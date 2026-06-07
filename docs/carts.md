@@ -1,57 +1,60 @@
 # Cart Structure
 
-## Entry functions
+## The shape of a cart
 
-| Function | When called | Notes |
-|---|---|---|
-| `fn main() -> Unit` | required | runs for one-shot carts; interactive carts write `()` |
-| `pub fn start()` | once after load | setup: screen, instruments |
-| `pub fn update()` | every frame (~60fps, 16.667ms) | main loop: draw, play, read input |
-
-- If `update` exists → frame loop; otherwise `main` / run-once and exit.
-- `halt(code)` ends the loop and returns an exit code.
+An interactive cart is one `main` function marked `@cart`, with a `loop` inside. Set things up before the loop; the loop body runs once per frame (~60fps).
 
 ```rust
-fn main() -> Unit { () }
-pub fn start()  -> <Graphics> Unit { screen(480, 320) }
-pub fn update() -> <Graphics, IO> Unit { cls(0x0000) }
+type World = { x: Int, prevb: Int }
+
+@cart
+fn main() -> <frame, Graphics, IO> Unit {
+  screen(480, 320);
+  let mut w = World { x: 0, prevb: 0 };
+  loop {
+    cls(0x0000);
+    // ... update + draw ...
+    device_in(0x2001, 1);    // commit the frame — forget this and the window stays blank
+    frame.present()
+  }
+}
 ```
+
+Locals live across frames, so state is just a `World` record in `main`. Helpers take `&mut World`.
+
+A plain `fn main() -> Unit` with no `@cart` runs once and exits — fine for scripts.
+
+`halt(code)` ends the loop with an exit code.
 
 ## .abe vs .pk
 
-- `.abe` — source, compiled by the built-in compiler on load. Use during development.
-- `.pk` — precompiled cartridge (polka format). Use for distribution.
+- `.abe` — source, compiled on load. Develop with this; `posara run` hot-reloads it on save.
+- `.pk` — precompiled cartridge, for distribution.
 
-## Module system
-
-Use `use` to import `pub` items from another file, in the same directory or a subdirectory:
-
-```rust
-use lib::state::{ INIT, AXIS }      // → <root>/lib/state.abe
-use lib::visuals::{ vis_anchor }    // → <root>/lib/visuals.abe
-```
-
-Rules:
-
-- `use a::b::c::{…}` maps to `<root>/a/b/c.abe` (leading segments are directories, the last is the file name).
-- `<root>` = the **entry cart's directory**. **All** imports resolve relative to that directory — including `use` statements inside imported files. So `lib/visuals.abe` referencing `state` must also write `use lib::state`, not `use state`.
-- Only `pub` items can be imported: `pub static mut` (shared state), `pub fn`, `pub effect`.
-
-### Conventional layout
+## Where things live
 
 ```sh
 carts/
-  main.abe          ← demo / entry cart
-  lib/
-    state.abe         ← shared state
-    visuals.abe       ← shared code
+  posara.toml       ← project root marker
+  midi.toml         ← MIDI wiring, optional (→ midi.md)
+  assets/           ← fonts, sprites
+  basic/  games/  music/  vis/
+  lib/              ← shared code
 ```
 
-Entry carts sit at the top of `carts/`; reusable libraries go in `carts/lib/` and are imported via `use lib::xxx`.
+`posara.toml` marks the root. `use` paths and `fs_open` paths both resolve from it, no matter how deep the cart sits. `--root <dir>` overrides.
+
+## Imports
+
+```rust
+use lib::state::{ st_new, SNOW }     // → <root>/lib/state.abe
+```
+
+- `use a::b::{…}` maps to `<root>/a/b.abe`.
+- Imports inside imported files also resolve from the root — `lib/visuals.abe` writes `use lib::state`, not `use state`.
+- Importable: `pub fn`, `pub static` (immutable data), `pub effect`.
 
 ## Screen config
 
-Either:
-
-- `screen(w, h)` — set the canvas size.
-- `device_in(0x2000, cfg)` — same, with scale: `cfg = w + h*65536 + scale*4294967296`.
+- `screen(w, h)` — set the canvas size, or
+- `device_in(0x2000, cfg)` — same with scale: `cfg = w + h*65536 + scale*4294967296`.

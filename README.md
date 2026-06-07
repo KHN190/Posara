@@ -4,8 +4,8 @@ Your creative visualaudio toolkit for early MacOS aesthetics but modernized.
 
 - **Screen** — minifb
 - **Controller** — 8-button bitmap + last ASCII key
-- **Audio** — 4 channels (sample + pitch + stereo volume + ADSR)
-- **MIDI** — note in / out
+- **Audio** — 4 channels (sample + synth + stereo volume)
+- **MIDI** — note in / out / wires!
 
 Run on MacOS / Linux / Windows. Bare metals TBA.
 

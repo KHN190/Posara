@@ -38,7 +38,7 @@ let _    = fs_close(fd);
 
 Full set: `fs_open` / `fs_read` / `fs_read_text` / `fs_write` / `fs_write_text` / `fs_seek` / `fs_close`, plus `fs_exists` / `fs_list` / `fs_mkdir` / `fs_remove`.
 
-Idiom: lazy-load once in `update()` behind a `static mut READY` flag and keep the data in a module-lifetime `static mut`. See `carts/basic/text.abe` / `carts/basic/sprite.abe`.
+Idiom: load once in `main` before the frame loop, keep the data in a local. See `carts/basic/text.abe` / `carts/basic/sprite.abe`.
 
 ## Effect annotations
 

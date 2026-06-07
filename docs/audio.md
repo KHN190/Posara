@@ -36,7 +36,7 @@ Queue a list of events into the sequencer at once:
 sfx_seq([ ev0, ev1, ... ])
 ```
 
-Each event is a value packed into an integer. `ride.abe` / `sound.abe` use a helper to pack one:
+Each event is a value packed into an integer. `ride.abe` uses a helper to pack one:
 
 ```rust
 fn ev(tick, ch, note, vol, dur) -> Int {
@@ -59,4 +59,4 @@ pub fn update() -> <IO, nondet> Unit {
 }
 ```
 
-> Full examples: `carts/sound.abe` (key-driven demo of each API), `carts/music/ride.abe`, `carts/music/song.abe`.
+> Full examples: `carts/music/ride.abe`, `carts/music/song.abe`, `carts/music/sequencer.abe`.
