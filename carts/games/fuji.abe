@@ -1,0 +1,693 @@
+
+const NIGHT: Int      = 2 * 2048 + 6 * 32 + 8;
+const WHITE: Int      = 31 * 2048 + 63 * 32 + 31;
+const SUN_ORANGE: Int = 31 * 2048 + 40 * 32 + 10;
+const SUN_CREAM: Int  = 31 * 2048 + 62 * 32 + 30;
+
+fn blend(a: Int, b: Int, t: Int, scale: Int) -> Int {
+  let inv = scale - t;
+  let r = ((a / 2048) % 32 * inv + (b / 2048) % 32 * t) / scale;
+  let g = ((a / 32)   % 64 * inv + (b / 32)   % 64 * t) / scale;
+  let bl = (a % 32 * inv + b % 32 * t) / scale;
+  r * 2048 + g * 32 + bl
+}
+
+fn season_cool(s: Int) -> Int {
+  match s {
+    0 => 16 * 2048 + 42 * 32 + 26
+    1 => 15 * 2048 + 40 * 32 + 28
+    2 => 19 * 2048 + 38 * 32 + 22
+    _ => 21 * 2048 + 44 * 32 + 30
+  }
+}
+
+fn season_warm(s: Int) -> Int {
+  match s {
+    0 => 29 * 2048 + 58 * 32 + 28
+    1 => 31 * 2048 + 61 * 32 + 27
+    2 => 31 * 2048 + 54 * 32 + 16
+    _ => 29 * 2048 + 57 * 32 + 31
+  }
+}
+
+fn mt_peak(s: Int) -> Int {
+  match s {
+    0 => 18 * 2048 + 48 * 32 + 22
+    1 => 15 * 2048 + 46 * 32 + 15
+    2 => 21 * 2048 + 42 * 32 + 12
+    _ => 27 * 2048 + 54 * 32 + 30
+  }
+}
+
+fn mt_grass(s: Int) -> Int {
+  match s {
+    0 => 11 * 2048 + 36 * 32 + 13
+    1 =>  9 * 2048 + 34 * 32 +  9
+    2 => 14 * 2048 + 30 * 32 +  8
+    _ => 13 * 2048 + 30 * 32 + 17
+  }
+}
+
+fn mt_under(s: Int) -> Int {
+  match s {
+    0 =>  8 * 2048 + 24 * 32 + 14
+    1 =>  7 * 2048 + 22 * 32 + 11
+    2 => 10 * 2048 + 20 * 32 +  9
+    _ =>  9 * 2048 + 20 * 32 + 14
+  }
+}
+
+fn mt_tex(s: Int) -> Int {
+  match s {
+    0 => 20 * 2048 + 56 * 32 + 16
+    1 =>  6 * 2048 + 36 * 32 +  6
+    2 => 30 * 2048 + 44 * 32 +  8
+    _ => 30 * 2048 + 61 * 32 + 31
+  }
+}
+
+fn sunhue(b: Int) -> Int {
+  blend(SUN_ORANGE, SUN_CREAM, b, 256)
+}
+
+fn sky_px(x: Int, y: Int, cool: Int, warm: Int, b: Int, sx: Int, sy: Int) -> Int {
+  let raw  = x * 150 / 480 + y * 106 / 320;
+  let tt   = if raw > 256 { 256 } else { raw };
+  let base = blend(cool, warm, tt, 256);
+  let dk   = (256 - b) * 120 / 256;
+  let lit  = blend(base, NIGHT, dk, 256);
+  let dx   = x - sx;
+  let dy   = y - sy;
+  let d2   = dx * dx + dy * dy;
+  let maxd = 200 * 200;
+  let gr   = if d2 < maxd { (maxd - d2) * 160 / maxd } else { 0 };
+  let glow = gr * b / 256;
+  blend(lit, sunhue(b), glow, 256)
+}
+
+fn hsh(ix: Int, iy: Int) -> Int {
+  let h = (ix * 73856093 + iy * 19349663 + 1013904223) % 2147483647;
+  (h % 65536) % 256
+}
+
+fn lerp(a: Int, b: Int, t: Int) -> Int {
+  (a * (256 - t) + b * t) / 256
+}
+
+fn smooth(t: Int) -> Int {
+  let t2 = t * t / 256;
+  3 * t2 - 2 * t2 * t / 256
+}
+
+fn vnoise(px: Int, py: Int, g: Int) -> Int {
+  let gx = px / g;
+  let gy = py / g;
+  let tx = smooth((px % g) * 256 / g);
+  let ty = smooth((py % g) * 256 / g);
+  let v00 = hsh(gx, gy);
+  let v10 = hsh(gx + 1, gy);
+  let v01 = hsh(gx, gy + 1);
+  let v11 = hsh(gx + 1, gy + 1);
+  let a = lerp(v00, v10, tx);
+  let c = lerp(v01, v11, tx);
+  lerp(a, c, ty)
+}
+
+fn fbm(px: Int, py: Int) -> Int {
+  let o1 = vnoise(px, py, 96);
+  let o2 = vnoise(px, py, 48);
+  (o1 * 2 + o2) / 3
+}
+
+fn fog_density(px: Int, py: Int, wind: Int) -> Int {
+  let n   = fbm(px + wind, py);
+  let thr = 140;
+  let raw = if n > thr { (n - thr) * 256 / (256 - thr) } else { 0 };
+  let d0  = if raw > 256 { 256 } else { raw };
+  let vf0 = 256 - py * 216 / 320;
+  let vf  = if vf0 < 0 { 0 } else { vf0 };
+  d0 * vf / 256
+}
+
+fn tick_sky(sky_buf: &mut Array<Int>, frame: Int, cool: Int, warm: Int, b: Int, sx: Int, sy: Int, wind: Int, fogc: Int) -> Unit {
+  let cell  = 12;
+  let slice = frame % 16;
+  let mut cy = 0;
+  while cy < 320 {
+    let mut cx = 0;
+    while cx < 480 {
+      let idx = (cy / cell) * 40 + cx / cell;
+      if idx % 8 == slice {
+        let sky = sky_px(cx + 6, cy + 6, cool, warm, b, sx, sy);
+        let d   = fog_density(cx + 6, cy + 6, wind);
+        sky_buf[idx] = blend(sky, fogc, d, 256)
+      };
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+fn draw_sky_buf(sky_buf: &Array<Int>) -> <Graphics> Unit {
+  let cell = 12;
+  let mut cy = 0;
+  while cy < 320 {
+    let mut cx = 0;
+    while cx < 480 {
+      rect(cx, cy, cell, cell, sky_buf[(cy / cell) * 40 + cx / cell]);
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+fn isqrt(n: Int) -> Int {
+  let mut bit = 16384;
+  while bit > n { bit = bit / 4 };
+  let mut x = 0;
+  let mut r = n;
+  while bit > 0 {
+    if r >= x + bit {
+      r = r - x - bit;
+      x = x / 2 + bit
+    } else {
+      x = x / 2
+    };
+    bit = bit / 4
+  };
+  x
+}
+
+fn mt_bh_raw(y: Int, mh: Int) -> Int {
+  let top = 50;
+  let mid = 205;
+  let bot = 275;
+  match y {
+    _ if y <= top => 0
+    _ if y >= bot => 0
+    _ if y < mid  => {
+      let lin = (y - top) * mh / (mid - top);
+      let rnd = isqrt((y - top) * mh * mh / (mid - top));
+      let h   = (3 * lin + rnd) / 4;
+      isqrt(h * h + 144)
+    }
+    _ => (bot - y) * mh / (bot - mid)
+  }
+}
+
+fn build_bh(mh: Int) -> Array<Int> {
+  let mut a = [0; 340];
+  let mut y = 0;
+  while y < 340 { a[y] = mt_bh_raw(y, mh); y = y + 1 };
+  a
+}
+
+static BH110: Array<Int> = build_bh(110);
+static BH120: Array<Int> = build_bh(120);
+
+fn mt_noise(seed: Int, y: Int) -> Int {
+  (vnoise(seed, y, 50) * 3 + vnoise(seed + 511, y, 19)) / 4
+}
+
+fn mt_bh_ns(y: Int) -> Int {
+  (mt_bh_raw(y - 6, 110) + 2 * mt_bh_raw(y, 110) + mt_bh_raw(y + 6, 110)) / 4
+}
+
+fn build_mtoff(seed: Int) -> Array<Int> {
+  let mut a = [0; 340];
+  let mut y = 6;
+  while y < 334 {
+    let bh = mt_bh_ns(y);
+    let n  = mt_noise(seed, y);
+    a[y] = bh + (n - 128) * bh / 512;
+    y = y + 1
+  };
+  a
+}
+
+fn build_mtnoise(seed: Int) -> Array<Int> {
+  let mut a = [0; 340];
+  let mut y = 0;
+  while y < 340 { a[y] = mt_noise(seed, y); y = y + 1 };
+  a
+}
+
+fn mt_dome_ns(y: Int, g: Int) -> Int {
+  let mut dome = 0;
+  let mut dy = 0 - g;
+  while dy <= g {
+    let bh = mt_bh_raw(y + dy, 120);
+    if bh > 0 {
+      let v = bh + isqrt(g * g - dy * dy);
+      if v > dome { dome = v }
+    };
+    dy = dy + 2
+  };
+  dome
+}
+
+fn build_mtdome() -> Array<Int> {
+  let mut a = [0; 340];
+  let mut y = 22;
+  while y < 304 { a[y] = mt_dome_ns(y, 14); y = y + 1 };
+  a
+}
+
+fn build_texfbm() -> Array<Int> {
+  let mut a = [0; 3200];
+  let mut cy = 0;
+  while cy < 240 {
+    let mut cx = 0;
+    while cx < 480 {
+      a[(cy / 6) * 80 + cx / 6] = fbm(cx * 2 + 300, cy / 3 + 100);
+      cx = cx + 6
+    };
+    cy = cy + 6
+  };
+  a
+}
+
+static MTOFF_L:  Array<Int> = build_mtoff(701);
+static MTOFF_R:  Array<Int> = build_mtoff(2707);
+static MTOFF_R2: Array<Int> = build_mtoff(1907);
+static MTNL:     Array<Int> = build_mtnoise(701);
+static MTNR:     Array<Int> = build_mtnoise(1607);
+static MTDOME:   Array<Int> = build_mtdome();
+static TEXFBM:   Array<Int> = build_texfbm();
+
+fn build_mt_grass_fac() -> Array<Int> {
+  let mut a = [0; 320];
+  let mid = 205;
+  let mut y = mid;
+  while y < mid + 30 {
+    let frac = (y - mid) * 256 / 30;
+    a[y] = if frac < 256 { isqrt((256 - frac) * 256) } else { 0 };
+    y = y + 1
+  };
+  a
+}
+
+static MT_GRASS_FAC: Array<Int> = build_mt_grass_fac();
+
+fn tick_mt_row(mt_row_buf: &mut Array<Int>, fr: Int, pk: Int, gr: Int, un: Int) -> Unit {
+  let slice = fr % 16;
+  let top = 50; let mid = 205; let bot = 303;
+  let mut y = 22;
+  while y < bot {
+    if y % 16 == slice && MTDOME[y] > 0 {
+      mt_row_buf[y] = if y < mid {
+        let tt = (y - top) * 256 / (mid - top);
+        blend(pk, gr, if tt < 0 { 0 } else { tt }, 256)
+      } else {
+        let tt = (y - mid) * 256 / (275 - mid);
+        blend(gr, un, if tt > 256 { 256 } else { tt }, 256)
+      }
+    };
+    y = y + 1
+  }
+}
+
+fn draw_mt_body_cached(mt_row_buf: &Array<Int>, gr: Int) -> <Graphics> Unit {
+  let cxm = 240; let bot = 275; let top = 50;
+  let mut y = top - 28;
+  while y < bot + 28 {
+    let dome = MTDOME[y];
+    if dome > 0 {
+      let color = mt_row_buf[y];
+      let loh = dome + (MTNL[y] - 128) * dome / 512;
+      let roh = dome + (MTNR[y] - 128) * dome / 512;
+      let lo  = MTOFF_L[y];
+      let ro  = MTOFF_R[y];
+      rect(cxm - loh, y, loh + roh, 1, color);
+      let fac = MT_GRASS_FAC[y];
+      if fac > 0 { rect(cxm - lo * fac / 256, y, (lo + ro) * fac / 256, 1, gr) }
+    };
+    y = y + 1
+  }
+}
+
+fn tick_mt_tex(mt_tex_buf: &mut Array<Int>, fr: Int, pk: Int, gr: Int, tex: Int) -> Unit {
+  let cxm  = 240;
+  let top  = 50;
+  let mid  = 205;
+  let cell = 6;
+  let slice = fr % 16;
+  let mut cy = top;
+  while cy < mid + 30 {
+    let yc   = cy + 3;
+    let frac = if yc >= mid { (yc - mid) * 256 / 30 } else { 0 };
+    let fac  = if yc < mid { 256 } else if frac < 256 { isqrt((256 - frac) * 256) } else { 0 };
+    let lo   = MTOFF_L[yc] * fac / 256;
+    let ro   = MTOFF_R[yc] * fac / 256;
+    let base = if yc < mid { blend(pk, gr, (yc - top) * 256 / (mid - top), 256) } else { gr };
+    let hfac = if yc < mid { (mid - yc) * 256 / (mid - top) } else { 0 };
+    let xl   = cxm - lo + lo / 3;
+    let x1   = cxm + ro - ro / 3;
+    let mut cx = xl;
+    while cx < x1 {
+      let idx = (cy / cell) * 80 + cx / cell;
+      if idx % 16 == slice {
+        let dl  = cx - xl;
+        let dr  = x1 - cx;
+        let d   = if dl < dr { dl } else { dr };
+        let ff  = if d > 16 { 256 } else { d * 16 };
+        let r    = TEXFBM[(cy / 6) * 80 + cx / 6];
+        let dist = if r > 128 { r - 128 } else { 128 - r };
+        let amt  = (128 - dist) * (60 + hfac * 196 / 256) / 128 * ff / 256;
+        mt_tex_buf[idx] = blend(base, tex, amt, 256)
+      };
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+fn draw_mt_tex_cached(mt_tex_buf: &Array<Int>) -> <Graphics> Unit {
+  let cxm  = 240;
+  let top  = 50;
+  let mid  = 205;
+  let cell = 6;
+  let mut cy = top;
+  while cy < mid + 30 {
+    let yc  = cy + 3;
+    let fac = if yc < mid { 256 } else {
+      let frac = (yc - mid) * 256 / 30;
+      if frac < 256 { isqrt((256 - frac) * 256) } else { 0 }
+    };
+    let lo = MTOFF_L[yc] * fac / 256;
+    let ro = MTOFF_R[yc] * fac / 256;
+    let xl = cxm - lo + lo / 3;
+    let x1 = cxm + ro - ro / 3;
+    let mut cx = xl;
+    while cx < x1 {
+      let c = mt_tex_buf[(cy / cell) * 80 + cx / cell];
+      if c != 0 { rect(cx, cy, cell, cell, c) };
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+fn sin256_raw(a0: Int) -> Int {
+  let a  = a0 % 256;
+  let aa = if a < 0 { a + 256 } else { a };
+  let h  = aa % 128;
+  let mag = 8 * h * (128 - h) / 128;
+  if aa < 128 { mag } else { 0 - mag }
+}
+
+fn build_sin256() -> Array<Int> {
+  let mut a = [0; 256];
+  let mut i = 0;
+  while i < 256 { a[i] = sin256_raw(i); i = i + 1 };
+  a
+}
+
+static SIN256T: Array<Int> = build_sin256();
+
+fn sin256(a: Int) -> Int { SIN256T[((a % 256) + 256) % 256] }
+fn cos256(a: Int) -> Int { SIN256T[((a + 64) % 256 + 256) % 256] }
+
+// per-branch leaf-mix factor (bid 0..99): hoisted out of clump's per-frame loop
+fn build_leafmix() -> Array<Int> {
+  let mut a = [0; 100];
+  let mut i = 0;
+  while i < 100 { a[i] = hsh(i, 7) % 256; i = i + 1 };
+  a
+}
+static LEAFMIX: Array<Int> = build_leafmix();
+
+// per-branch clump jitter (bid 0..99): packs offset/size into one value 0..146
+fn build_jit() -> Array<Int> {
+  let mut a = [0; 100];
+  let mut i = 0;
+  while i < 100 { a[i] = hsh(i, 53) % 147; i = i + 1 };
+  a
+}
+static JIT: Array<Int> = build_jit();
+
+fn tree_la(yp: Int, i: Int) -> Int {
+  let spawn  = 30 + hsh(i, 41) % 280;
+  let gdur   = 80 + hsh(i, 71) % 130;
+  let lstart = 540 + hsh(i, 113) % 140;
+  let ldur   = 60 + hsh(i, 127) % 80;
+  match yp {
+    _ if yp < spawn            => 0
+    _ if yp < spawn + gdur     => (yp - spawn) * 256 / gdur
+    _ if yp < lstart           => 256
+    _ if yp < lstart + ldur    => 256 - (yp - lstart) * 256 / ldur
+    _                          => 0
+  }
+}
+
+fn clump(cx: Int, cy: Int, depth: Int, la: Int, leaf: Int, leaf2: Int, bid: Int) -> <Graphics> Unit {
+  let rad = 2 + la * depth * (depth + 1) / 300;
+  let lc  = blend(leaf, leaf2, LEAFMIX[bid], 256);
+  let h   = rad / 2;
+  // per-branch rotation = organic variety, triangle size unchanged (no fill bloat)
+  let ang = JIT[bid];
+  let ca  = cos256(ang);
+  let sa  = sin256(ang);
+  let rc  = rad * ca / 256;
+  let rs  = rad * sa / 256;
+  let hc  = h * ca / 256;
+  let hs  = h * sa / 256;
+  tri(cx + rs, cy - rc, cx - rc - hs, cy - rs + hc, cx + rc - hs, cy + rs + hc, lc);
+  tri(cx - rs, cy + rc, cx - rc + hs, cy - rs - hc, cx + rc + hs, cy + rs - hc, lc)
+}
+
+fn collect_branch(segs: &mut Array<Int>, n: Int, off: Int, x0: Int, y0: Int, ang: Int, len: Int, depth: Int, ba: Int, tw: Int, lr: Int, sway: Int, dep: Int, bid: Int) -> Int {
+  if depth <= 0 { n }
+  else {
+    let x1 = x0 + cos256(ang) * len / 256;
+    let y1 = y0 - sin256(ang) * len / 256;
+    let base = off + n * 6;
+    segs[base]     = x0; segs[base + 1] = y0;
+    segs[base + 2] = x1; segs[base + 3] = y1;
+    segs[base + 4] = tw; segs[base + 5] = depth * 100 + bid % 100;
+    let n1 = n + 1;
+    if depth > 1 {
+      let nlen = len * lr / 100;
+      let ntw  = if tw > 2 { tw - 2 } else { 1 };
+      let n2 = collect_branch(segs, n1, off, x1, y1, ang + sway,      nlen * 8 / 10, depth-1, ba, ntw, lr, sway, dep, bid*3);
+      let n3 = collect_branch(segs, n2, off, x1, y1, ang - ba + sway, nlen,          depth-1, ba, ntw, lr, sway, dep, bid*3+1);
+      collect_branch(segs, n3, off, x1, y1, ang + ba + sway, nlen,                   depth-1, ba, ntw, lr, sway, dep, bid*3+2)
+    } else { n1 }
+  }
+}
+
+fn draw_tree_segs(segs: &Array<Int>, n: Int, off: Int, dep: Int, trunk: Int, leaf: Int, leaf2: Int, la: Int) -> <Graphics> Unit {
+  let mut j = 0;
+  while j < n {
+    let base  = off + j * 6;
+    let x0    = segs[base]; let y0 = segs[base+1];
+    let x1    = segs[base+2]; let y1 = segs[base+3];
+    let tw    = segs[base+4];
+    let depth = segs[base+5] / 100;
+    let bid   = segs[base+5] % 100;
+    linew(x0, y0, x1, y1, tw, trunk);
+    if depth < dep && la > 20 { clump(x1, y1, depth, la, leaf, leaf2, bid) };
+    j = j + 1
+  }
+}
+
+fn tick_trees(segs: &mut Array<Int>, seg_n: &mut Array<Int>, dep_arr: &mut Array<Int>, fr: Int, si: Int, sf: Int, t: Int) -> Unit {
+  let i    = fr % 16;
+  let cxm  = 240;
+  let hx   = hsh(i * 13 + 5, 77);
+  let hy   = hsh(i * 13 + 5, 91);
+  let py   = 101 + hy * 99 / 256;
+  let lo   = MTOFF_L[py];
+  let ro   = MTOFF_R2[py];
+  let span = lo + ro - 16;
+  let px   = if span > 0 { cxm - lo + 8 + hx * span / 256 } else { cxm };
+  let yp   = si * 256 + sf;
+  let gh   = tree_h(yp, i);
+  let amax = 4 + (py - 101) * 12 / 99;
+  let len  = (amax + hsh(i, 31) % 3) * gh / 256;
+  let lean = hsh(i, 53) % 17 - 8;
+  let ba   = 13 + hsh(i, 59) % 12;
+  let lr   = 66 + hsh(i, 97) % 18;
+  let dep  = 3 + hsh(i, 103) % 2;
+  let tw   = 2 + len / 4;
+  let sway = sin256(t / 220 + i * 37) * 6 / 256;
+  dep_arr[i] = dep;
+  if len > 2 {
+    seg_n[i] = collect_branch(segs, 0, i * 300, px, py, 64 + lean, len, dep, ba, tw, lr, sway, dep, i + 1)
+  } else {
+    seg_n[i] = 0
+  }
+}
+
+fn draw_trees(segs: &Array<Int>, seg_n: &Array<Int>, dep_arr: &Array<Int>, si: Int, _sj: Int, sf: Int, dk: Int) -> <Graphics> Unit {
+  let turn  = match si { 2 => sf  3 => 256  _ => 0 };
+  let ldd   = 28 * 2048 + 34 * 32 + 15;
+  let leafc = blend(blend(22 * 2048 + 46 * 32 + 21, ldd, turn, 256), NIGHT, dk, 256);
+  let leaf2 = blend(blend(27 * 2048 + 50 * 32 + 24, ldd, turn, 256), NIGHT, dk, 256);
+  let trunk = blend(16 * 2048 + 30 * 32 + 14, NIGHT, dk, 256);
+  let yp    = si * 256 + sf;
+  let mut i = 0;
+  while i < 16 {
+    let n = seg_n[i];
+    if n > 0 {
+      let la = tree_la(yp, i);
+      draw_tree_segs(segs, n, i * 300, dep_arr[i], trunk, leafc, leaf2, la)
+    };
+    i = i + 1
+  }
+}
+
+fn tree_h(yp: Int, i: Int) -> Int {
+  let dorm   = if hsh(i, 17) % 10 == 0 { 0 } else { 14 };
+  let spawn  = 30 + hsh(i, 41) % 280;
+  let gdur   = 80 + hsh(i, 71) % 130;
+  let lstart = 540 + hsh(i, 113) % 140;
+  let ldur   = 60 + hsh(i, 127) % 80;
+  let wstart = lstart + ldur;
+  let wdur   = 70 + hsh(i, 89) % 100;
+  match yp {
+    _ if yp < spawn            => dorm
+    _ if yp < spawn + gdur     => dorm + (256 - dorm) * (yp - spawn) / gdur
+    _ if yp < wstart           => 256
+    _ if yp < wstart + wdur    => 256 - (256 - dorm) * (yp - wstart) / wdur
+    _                          => dorm
+  }
+}
+
+fn snow_amt(yp: Int) -> Int {
+  match yp {
+    _ if yp < 128  => 256 - yp * 256 / 128
+    _ if yp < 640  => 0
+    _ if yp < 860  => (yp - 640) * 256 / 220
+    _              => 256
+  }
+}
+
+fn draw_snow_sliced(snow_buf: &mut Array<Int>, frame: Int, yp: Int, dk: Int) -> <Graphics> Unit {
+  let amt = snow_amt(yp);
+  if amt > 0 {
+    let cxm   = 240;
+    let top   = 50;
+    let tyt   = 105;
+    let white = blend(WHITE, NIGHT, dk, 256);
+    let cell  = 3;
+    let slice = frame % 10;
+    let mut cy = top;
+    while cy < tyt + 35 {
+      let lo  = MTOFF_L[cy + 1];
+      let ro  = MTOFF_R2[cy + 1];
+      let alt = (tyt - cy) * 256 / (tyt - top);
+      let x1  = cxm + ro;
+      let mut cx = cxm - lo;
+      while cx < x1 {
+        let idx = (cy / cell) * 160 + cx / cell;
+        if idx % 10 == slice {
+          let warp  = (fbm(cx * 2 + 100, cy / 2 + 700) - 128) * 3 / 2;
+          let r     = fbm(cx * 2 + 1500, cy / 4 + 900);
+          let dist  = if r > 128 { r - 128 } else { 128 - r };
+          let carve = if 128 - dist > 92 { (128 - dist - 92) * 4 } else { 0 };
+          snow_buf[idx] = warp - carve
+        };
+        let d = alt + snow_buf[idx] - (256 - amt);
+        if d > 24 { rect(cx, cy, cell, cell, white) };
+        cx = cx + cell
+      };
+      cy = cy + cell
+    }
+  }
+}
+
+fn draw_mountain(mt_row_buf: &Array<Int>, mt_tex_buf: &Array<Int>, gr: Int) -> <Graphics> Unit {
+  draw_mt_body_cached(mt_row_buf, gr);
+  draw_mt_tex_cached(mt_tex_buf)
+}
+
+fn tick_fog(fog_buf: &mut Array<Int>, fr: Int, t: Int) -> Unit {
+  let wind2 = (t / 28) % 8192;
+  let cell  = 12;
+  let slice = fr % 8;
+  let mut cy = 0;
+  while cy < 180 {
+    let mut cx = 0;
+    while cx < 480 {
+      let idx = (cy / cell) * 40 + cx / cell;
+      if idx % 4 == slice {
+        let n   = fbm((cx + wind2) / 2 + 4000, cy / 2 + 1500);
+        let thr = 100;
+        let raw = if n > thr { (n - thr) * 256 / (256 - thr) } else { 0 };
+        let vf  = if cy < 190 { (190 - cy) * 240 / 190 } else { 0 };
+        let v2  = if vf > 256 { 256 } else { vf };
+        fog_buf[idx] = raw * v2 / 256
+      };
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+fn draw_fog_buf(fog_buf: &Array<Int>, b: Int, dk: Int) -> <Graphics> Unit {
+  let mistc = blend(blend(WHITE, sunhue(b), 50, 256), NIGHT, dk, 256);
+  let cell  = 12;
+  let mut cy = 0;
+  while cy < 180 {
+    let mut cx = 0;
+    while cx < 480 {
+      let d = fog_buf[(cy / cell) * 40 + cx / cell];
+      if d > 4 { rectmix(cx, cy, cell, cell, mistc, d) };
+      cx = cx + cell
+    };
+    cy = cy + cell
+  }
+}
+
+@cart fn main() -> <frame, Graphics, IO> Unit {
+  screen(480, 320);
+  let mut sky_buf    = [0; 1080];
+  let mut snow_buf   = [0; 8000];
+  let mut fog_buf    = [0; 600];
+  let mut mt_row_buf = [0; 320];
+  let mut mt_tex_buf = [0; 3200];
+  let mut tree_segs  = [0; 4800];
+  let mut tree_seg_n = [0; 16];
+  let mut tree_dep   = [0; 16];
+  let mut fr = 0;
+  loop {
+    let day_ms = 20000;
+    let t    = now();
+    let pp   = (t % day_ms) * 256 / day_ms;
+    let b    = 4 * pp * (256 - pp) / 256;
+    let sx   = 60 + pp * 360 / 256;
+    let sy   = 210 - b * 150 / 256;
+    let wind = (t / 60) % 4096;
+
+    let yr   = day_ms * 12;
+    let fpos = (t % yr) * 1024 / yr;
+    let si   = (fpos / 256) % 4;
+    let sf   = fpos % 256;
+    let sj   = (si + 1) % 4;
+
+    let dk   = (256 - b) * 120 / 256;
+    let fogc = blend(blend(30 * 2048 + 60 * 32 + 30, sunhue(b), 60, 256), NIGHT, dk, 256);
+    let cool = blend(season_cool(si), season_cool(sj), sf, 256);
+    let warm = blend(season_warm(si), season_warm(sj), sf, 256);
+
+    tick_sky(&mut sky_buf, fr, cool, warm, b, sx, sy, wind, fogc);
+    let pk = blend(blend(mt_peak(si),  mt_peak(sj),  sf, 256), NIGHT, dk, 256);
+    let gr = blend(blend(mt_grass(si), mt_grass(sj), sf, 256), NIGHT, dk, 256);
+    let un = blend(blend(mt_under(si), mt_under(sj), sf, 256), NIGHT, dk, 256);
+    let tex = blend(blend(mt_tex(si), mt_tex(sj), sf, 256), NIGHT, dk, 256);
+    tick_mt_row(&mut mt_row_buf, fr, pk, gr, un);
+    tick_mt_tex(&mut mt_tex_buf, fr, pk, gr, tex);
+    tick_trees(&mut tree_segs, &mut tree_seg_n, &mut tree_dep, fr, si, sf, t);
+    draw_sky_buf(&sky_buf);
+    draw_mountain(&mt_row_buf, &mt_tex_buf, gr);
+    draw_snow_sliced(&mut snow_buf, fr, si * 256 + sf, dk);
+    draw_trees(&tree_segs, &tree_seg_n, &tree_dep, si, sj, sf, dk);
+    tick_fog(&mut fog_buf, fr, t);
+    draw_fog_buf(&fog_buf, b, dk);
+    dither(0, 0xffff);
+    device_in(0x2001, 1);
+    fr = fr + 1;
+    frame.present()
+  }
+}

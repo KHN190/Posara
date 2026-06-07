@@ -1,0 +1,41 @@
+use lib::seq::{ Seq, seq_new, seq_reset, seq_tick }
+
+fn main() -> Unit { () }
+
+pub fn test_new_is_zero() -> Unit {
+  let s = seq_new();
+  assert(s.pos == 0, "pos={s.pos}");
+  assert(s.bar == 0, "bar={s.bar}");
+}
+
+pub fn test_fires_on_schedule() -> Unit {
+  let mut s = seq_new();
+  // first tick at t>=0 fires step 0 and arms next at t=10
+  assert(seq_tick(&mut s, 0, 10) == 0, "step0");
+  // not yet due
+  assert(seq_tick(&mut s, 5, 10) == -1, "early returns -1");
+  // due again -> step 1
+  assert(seq_tick(&mut s, 10, 10) == 1, "step1");
+}
+
+pub fn test_wraps_and_counts_bars() -> Unit {
+  let mut s = seq_new();
+  let mut t = 0;
+  // drive 16 fires -> pos wraps 15->0, bar increments once
+  let mut i = 0;
+  while i < 16 {
+    seq_tick(&mut s, t, 1);
+    t = t + 1;
+    i = i + 1;
+  }
+  assert(s.pos == 0, "wrapped pos={s.pos}");
+  assert(s.bar == 1, "bar={s.bar}");
+}
+
+pub fn test_reset() -> Unit {
+  let mut s = seq_new();
+  seq_tick(&mut s, 0, 10);
+  seq_reset(&mut s, 100);
+  assert(s.pos == 0, "reset pos={s.pos}");
+  assert(s.bar == 0, "reset bar={s.bar}");
+}

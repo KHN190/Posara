@@ -1,0 +1,22 @@
+// Reusable 16-step sequencer clock. Hold a Seq in your World; call seq_tick each
+// frame — it returns the step (0..15) on the frame a step fires, else -1.
+
+pub type Seq = { t: Int, pos: Int, bar: Int }
+
+pub fn seq_new() -> Seq { Seq { t: 0, pos: 0, bar: 0 } }
+
+pub fn seq_reset(s: &mut Seq, t: Int) -> Unit {
+  s.t = t; s.pos = 0; s.bar = 0
+}
+
+pub fn seq_tick(s: &mut Seq, t: Int, ms: Int) -> Int {
+  if t >= s.t {
+    let p = s.pos;
+    s.pos = if p >= 15 { 0 } else { p + 1 };
+    if s.pos == 0 { s.bar = s.bar + 1 };
+    s.t = s.t + ms;
+    p
+  } else {
+    -1
+  }
+}

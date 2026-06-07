@@ -1,0 +1,14 @@
+/target
+/designs
+/priv_carts
+/assets
+
+.claude/
+
+CLAUDE.md
+todo.md
+
+Cargo.lock
+
+.DS_Store
+

@@ -1,0 +1,41 @@
+// Reusable chiptune synth kit on the polyphonic synth voices.
+// Patches: 0 kick · 1 acid bass · 2 clap · 3 hat · 4 lead pluck · 5 alarm/pad.
+// Patches 0..3 are lifted from acid.abe's setup; 4/5 added for melody + stingers.
+// Call synthkit_setup() once in start(), then synth_on(patch, midi, vol, dur_ms).
+
+pub fn synthkit_setup() -> <IO> Unit {
+  synth_voices(16);
+
+  // 0 = kick: sine with a downward pitch env (the "thump").
+  synth_osc(0, 0, 1, 0, 0, 100);
+  synth_filter(0, 0, 1400, 8);
+  synth_env(0, 0, 0, 100, 0, 110, 0, 25);
+  synth_env(0, 1, 2, 30, 0, 55, 0, 0);
+
+  // 1 = 303-ish saw bass through a resonant low-pass filter envelope.
+  synth_osc(1, 0, 3, 0, 0, 100);
+  synth_filter(1, 0, 520, 88);
+  synth_env(1, 0, 0, 100, 2, 260, 35, 80);
+  synth_env(1, 1, 1, 65, 2, 150, 0, 70);
+
+  // 2 = clap: noise burst.
+  synth_osc(2, 0, 4, 0, 0, 100);
+  synth_filter(2, 2, 1600, 40);
+  synth_env(2, 0, 0, 100, 0, 120, 0, 60);
+
+  // 3 = hat: bright noise, fast decay.
+  synth_osc(3, 0, 4, 0, 0, 90);
+  synth_filter(3, 1, 7000, 10);
+  synth_env(3, 0, 0, 100, 0, 38, 0, 18);
+
+  // 4 = lead: square pluck for melody / victory fanfare.
+  synth_osc(4, 0, 0, 1, 0, 100);
+  synth_filter(4, 0, 4200, 14);
+  synth_env(4, 0, 0, 100, 2, 95, 0, 70);
+
+  // 5 = alarm/pad: detuned saw, band-pass, for the boss-incoming sting.
+  synth_osc(5, 0, 3, 1, 0, 80);
+  synth_osc(5, 1, 3, 2, 7, 50);
+  synth_filter(5, 2, 800, 60);
+  synth_env(5, 0, 0, 100, 20, 200, 60, 220)
+}

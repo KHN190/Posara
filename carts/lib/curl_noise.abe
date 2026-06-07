@@ -1,0 +1,168 @@
+// 3D curl-noise strand field. State lives in a Curl record (cn_new); cn_init /
+// cn_step take &mut Curl. The cart reads csx/csy/csz/clen to draw.
+
+fn itof(v: Int) -> Float { v.to_f() }
+
+// b/255 lookup, built once at load — the hot noise path needs no per-call int->float.
+fn build_inv255() -> Array<Float> {
+  let mut a = [0.0; 256];
+  let mut i = 0;
+  while i < 256 { a[i] = itof(i) / 255.0; i = i + 1 };
+  a
+}
+static INV255: Array<Float> = build_inv255();
+
+fn fhash(ix: Int, iy: Int, iz: Int) -> Float {
+  let h = (ix * 73856093 + iy * 19349663 + iz * 83492791 + 1013904223) % 2147483647;
+  let b = ((h % 256) + 256) % 256;
+  INV255[b]
+}
+fn fract(x: Float) -> Float {
+  let i = flr(x).to_i();
+  x - itof(i)
+}
+fn smoothf(t: Float) -> Float { t * t * (3.0 - 2.0 * t) }
+fn lerpf(a: Float, b: Float, t: Float) -> Float { a + (b - a) * t }
+
+fn vnoise3(x: Float, y: Float, z: Float) -> Float {
+  let ix = flr(x).to_i();
+  let iy = flr(y).to_i();
+  let iz = flr(z).to_i();
+  let tx = smoothf(fract(x));
+  let ty = smoothf(fract(y));
+  let tz = smoothf(fract(z));
+  let x00 = lerpf(fhash(ix, iy, iz),       fhash(ix + 1, iy, iz),       tx);
+  let x10 = lerpf(fhash(ix, iy + 1, iz),   fhash(ix + 1, iy + 1, iz),   tx);
+  let x01 = lerpf(fhash(ix, iy, iz + 1),   fhash(ix + 1, iy, iz + 1),   tx);
+  let x11 = lerpf(fhash(ix, iy + 1, iz + 1), fhash(ix + 1, iy + 1, iz + 1), tx);
+  let y0 = lerpf(x00, x10, ty);
+  let y1 = lerpf(x01, x11, ty);
+  lerpf(y0, y1, tz)
+}
+
+const NS: Float = 0.06;
+fn nA(x: Float, y: Float, z: Float, t: Float) -> Float { vnoise3(x * NS + t, y * NS, z * NS) }
+fn nB(x: Float, y: Float, z: Float, t: Float) -> Float { vnoise3(x * NS + 31.4, y * NS + 11.2, z * NS + 7.7 + t) }
+fn nC(x: Float, y: Float, z: Float) -> Float { vnoise3(x * NS + 57.1, y * NS + 93.3, z * NS + 22.6) }
+
+fn curl3(x: Float, y: Float, z: Float, t: Float) -> Array<Float> {
+  let e = 1.6;
+  let i2 = 1.0 / (2.0 * e);
+  let dcdy = (nC(x, y + e, z) - nC(x, y - e, z)) * i2;
+  let dbdz = (nB(x, y, z + e, t) - nB(x, y, z - e, t)) * i2;
+  let dadz = (nA(x, y, z + e, t) - nA(x, y, z - e, t)) * i2;
+  let dcdx = (nC(x + e, y, z) - nC(x - e, y, z)) * i2;
+  let dbdx = (nB(x + e, y, z, t) - nB(x - e, y, z, t)) * i2;
+  let dady = (nA(x, y + e, z, t) - nA(x, y - e, z, t)) * i2;
+  let vx = dcdy - dbdz;
+  let vy = dadz - dcdx;
+  let vz = dbdx - dady;
+  let m = sqrt(vx * vx + vy * vy + vz * vz);
+  let mut out = [0.0; 3];
+  if m < 0.00001 {
+    out[2] = 1.7
+  } else {
+    let s = 1.7 / m;
+    out[0] = vx * s;
+    out[1] = vy * s;
+    out[2] = vz * s
+  };
+  out
+}
+
+const CN: Int = 10;     // strand count
+const CML: Int = 48;    // max points per strand
+const CH: Float = 110.0;
+
+pub type Curl = {
+  csx: Array<Float>, csy: Array<Float>, csz: Array<Float>,
+  clen: Array<Int>, ct: Float
+}
+
+pub fn cn_new() -> Curl {
+  Curl { csx: [0.0; 480], csy: [0.0; 480], csz: [0.0; 480], clen: [0; 10], ct: 0.0 }
+}
+
+fn rrange(a: Float, b: Float) -> <nondet> Float { a + rand() * (b - a) }
+fn fmax3(a: Float, b: Float, c: Float) -> Float {
+  let m = if a > b { a } else { b };
+  if c > m { c } else { m }
+}
+fn clampf(x: Float, lo: Float, hi: Float) -> Float {
+  if x < lo { lo } else if x > hi { hi } else if x == x { x } else { 0.0 }
+}
+
+fn cn_spawn(c: &mut Curl, s: Int) -> <nondet> Unit {
+  let r = CH * 0.1;
+  let base = s * CML;
+  c.csx[base] = rrange(0.0 - r, r);
+  c.csy[base] = rrange(0.0 - r, r);
+  c.csz[base] = rrange(0.0 - r, r);
+  c.clen[s] = 1
+}
+
+pub fn cn_init(c: &mut Curl) -> <nondet> Unit {
+  c.ct = 0.0;
+  let step = CML / CN;
+  let mut s = 0;
+  while s < CN {
+    cn_spawn(c, s);
+    let base = s * CML;
+    let sx = c.csx[base];
+    let sy = c.csy[base];
+    let sz = c.csz[base];
+    let st = 1 + s * step;
+    let mut i = 1;
+    while i < st {
+      c.csx[base + i] = sx;
+      c.csy[base + i] = sy;
+      c.csz[base + i] = sz;
+      i = i + 1
+    };
+    c.clen[s] = st;
+    s = s + 1
+  }
+}
+
+pub fn cn_step(c: &mut Curl) -> <nondet> Unit {
+  c.ct = c.ct + 0.0006;
+  let mut s = 0;
+  while s < CN {
+    let len = c.clen[s];
+    if len >= CML {
+      cn_spawn(c, s)
+    } else {
+      let base = s * CML;
+      let h = base + len - 1;
+      let hx = c.csx[h];
+      let hy = c.csy[h];
+      let hz = c.csz[h];
+      let v = curl3(hx, hy, hz, c.ct);
+      let mut vx = v[0];
+      let mut vy = v[1];
+      let mut vz = v[2];
+      let r = fmax3(hx.abs(), hy.abs(), hz.abs());
+      if r > CH * 0.85 {
+        let im = sqrt(hx * hx + hy * hy + hz * hz);
+        if im > 0.001 {
+          let k = 1.7 * 0.6 / im;
+          vx = vx - hx * k;
+          vy = vy - hy * k;
+          vz = vz - hz * k;
+          let m2 = sqrt(vx * vx + vy * vy + vz * vz);
+          if m2 > 0.001 {
+            let s2 = 1.7 / m2;
+            vx = vx * s2;
+            vy = vy * s2;
+            vz = vz * s2
+          }
+        }
+      };
+      c.csx[base + len] = clampf(hx + vx, 0.0 - CH, CH);
+      c.csy[base + len] = clampf(hy + vy, 0.0 - CH, CH);
+      c.csz[base + len] = clampf(hz + vz, 0.0 - CH, CH);
+      c.clen[s] = len + 1
+    };
+    s = s + 1
+  }
+}

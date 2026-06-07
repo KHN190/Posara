@@ -1,0 +1,722 @@
+// Touhou-style danmaku demo (persistent-main @cart).
+// Move=arrows,fire=A/Z,Slow=B/X,bomb=Select/Tab
+
+use lib::seq::{ Seq, seq_new, seq_reset, seq_tick }
+use lib::synthkit::{ synthkit_setup }
+
+const NB: Int = 128;
+const NE: Int = 16;
+const NP: Int = 160;
+const WAVE_DUR: Int = 22000;
+const CARD_LIMIT: Int = 18000;
+const GRAZE_R2: Int = 240;
+const BOMB_COST: Int = 8;
+const GRAZE_MAX: Int = 16;
+const NPB: Int = 16;
+
+type Player = { x: Int, y: Int, dxr: Float, dyr: Float, lives: Int, invt: Int, cd: Int, graze: Int, captures: Int }
+type Timing = { frame: Int, flash: Int, sang: Float, spt: Int, phase: Int, wave_t: Int, freeze: Int }
+type Boss = { hp: Int, hpmax: Int, card: Int, ncards: Int, cardt: Int, nodeath: Int }
+type Pbullet = { on: Int, x: Int, y: Int, lng: Int }
+type Bullet = { on: Int, x: Float, y: Float, vx: Float, vy: Float, gz: Int, kind: Int }
+type Enemy = { on: Int, ty: Int, x: Float, y: Float, ph: Float, hp: Int, cd: Int, hf: Int }
+type Flow = { x: Array<Float>, y: Array<Float>, sx: Float, sy: Float }
+type Fx = { on: Int, x: Int, y: Int, age: Int, life: Int }
+
+// All cross-frame state, threaded as &mut into each frame's logic.
+type World = {
+  p: Player, tm: Timing, bo: Boss,
+  pb: Array<Pbullet>, eb: Array<Bullet>, en: Array<Enemy>,
+  fl: Flow, fx: Array<Fx>,
+  rank: Int, prevbomb: Int, sq: Seq
+}
+
+// Immutable note/pattern tables (read-only).
+static WKICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static WBASS: Array<Int> = [33,0,33,45, 0,48,0,33, 33,0,52,0, 45,0,48,33];
+static WHAT:  Array<Int> = [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0];
+static WCLAP: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+static BKICK: Array<Int> = [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,1];
+static BBASS: Array<Int> = [33,33,0,33, 36,0,33,0, 32,0,32,0, 31,0,30,0];
+static BHAT:  Array<Int> = [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,1,1];
+static BLEAD: Array<Int> = [69,0,72,0, 71,0,69,0, 67,0,69,71, 72,0,76,0];
+
+fn rgb(r: Int, g: Int, b: Int) -> Int { r * 2048 + g * 32 + b }
+fn c_white()  -> Int { rgb(31, 63, 31) }
+fn c_gray()   -> Int { rgb(60, 60, 60) }
+fn c_dim()    -> Int { rgb(6, 12, 6) }
+fn c_amber()  -> Int { rgb(31, 46, 0) }
+fn c_teal()   -> Int { rgb(0, 58, 21) }
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+fn btn(b: Int, mask: Int) -> Int { b / mask % 2 }
+
+fn clamp(v: Int, lo: Int, hi: Int) -> Int {
+  match v { _ if v < lo => lo, _ if v > hi => hi, _ => v }
+}
+
+fn wrap(v: Float, hi: Float) -> Float {
+  match v { _ if v < 0.0 => hi, _ if v > hi => 0.0, _ => v }
+}
+
+fn field(x: Float, y: Float, t: Float, sx: Float, sy: Float) -> Float {
+  sin(x * 0.012 + t + sx) * 1.6 + cos(y * 0.015 - t * 0.7 + sy) * 1.6
+}
+
+fn poly(cx: Int, cy: Int, n: Int, r: Float, rot: Float, col: Int) -> <Graphics> Unit {
+  let step = 6.28318 / n.to_f();
+  let mut k = 0;
+  while k < n {
+    let a0 = rot + k.to_f() * step;
+    let a1 = rot + (k + 1).to_f() * step;
+    tri(cx, cy,
+        cx + (cos(a0) * r).to_i(), cy + (sin(a0) * r).to_i(),
+        cx + (cos(a1) * r).to_i(), cy + (sin(a1) * r).to_i(), col);
+    k = k + 1
+  }
+}
+
+// --- music ---
+fn wave_row(s: Int, prog: Int, bar: Int) -> <IO, nondet> Unit {
+  if WKICK[s] == 1 { synth_on(0, 36, 85, 140) };
+  let tp = if bar % 8 >= 4 { 5 } else { 0 };
+  let bn = WBASS[s];
+  let play = bn != 0 && (prog >= 1 || s % 4 == 0);
+  if play {
+    let acc = if s == 0 { 18 } else { 0 };
+    let vol = if prog >= 3 { 72 } else { 58 };
+    let dur = if prog >= 3 { 180 } else { 140 };
+    synth_on(1, bn + tp, vol + acc + ri(8), dur)
+  };
+  if prog >= 1 { if WHAT[s] == 1 { synth_on(3, 72, 30 + ri(12), 40) } };
+  if prog >= 2 { if WCLAP[s] == 1 { synth_on(2, 60, 60, 120) } }
+}
+
+fn boss_row(s: Int, card: Int) -> <IO, nondet> Unit {
+  if BKICK[s] == 1 { synth_on(0, 36, 92, 140) };
+  if s % 4 == 2 { synth_on(2, 60, 70, 120) };
+  let bn = BBASS[s];
+  if bn != 0 { synth_on(1, bn, 78, 120) };
+  if card >= 1 { if BHAT[s] == 1 { synth_on(3, 72, 35 + ri(15), 40) } };
+  let ln = BLEAD[s];
+  if card >= 1 { if ln != 0 { synth_on(4, ln, 55, 180) } };
+  if card >= 2 { if ln != 0 { synth_on(4, ln + 12, 38, 120) } }
+}
+
+fn music_step(w: &mut World, t: Int) -> <IO, nondet> Unit {
+  let ms = match w.tm.phase { 1 => match w.bo.card { 0 => 110, 1 => 100, _ => 90 }, _ => 125 };
+  let s = seq_tick(&mut w.sq, t, ms);
+  if s >= 0 {
+    match w.tm.phase {
+      1 => boss_row(s, w.bo.card),
+      _ => wave_row(s, (t - w.tm.wave_t) * 4 / WAVE_DUR, w.sq.bar)
+    }
+  }
+}
+
+// --- flow field ---
+fn flow_reseed(w: &mut World) -> <nondet> Unit {
+  w.fl.sx = rand() * 100.0;
+  w.fl.sy = rand() * 100.0;
+  let mut i = 0;
+  while i < NP {
+    w.fl.x[i] = rand() * 480.0;
+    w.fl.y[i] = rand() * 320.0;
+    i = i + 1
+  }
+}
+
+fn flow_step(w: &mut World, t: Int) -> <Graphics, nondet> Unit {
+  let tt = t.to_f() * 0.0004;
+  let d = c_dim();
+  let mut i = 0;
+  while i < NP {
+    let a = field(w.fl.x[i], w.fl.y[i], tt, w.fl.sx, w.fl.sy);
+    let nx = w.fl.x[i] + cos(a) * 1.8;
+    let ny = w.fl.y[i] + sin(a) * 1.8;
+    linew(w.fl.x[i].to_i(), w.fl.y[i].to_i(), nx.to_i(), ny.to_i(), 6, d);
+    w.fl.x[i] = wrap(nx, 480.0);
+    w.fl.y[i] = wrap(ny, 320.0);
+    i = i + 1
+  };
+  let r = w.tm.frame % NP;
+  w.fl.x[r] = ri(480).to_f();
+  w.fl.y[r] = ri(320).to_f()
+}
+
+// --- player bullets ---
+fn spawn_pb(w: &mut World, lng: Int) -> Unit {
+  let mut i = 0;
+  let mut done = 0;
+  while i < NPB {
+    if done == 0 {
+      if w.pb[i].on == 0 {
+        w.pb[i] = Pbullet { on: 1, x: w.p.x, y: w.p.y - 8, lng: lng };
+        done = 1
+      }
+    };
+    i = i + 1
+  }
+}
+
+// 单发直射。focus=1 标记拉长（激光感），配 player_step 的更快 cd。
+fn fire(w: &mut World, focus: Int) -> <IO> Unit {
+  spawn_pb(w, focus);
+  sfx_play(2, 900, 20, 40)
+}
+
+// --- enemy bullets (spawn) ---
+fn emit(w: &mut World, bx: Int, by: Int, ang: Float, spd: Float, kind: Int) -> Unit {
+  let rf = 0.5 + (w.rank.to_f() - 90.0) / 80.0;
+  let mut i = 0;
+  let mut done = 0;
+  while i < NB {
+    if done == 0 {
+      if w.eb[i].on == 0 {
+        w.eb[i] = Bullet {
+          on: 1, x: bx.to_f(), y: by.to_f(),
+          vx: cos(ang) * spd * rf,
+          vy: sin(ang) * spd * rf,
+          gz: 0, kind: kind
+        };
+        done = 1
+      }
+    };
+    i = i + 1
+  }
+}
+
+fn emit_aim(w: &mut World, bx: Int, by: Int, spd: Float) -> Unit {
+  let rf = 0.5 + (w.rank.to_f() - 90.0) / 80.0;
+  let dx = (w.p.x - bx).to_f();
+  let dy = (w.p.y - by).to_f();
+  let dd0 = sqrt(dx * dx + dy * dy);
+  let dd = if dd0 < 1.0 { 1.0 } else { dd0 };
+  let mut i = 0;
+  let mut done = 0;
+  while i < NB {
+    if done == 0 {
+      if w.eb[i].on == 0 {
+        w.eb[i] = Bullet {
+          on: 1, x: bx.to_f(), y: by.to_f(),
+          vx: dx / dd * spd * rf,
+          vy: dy / dd * spd * rf,
+          gz: 0, kind: 1
+        };
+        done = 1
+      }
+    };
+    i = i + 1
+  }
+}
+
+fn ring(w: &mut World, bx: Int, by: Int, spd: Float, kind: Int) -> Unit {
+  let mut k = 0;
+  while k < 12 {
+    emit(w, bx, by, k.to_f() * 0.5236, spd, kind);
+    k = k + 1
+  }
+}
+
+fn spawn_step(w: &mut World, bx: Int, by: Int) -> Unit {
+  let spd = 1.8;
+  match w.bo.card {
+    0 => {
+      if w.tm.frame % 3 == 0 {
+        emit(w, bx, by, w.tm.sang, spd, 0);
+        emit(w, bx, by, w.tm.sang + 3.14159, spd, 0);
+        w.tm.sang = w.tm.sang + 0.38
+      };
+      if w.tm.frame % 96 == 0 { ring(w, bx, by, spd * 0.85, 0) };
+      if w.tm.frame % 140 == 0 { emit_aim(w, bx, by, spd + 0.6) }
+    },
+    1 => {
+      if w.tm.frame % 45 == 0 { ring(w, bx, by, spd * 0.7, 0) };
+      if w.tm.frame % 22 == 0 { emit_aim(w, bx, by, spd + 0.4) }
+    },
+    _ => {
+      if w.tm.frame % 2 == 0 {
+        emit(w, bx, by, w.tm.sang, spd, 0);
+        emit(w, bx, by, w.tm.sang + 2.094, spd, 0);
+        emit(w, bx, by, w.tm.sang + 4.188, spd, 0);
+        w.tm.sang = w.tm.sang + 0.25
+      };
+      if w.tm.frame % 110 == 0 { emit_aim(w, bx, by, spd + 0.8) }
+    }
+  }
+}
+
+// --- enemies ---
+fn spawn_enemy(w: &mut World, t: Int) -> <nondet> Unit {
+  let elapsed = t - w.tm.wave_t;
+  if elapsed < WAVE_DUR {
+    if t >= w.tm.spt {
+      let mut j = 0;
+      let mut done = 0;
+      while j < NE {
+        if done == 0 {
+          if w.en[j].on == 0 {
+            let ty = ri(3);
+            w.en[j] = Enemy {
+              on: 1, ty: ty,
+              x: (30 + ri(420)).to_f(), y: -10.0,
+              ph: rand() * 6.28,
+              hp: match ty { 0 => 2, 1 => 3, _ => 4 },
+              cd: t + 600, hf: 0
+            };
+            done = 1
+          }
+        };
+        j = j + 1
+      };
+      let iv = 1300 - elapsed / 20;
+      let ivc = if iv < 280 { 280 } else { iv };
+      w.tm.spt = t + ivc
+    }
+  }
+}
+
+fn enemy_fire(w: &mut World, ty: Int, x: Int, y: Int, ph: Float) -> Unit {
+  match ty {
+    0 => emit_aim(w, x, y, 2.2),
+    1 => emit(w, x, y, 1.5708, 2.4, 2),
+    _ => emit(w, x, y, 1.5708 + sin(ph) * 0.9, 1.7, 0)
+  }
+}
+
+fn draw_enemy(ty: Int, x: Int, y: Int, rot: Float, hf: Int) -> <Graphics> Unit {
+  let g = if hf > 0 { c_white() } else { c_teal() };
+  match ty {
+    0 => poly(x, y, 4, 6.5, rot, g),
+    1 => poly(x, y, 6, 6.0, rot, g),
+    _ => poly(x, y, 3, 7.0, rot, g)
+  }
+}
+
+fn enemies_step(w: &mut World, t: Int) -> <Graphics> Unit {
+  let mut i = 0;
+  while i < NE {
+    if w.en[i].on == 1 {
+      let ty = w.en[i].ty;
+      let nph = w.en[i].ph + 0.05;
+      let ny = w.en[i].y + match ty { 1 => 1.6, 0 => 1.0, _ => 0.7 };
+      let nx = w.en[i].x + match ty { 2 => sin(nph) * 1.5, 0 => sin(nph) * 0.8, _ => 0.0 };
+      let yi = ny.to_i();
+      if yi > 330 { w.en[i].on = 0 } else {
+        draw_enemy(ty, nx.to_i(), yi, nph, w.en[i].hf);
+        if t >= w.en[i].cd {
+          enemy_fire(w, ty, nx.to_i(), yi, nph);
+          w.en[i].cd = t + match ty { 0 => 1100, 1 => 1400, _ => 1200 }
+        };
+        if w.en[i].hf > 0 { w.en[i].hf = w.en[i].hf - 1 };
+        w.en[i].x = nx; w.en[i].y = ny; w.en[i].ph = nph
+      }
+    };
+    i = i + 1
+  }
+}
+
+fn enemies_clear(w: &mut World) -> Int {
+  let mut i = 0;
+  let mut any = 0;
+  while i < NE { if w.en[i].on == 1 { any = 1 }; i = i + 1 };
+  if any == 0 { 1 } else { 0 }
+}
+
+// --- effects (rings) ---
+fn fx_spawn(w: &mut World, x: Int, y: Int, life: Int) -> Unit {
+  let mut i = 0;
+  let mut done = 0;
+  while i < 16 {
+    if done == 0 {
+      if w.fx[i].on == 0 { w.fx[i] = Fx { on: 1, x: x, y: y, age: 0, life: life }; done = 1 }
+    };
+    i = i + 1
+  }
+}
+
+fn fx_step(w: &mut World) -> <Graphics> Unit {
+  let col = c_white();
+  let mut i = 0;
+  while i < 16 {
+    if w.fx[i].on == 1 {
+      let age = w.fx[i].age + 1;
+      if age >= w.fx[i].life { w.fx[i].on = 0 } else {
+        circb(w.fx[i].x, w.fx[i].y, age * 2, col);
+        w.fx[i].age = age
+      }
+    };
+    i = i + 1
+  }
+}
+
+// --- enemy-bullet clear / bomb ---
+fn clear_eb(w: &mut World) -> Unit {
+  let mut i = 0;
+  while i < NB { w.eb[i].on = 0; i = i + 1 }
+}
+
+// graze gain funnels here: cap at GRAZE_MAX, overflow cranks rank (harder bullets).
+fn gain_graze(w: &mut World, n: Int) -> Unit {
+  let g = w.p.graze + n;
+  if g > GRAZE_MAX {
+    w.rank = clamp(w.rank + (g - GRAZE_MAX), 90, 170);
+    w.p.graze = GRAZE_MAX
+  } else {
+    w.p.graze = g
+  }
+}
+
+fn cancel_eb(w: &mut World, reward: Int) -> Unit {
+  let mut i = 0;
+  while i < NB {
+    if w.eb[i].on == 1 {
+      if reward == 1 {
+        fx_spawn(w, w.eb[i].x.to_i(), w.eb[i].y.to_i(), 4);
+        gain_graze(w, 1)
+      };
+      w.eb[i].on = 0
+    };
+    i = i + 1
+  }
+}
+
+fn clear_enemies(w: &mut World) -> Unit {
+  let mut i = 0;
+  while i < NE { w.en[i].on = 0; i = i + 1 }
+}
+
+fn bomb(w: &mut World, t: Int) -> <IO> Unit {
+  cancel_eb(w, 0);
+  w.p.graze = w.p.graze - BOMB_COST;
+  w.p.invt = t + 800;
+  fx_spawn(w, w.p.x, w.p.y, 26);
+  w.tm.flash = 4;
+  w.tm.freeze = 3;
+  synth_on(5, 57, 80, 400)
+}
+
+// --- phase transitions ---
+fn enter_boss(w: &mut World, t: Int) -> <IO> Unit {
+  w.tm.phase = 1; w.bo.hp = w.bo.hpmax; w.tm.flash = 0; w.tm.sang = 0.0;
+  w.bo.card = 0; w.bo.nodeath = 1; w.bo.cardt = t + CARD_LIMIT;
+  seq_reset(&mut w.sq, t);
+  synth_on(5, 45, 80, 650)
+}
+
+fn boss_down(w: &mut World, t: Int) -> <IO, nondet> Unit {
+  w.tm.phase = 0; w.tm.wave_t = t; w.tm.spt = t;
+  w.bo.hp = w.bo.hpmax;
+  flow_reseed(w);
+  seq_reset(&mut w.sq, t);
+  synth_on(4, 69, 70, 400);
+  synth_on(4, 72, 70, 400);
+  synth_on(4, 76, 70, 400)
+}
+
+fn card_clear(w: &mut World, t: Int) -> <IO, nondet> Unit {
+  let captured = w.bo.nodeath == 1;
+  if captured {
+    cancel_eb(w, 1);
+    w.p.captures = w.p.captures + 1;
+    w.rank = clamp(w.rank + 8, 90, 170);
+    synth_on(4, 69, 70, 300); synth_on(4, 73, 70, 300); synth_on(4, 76, 70, 300)
+  } else {
+    clear_eb(w);
+    synth_on(5, 50, 70, 300)
+  };
+  w.bo.card = w.bo.card + 1;
+  if w.bo.card >= w.bo.ncards { boss_down(w, t) }
+  else {
+    w.bo.hp = w.bo.hpmax; w.bo.nodeath = 1; w.bo.cardt = t + CARD_LIMIT; w.tm.sang = 0.0
+  }
+}
+
+fn enemy_down(w: &mut World, j: Int) -> <IO> Unit {
+  fx_spawn(w, w.en[j].x.to_i(), w.en[j].y.to_i(), 8);
+  w.en[j].on = 0;
+  gain_graze(w, 1);
+  sfx_play(3, 300, 60, 90)
+}
+
+fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, IO, nondet> Unit {
+  let y = c_amber();
+  let mut i = 0;
+  while i < NPB {
+    if w.pb[i].on == 1 {
+      w.pb[i].y = w.pb[i].y - (if w.pb[i].lng == 1 { 8 } else { 7 });
+      if w.pb[i].y < 0 { w.pb[i].on = 0 } else {
+        if w.pb[i].lng == 1 { rect(w.pb[i].x - 1, w.pb[i].y - 4, 2, 10, y) } else { circ(w.pb[i].x, w.pb[i].y, 2, y) };
+        if bosson == 1 {
+          let dx = w.pb[i].x - bx;
+          let dy = w.pb[i].y - by;
+          if dx * dx + dy * dy < 196 {
+            w.pb[i].on = 0;
+            w.bo.hp = w.bo.hp - 1;
+            w.tm.flash = 3;
+            if w.bo.hp <= 0 { card_clear(w, t) }
+          }
+        };
+        if w.pb[i].on == 1 {
+          let mut j = 0;
+          while j < NE {
+            if w.en[j].on == 1 {
+              if w.pb[i].on == 1 {
+                let ex = w.pb[i].x - w.en[j].x.to_i();
+                let ey = w.pb[i].y - w.en[j].y.to_i();
+                if ex * ex + ey * ey < 81 {
+                  w.pb[i].on = 0;
+                  w.en[j].hp = w.en[j].hp - 1;
+                  w.en[j].hf = 2;
+                  sfx_play(2, 1300, 35, 40);
+                  if w.en[j].hp <= 0 { enemy_down(w, j) }
+                }
+              }
+            };
+            j = j + 1
+          }
+        }
+      }
+    };
+    i = i + 1
+  }
+}
+
+// --- segment / game reset ---
+fn restart_segment(w: &mut World, t: Int) -> <nondet> Unit {
+  clear_eb(w);
+  flow_reseed(w);
+  seq_reset(&mut w.sq, t);
+  w.p.x = 240; w.p.y = 270;
+  if w.tm.phase == 0 {
+    clear_enemies(w);
+    w.tm.wave_t = t; w.tm.spt = t
+  } else {
+    w.bo.cardt = t + CARD_LIMIT
+  }
+}
+
+fn reset_game(w: &mut World, t: Int) -> <nondet> Unit {
+  w.p.lives = 3; w.p.captures = 0;
+  w.rank = 100;
+  w.tm.phase = 0; w.tm.wave_t = t; w.tm.spt = t;
+  w.bo.card = 0; w.bo.hp = w.bo.hpmax;
+  clear_enemies(w);
+  clear_eb(w);
+  flow_reseed(w);
+  seq_reset(&mut w.sq, t);
+  w.p.x = 240; w.p.y = 270
+}
+
+fn player_hit(w: &mut World, t: Int) -> <IO, nondet> Unit {
+  w.p.lives = w.p.lives - 1;
+  w.p.invt = t + 1500;
+  w.bo.nodeath = 0;
+  w.rank = clamp(w.rank - 25, 90, 170);
+  fx_spawn(w, w.p.x, w.p.y, 22);
+  w.tm.freeze = 6;
+  sfx_play(3, 240, 80, 220);
+  sfx_play(3, 90, 80, 320);
+  if w.p.lives < 0 { reset_game(w, t) } else { restart_segment(w, t) }
+}
+
+fn ebullets(w: &mut World, t: Int) -> <Graphics, IO, nondet> Unit {
+  let g = c_white();
+  let tt = t.to_f() * 0.0004;
+  let mut i = 0;
+  while i < NB {
+    if w.eb[i].on == 1 {
+      let wf = match w.eb[i].kind { 2 => 0.15, 1 => 0.3, _ => 0.5 };
+      let a = field(w.eb[i].x, w.eb[i].y, tt, w.fl.sx, w.fl.sy);
+      w.eb[i].x = w.eb[i].x + w.eb[i].vx + cos(a) * wf;
+      w.eb[i].y = w.eb[i].y + w.eb[i].vy + sin(a) * wf;
+      let x = w.eb[i].x.to_i();
+      let y = w.eb[i].y.to_i();
+      let oob = x < 0 || x > 480 || y < 0 || y > 320;
+      if oob { w.eb[i].on = 0 } else {
+        match w.eb[i].kind {
+          1 => poly(x, y, 4, 3.0, 0.0, g),
+          2 => circ(x, y, 3, g),
+          _ => circ(x, y, 2, g)
+        };
+        if t >= w.p.invt {
+          let dx = x - w.p.x;
+          let dy = y - w.p.y;
+          let d2 = dx * dx + dy * dy;
+          if d2 < 30 {
+            w.eb[i].on = 0;
+            player_hit(w, t)
+          } else if d2 < GRAZE_R2 {
+            if w.eb[i].gz == 0 {
+              w.eb[i].gz = 1;
+              gain_graze(w, 1);
+              w.rank = clamp(w.rank + 1, 90, 170)
+            }
+          }
+        }
+      }
+    };
+    i = i + 1
+  }
+}
+
+// --- player move/fire/bomb ---
+fn player_step(w: &mut World, b: Int, t: Int) -> <IO> Unit {
+  let sp = match btn(b, 2) { 1 => 2, _ => 5 };
+  let ix = btn(b, 128) - btn(b, 64);
+  let iy = btn(b, 32) - btn(b, 16);
+  let a = field(w.p.x.to_f(), w.p.y.to_f(), t.to_f() * 0.0004, w.fl.sx, w.fl.sy);
+  let pw = match btn(b, 2) { 1 => 0.48, _ => 0.96 };
+  w.p.dxr = w.p.dxr + cos(a) * pw;
+  w.p.dyr = w.p.dyr + sin(a) * pw;
+  let mvx = w.p.dxr.to_i();
+  let mvy = w.p.dyr.to_i();
+  w.p.dxr = w.p.dxr - mvx.to_f();
+  w.p.dyr = w.p.dyr - mvy.to_f();
+  w.p.x = w.p.x + ix * sp + mvx;
+  w.p.y = w.p.y + iy * sp + mvy;
+  w.p.x = clamp(w.p.x, 8, 472);
+  w.p.y = clamp(w.p.y, 8, 312);
+  match btn(b, 1) {
+    1 => if t >= w.p.cd { let f = btn(b, 2); fire(w, f); w.p.cd = t + (if f == 1 { 80 } else { 110 }) },
+    _ => ()
+  };
+  let bp = btn(b, 4);
+  if bp == 1 && w.prevbomb == 0 && w.p.graze >= BOMB_COST { bomb(w, t) };
+  w.prevbomb = bp
+}
+
+fn draw_boss(w: &mut World, bx: Int, by: Int) -> <Graphics> Unit {
+  let c = if w.tm.flash > 0 { c_amber() } else { c_teal() };
+  circb(bx, by, 14, c);
+  circb(bx, by, 8, c);
+  if w.tm.flash > 0 { circ(bx, by, 6, c) } else { pset(bx, by, c) }
+}
+
+fn draw_player(w: &mut World, t: Int, focus: Int) -> <Graphics> Unit {
+  let vis = if t >= w.p.invt { 1 } else { t / 80 % 2 };
+  if vis == 1 {
+    blit([24, 24, 60, 60, 126, 255, 231, 195], w.p.x - 4, w.p.y - 4, 8, 8, c_white())
+  };
+  if focus == 1 {
+    circb(w.p.x, w.p.y, 5, c_amber());
+    pset(w.p.x, w.p.y, c_white())
+  }
+}
+
+fn hud(w: &mut World, t: Int) -> <Graphics> Unit {
+  let col = c_white();
+  if w.tm.phase == 1 {
+    rectb(140, 8, 200, 6, col);
+    let bw = w.bo.hp * 200 / w.bo.hpmax;
+    if bw > 0 { rect(140, 8, bw, 6, c_amber()) };
+    let mut c = 0;
+    while c < w.bo.ncards {
+      let pc = if c < w.bo.card { c_dim() } else { c_amber() };
+      rect(140 + c * 8, 2, 5, 3, pc);
+      c = c + 1
+    };
+    let rem = w.bo.cardt - t;
+    let tw = if rem > 0 { rem * 200 / CARD_LIMIT } else { 0 };
+    rect(140, 16, tw, 2, c_gray())
+  };
+  let mut i = 0;
+  while i < w.p.lives { rect(8 + i * 8, 306, 5, 5, col); i = i + 1 };
+  let mut j = 0;
+  while j < w.p.captures { rect(8 + j * 5, 22, 3, 3, c_amber()); j = j + 1 };
+  rectb(388, 306, 84, 5, col);
+  let gv = clamp(w.p.graze, 0, GRAZE_MAX);
+  let gm = gv * 82 / GRAZE_MAX;
+  let gc = if w.p.graze >= BOMB_COST { c_amber() } else { c_teal() };
+  if gm > 0 { rect(389, 307, gm, 3, gc) };
+  rect(389 + 82 * BOMB_COST / GRAZE_MAX, 306, 1, 5, c_gray())
+}
+
+// One full frame of simulation + draw. On hitstop, just flash and skip the sim.
+fn frame_step(w: &mut World, b: Int, t: Int) -> <Graphics, IO, nondet> Unit {
+  if w.tm.freeze > 0 {
+    w.tm.freeze = w.tm.freeze - 1;
+    let v = w.tm.freeze * 5;
+    cls(rgb(v, v * 2, v))
+  } else {
+    sim_step(w, b, t)
+  }
+}
+
+fn sim_step(w: &mut World, b: Int, t: Int) -> <Graphics, IO, nondet> Unit {
+  cls(0x0000);
+  flow_step(w, t);
+  music_step(w, t);
+  player_step(w, b, t);
+
+  let bx = 240 + (sin(t.to_f() * 0.0011) * 150.0).to_i();
+  let by = 58;
+
+  if w.tm.phase == 0 {
+    spawn_enemy(w, t);
+    enemies_step(w, t);
+    pbullets(w, 0, 0, 0, t);
+    if t - w.tm.wave_t > WAVE_DUR {
+      if enemies_clear(w) == 1 { enter_boss(w, t) }
+    }
+  } else {
+    if t > w.bo.cardt {
+      w.bo.nodeath = 0;
+      card_clear(w, t)
+    } else {
+      spawn_step(w, bx, by);
+      pbullets(w, bx, by, 1, t);
+      draw_boss(w, bx, by)
+    }
+  };
+
+  ebullets(w, t);
+  fx_step(w);
+  draw_player(w, t, btn(b, 2));
+  hud(w, t);
+
+  if w.tm.flash > 0 { w.tm.flash = w.tm.flash - 1 };
+  w.tm.frame = w.tm.frame + 1
+}
+
+@cart
+fn main() -> <frame, Graphics, IO, nondet> Unit {
+  screen(480, 320);
+  srand(now());
+
+  let mut w = World {
+    p: Player { x: 240, y: 270, dxr: 0.0, dyr: 0.0, lives: 3, invt: 0, cd: 0, graze: 0, captures: 0 },
+    tm: Timing { frame: 0, flash: 0, sang: 0.0, spt: 0, phase: 0, wave_t: 0, freeze: 0 },
+    bo: Boss { hp: 40, hpmax: 40, card: 0, ncards: 3, cardt: 0, nodeath: 1 },
+    pb: [Pbullet { on: 0, x: 0, y: 0, lng: 0 }; 16],
+    eb: [Bullet { on: 0, x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, gz: 0, kind: 0 }; 128],
+    en: [Enemy { on: 0, ty: 0, x: 0.0, y: 0.0, ph: 0.0, hp: 0, cd: 0, hf: 0 }; 16],
+    fl: Flow { x: [0.0; 160], y: [0.0; 160], sx: 0.0, sy: 0.0 },
+    fx: [Fx { on: 0, x: 0, y: 0, age: 0, life: 0 }; 16],
+    rank: 100, prevbomb: 0, sq: seq_new()
+  };
+
+  // De-alias the array-repeat slots (give each its own heap record).
+  let mut k = 0;
+  while k < NB { w.eb[k] = Bullet { on: 0, x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, gz: 0, kind: 0 }; k = k + 1 };
+  let mut pp = 0;
+  while pp < NPB { w.pb[pp] = Pbullet { on: 0, x: 0, y: 0, lng: 0 }; pp = pp + 1 };
+  let mut e = 0;
+  while e < NE { w.en[e] = Enemy { on: 0, ty: 0, x: 0.0, y: 0.0, ph: 0.0, hp: 0, cd: 0, hf: 0 }; e = e + 1 };
+  let mut f = 0;
+  while f < 16 { w.fx[f] = Fx { on: 0, x: 0, y: 0, age: 0, life: 0 }; f = f + 1 };
+
+  flow_reseed(&mut w);
+  sfx_inst(2, 0, 1, 30, 0, 20);
+  sfx_inst(3, 4, 1, 80, 0, 60);
+  synthkit_setup();
+  seq_reset(&mut w.sq, 0);
+
+  loop {
+    let t = now();
+    let b = device_out(0x8002);
+    frame_step(&mut w, b, t);
+    device_in(0x2001, 1);
+    frame.present()
+  }
+}

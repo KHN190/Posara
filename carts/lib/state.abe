@@ -1,0 +1,39 @@
+// Shared music + visual state for the flute cart, bundled into one St record
+// (the cart owns a `let mut` and threads &mut St). SNOW is immutable data.
+
+pub type St = {
+  axis: Int, axis_t: Int,
+  cell0: Int, cell1: Int, cell2: Int, cell3: Int,
+  bass_t: Int,
+  motif_s: Int, motif_t: Int, motif_run: Int, motif_rest: Int, motif_oct: Int,
+  tex1_t: Int, tex2_t: Int,
+  anchor_s: Int, anchor_t: Int,
+  song_start: Int, ending_s: Int, ending_t: Int,
+  vis_bass_t: Int,
+  big_font: Array<Int>, font_ready: Int, fade_done: Int,
+  truchet_cells: Array<Int>, truchet_axis: Int
+}
+
+pub fn st_new() -> St {
+  St {
+    axis: 0, axis_t: 0,
+    cell0: 60, cell1: 65, cell2: 68, cell3: 72,
+    bass_t: 0,
+    motif_s: 0, motif_t: 0, motif_run: 3, motif_rest: 0, motif_oct: 0,
+    tex1_t: 0, tex2_t: 0,
+    anchor_s: -1, anchor_t: 0,
+    song_start: 0, ending_s: -1, ending_t: 0,
+    vis_bass_t: 0 - 10000,
+    big_font: [0; 1], font_ready: 0, fade_done: 0,
+    truchet_cells: [0; 64], truchet_axis: -1
+  }
+}
+
+// unicode ❄ (U+2744) baked from Arial Unicode at 20x20 = 50 bytes (px 18).
+pub static SNOW: Array<Int> = [
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0xF0, 0x00,
+  0x02, 0x40, 0x03, 0x26, 0x00, 0x3A, 0xE0, 0x00, 0x60, 0x00,
+  0x4F, 0x20, 0x03, 0x2C, 0x00, 0x52, 0x60, 0x00, 0x64, 0x00,
+  0x0A, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];

@@ -1,0 +1,153 @@
+// Ab major / Fm post-minimalist.
+//   * harmony MOVES on an Ab–Eb–Fm axis (progression I I vi IV I vi ii V).
+//   * bass follows chord root, leans on Ab pedal (44/32); floor = Ab1 (32).
+//   * G (67/55) confined to Eb(V), rarest note in source.
+// 4/4 ~120 BPM, ~168s arch, 7-tone palette, soft dynamics, density swell,
+//   open Fm-color ending.
+
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+// integer modulo helpers (no % operator available).
+fn m2(x: Int) -> Int { x - (x / 2) * 2 }
+fn m4(x: Int) -> Int { x - (x / 4) * 4 }
+fn m8(x: Int) -> Int { x - (x / 8) * 8 }
+
+// progression: I I vi IV I vi ii V (the Ab↔Fm axis with Db/Bbm/Eb pivots).
+fn chord_at(s: Int) -> Int {
+  if s == 0 { 0 } else if s == 1 { 0 }
+  else if s == 2 { 1 } else if s == 3 { 2 }
+  else if s == 4 { 0 } else if s == 5 { 1 }
+  else if s == 6 { 3 } else { 4 }
+}
+
+// THE MOTIF: ladder indices forming an ARCH — rise to the top (5), ease back.
+// one phrase = one bar at 8th-note pace, so you hear it restate each bar.
+fn motif(m: Int) -> Int {
+  match m {
+    0 => 0, 1 => 2, 2 => 3, 3 => 5,
+    4 => 4, 5 => 3, 6 => 2, _ => 1,
+  }
+}
+
+// does the lead sound at this grid position? caps at 8th notes.
+fn lead_on(pos: Int, bar: Int) -> Int {
+  if bar < 8 { if m4(pos) == 0 { 1 } else { 0 } }        // intro: quarters
+  else if bar < 72 { if m2(pos) == 0 { 1 } else { 0 } }  // body: 8ths
+  else if bar < 84 { if m4(pos) == 0 { 1 } else { 0 } }  // recede: quarters
+  else { 0 }
+}
+
+// bass root per chord, octave 2.
+fn bass_root(c: Int) -> Int {
+  match c { 0 => 44, 1 => 41, 2 => 37, 3 => 46, _ => 39 }
+}
+
+fn bass_note(c: Int, r: Float) -> Int {
+  if r < 0.25 { 44 }
+  else if r < 0.35 { 32 }
+  else { bass_root(c) }
+}
+
+// 6-note chord-tone ladder, ascending Ab3-ish → Eb5-ish. k = motif(MS).
+fn arp_pitch(c: Int, k: Int) -> Int {
+  match c {
+    0 => match k { 0 => 56, 1 => 60, 2 => 63, 3 => 68, 4 => 72, _ => 75 }, // Ab: Ab3 C4 Eb4 Ab4 C5 Eb5
+    1 => match k { 0 => 53, 1 => 56, 2 => 60, 3 => 65, 4 => 68, _ => 72 }, // Fm: F3 Ab3 C4 F4 Ab4 C5
+    2 => match k { 0 => 61, 1 => 65, 2 => 68, 3 => 73, 4 => 77, _ => 80 }, // Db: Db4 F4 Ab4 Db5 F5 Ab5
+    3 => match k { 0 => 58, 1 => 61, 2 => 65, 3 => 70, 4 => 73, _ => 77 }, // Bbm: Bb3 Db4 F4 Bb4 Db5 F5
+    _ => match k { 0 => 63, 1 => 67, 2 => 70, 3 => 75, 4 => 79, _ => 82 }, // Eb: Eb4 G4 Bb4 Eb5 G5 Bb5 (G导音)
+  }
+}
+
+// treble: ONE high chord tone, alternates between two per chord (by bar).
+fn tre(c: Int, bar: Int) -> Int {
+  let hi = m2(bar);
+  match c {
+    0 => if hi == 0 { 75 } else { 80 },  // Ab: Eb5 / Ab5
+    1 => if hi == 0 { 72 } else { 77 },  // Fm: C5 / F5
+    2 => if hi == 0 { 73 } else { 80 },  // Db: Db5 / Ab5
+    3 => if hi == 0 { 70 } else { 73 },  // Bbm: Bb4 / Db5
+    _ => if hi == 0 { 75 } else { 79 },  // Eb: Eb5 / G5
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  // ch0 pedal: sine, slow attack, very long release — pedal point.
+  sfx_inst(0, 1, 80, 800, 70, 4500);
+  sfx_pan(0, 100, 100);
+  // ch1 lead / ch2 stack / ch3 treble: short plucky sine.
+  sfx_inst(1, 1, 2, 10, 60, 40);
+  sfx_pan(1, 100, 70);
+  sfx_inst(2, 1, 2, 10, 60, 40);
+  sfx_pan(2, 70, 100);
+  sfx_inst(3, 1, 2, 10, 60, 40);
+  sfx_pan(3, 85, 85);
+
+  let t0 = now();
+  srand(t0);
+  let song_start = t0;
+  let mut b0_t = t0 + 16000;
+  let mut grid_t = t0 + 1000;
+  let mut axis_t = t0;
+  let mut chord = 0;
+  let mut step = 0;
+  let mut bar = 0;
+  let mut ms = 0;
+  let mut pos = 0;
+
+  loop {
+    let t = now();
+    let dt = t - song_start;
+
+    if t >= axis_t {
+      step = if step >= 7 { 0 } else { step + 1 };
+      chord = chord_at(step);
+      let hold = if dt < 16000 { 4000 } else if dt < 82000 { 4000 }
+                 else if dt < 146000 { 4000 } else { 6000 };
+      axis_t = t + hold
+    };
+
+    if t >= b0_t && dt >= 16000 && dt < 164000 {
+      let n = bass_note(chord, rand());
+      sfx_playm(0, n, 63 + ri(18), 5500);
+      let gap = if dt < 24000 { 3500 + ri(1500) }
+                else if dt < 52000 { 3000 + ri(1500) }
+                else if dt < 82000 { 2500 + ri(1500) }
+                else if dt < 146000 { 4000 + ri(2500) }
+                else { 6000 + ri(3000) };
+      b0_t = t + gap
+    };
+
+    if t >= grid_t {
+      let oct = if bar >= 26 && bar < 42 { 12 } else { 0 };
+
+      if lead_on(pos, bar) == 1 {
+        let k = motif(ms);
+        let n = arp_pitch(chord, k) + oct;
+        let acc = if m8(pos) == 0 { 12 } else { 0 };
+        sfx_playm(1, n, 51 + acc + ri(9), 150);
+        if bar >= 12 && bar < 72 && m8(pos) == 0 && k >= 2 {
+          sfx_playm(2, arp_pitch(chord, k - 2) + oct, 45 + ri(9), 140)
+        };
+        ms = if ms >= 7 { 0 } else { ms + 1 }
+      };
+
+      if bar >= 10 && bar < 72 && pos == 14 {
+        sfx_playm(3, tre(chord, bar), 45 + ri(9), 150)
+      };
+      if bar >= 26 && bar < 42 && pos == 6 {
+        sfx_playm(3, tre(chord, bar), 42 + ri(9), 140)
+      };
+
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 { bar += 1 };
+      pos = np;
+      grid_t += 125
+    };
+
+    if dt >= 173000 { halt(0) };
+    frame.present()
+  }
+}

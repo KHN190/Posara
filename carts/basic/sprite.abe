@@ -1,0 +1,32 @@
+// 64x64 1bpp sprite (img2sprite, 512 bytes). Loaded once into a main-local.
+
+fn load_spr() -> <IO> Array<Int> {
+  let fd = fs_open("assets/mountain64.spr", 1);
+  let d = fs_read(fd, 512);
+  let _ = fs_close(fd);
+  d
+}
+
+@cart
+fn main() -> <frame, Graphics, IO> Unit {
+  screen(480, 320);
+  let spr = load_spr();
+  loop {
+    cls(0xffff);
+    // mode = (rot << 4) | op ; rot 0/1/2/3 = 0/90/180/270, op 0=REPLACE 1=XOR
+    blitg(spr.clone(), 0,  30, 40, 64, 64, 0x0000, 0);    // 0
+    blitg(spr.clone(), 0, 130, 40, 64, 64, 0x0000, 16);   // 90
+    blitg(spr.clone(), 0, 230, 40, 64, 64, 0x0000, 32);   // 180
+    blitg(spr.clone(), 0, 330, 40, 64, 64, 0x0000, 48);   // 270
+
+    rect(30, 140, 64, 64, 0x0000);                        // black box
+    blitg(spr.clone(), 0, 30, 140, 64, 64, 0xffff, 1);    // XOR -> reverse video
+
+    let t = now();
+    let deg = (t / 20) % 360;
+    blitr(spr.clone(), 200, 150, 64, 64, 0x0000, 0, deg);
+
+    device_in(0x2001, 1);
+    frame.present()
+  }
+}

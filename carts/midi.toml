@@ -1,0 +1,15 @@
+# MIDI wiring for the music carts. See designs/midi.md.
+# seq drives tracker and the IAC bus; tracker plays out to the bus only.
+
+[nodes]
+seq     = { cart = "music/sequencer.abe" }
+tracker = { cart = "music/tracker.abe" }
+bus     = { port = "IAC*" }
+
+[[wires]]
+from = "seq"
+to   = ["tracker", "bus"]
+
+[[wires]]
+from = "tracker"
+to   = ["bus"]
