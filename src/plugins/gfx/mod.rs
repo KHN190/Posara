@@ -250,22 +250,33 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         ret_unit()
     }));
     let f = Rc::clone(&fb);
+    // sprite(data, off_px, x, y, w, h): 4bpp palette-indexed blit. Data layout
+    // matches fs_read (one byte per element, two pixels per byte, high nibble
+    // first). Palette index 0 is transparent. off_px selects a frame in a
+    // concatenated sheet: off_px = frame * w * h. scale arg = percent zoom
+    // (100 = 1x, nearest sampling; <100 shrinks, >100 enlarges).
     vm.register_native("sprite", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let data = a.first().copied().unwrap_or(Value::NONE);
-        let (x0, y0, w, h) = (arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4));
-        if data.is_handle_none() { return ret_unit(); }
+        let off = arg(a, 1).max(0) as usize;
+        let (x0, y0, w, h) = (arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5));
+        let pct = match a.get(6) { Some(v) => v.as_int().max(1), None => 100 };
+        if data.is_handle_none() || w <= 0 || h <= 0 { return ret_unit(); }
         let (slot, gen_) = data.as_handle();
         let cells = ctx.heap.cell_data(slot, gen_)?;
-        let total = (w * h) as usize;
         let mut fbm = f.borrow_mut();
-        for i in 0..total {
-            let cell = cells.get(i / 8).copied().unwrap_or(0);
-            let shift = (7 - (i % 8)) * 4;
-            let idx = ((cell >> shift) & 0xF) as usize;
-            let c = fbm.palette[idx];
-            let px = (i % w as usize) as i64;
-            let py = (i / w as usize) as i64;
-            fbm.pset(x0 + px, y0 + py, c);
+        let dw = (w * pct / 100).max(1);
+        let dh = (h * pct / 100).max(1);
+        for dy in 0..dh {
+            let sy = dy * 100 / pct;
+            for dx in 0..dw {
+                let sx = dx * 100 / pct;
+                let n = off + (sy * w + sx) as usize;
+                let byte = cells.get(n / 2).copied().unwrap_or(0);
+                let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
+                if idx == 0 { continue; }
+                let c = fbm.palette[idx];
+                fbm.pset(x0 + dx, y0 + dy, c);
+            }
         }
         ret_unit()
     }));
@@ -321,6 +332,6 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("blit",    vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
         ("blitg",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
         ("blitr",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("sprite",  vec![arr_int(), T::Int, T::Int, T::Int, T::Int],       T::Unit),
+        ("sprite",  vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
     ]
 }

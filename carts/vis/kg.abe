@@ -1,0 +1,34 @@
+// Glitch with intention: 64x144 / 61-frame layout read against the 96x56 / 
+// 50-frame sheet. The stride mismatch shears each frame into two scrollings
+
+const FW: Int = 64;
+const FH: Int = 144;
+const NF: Int = 61;
+const BYTES: Int = 281088;
+
+static REAL: Array<Int> = [
+  0, 197122, 5849659, 7499370, 2759192, 10128001, 12893881,
+  0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+fn load_sheet() -> <IO> Array<Int> {
+  let fd = fs_open("assets/slash.spr", 1);
+  let data = fs_read(fd, BYTES);
+  let _ = fs_close(fd);
+  data
+}
+
+@cart
+fn main() -> <frame, Graphics, IO> Unit {
+  screen(480, 320);
+  for i in 0..16 { pal(i, REAL[i]) };
+  let sheet = load_sheet();
+  loop {
+    let t = now();
+    let f = t / 83 % NF;
+    cls(0x0000);
+    sprite(sheet.clone(), f * FW * FH, 208, 88, FW, FH, 100);
+    device_in(0x2001, 1);
+    frame.present()
+  }
+}
