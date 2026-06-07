@@ -217,6 +217,43 @@ pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<Str
     Ok(())
 }
 
+// Real-time run that saves a PNG every 1000/fps ms (starting at from_ms) while
+// the recorder (if armed) captures audio — one run, synced tracks.
+#[cfg(feature = "gfx")]
+pub struct CaptureCfg {
+    pub dir: PathBuf,
+    pub fps: u32,
+    pub from_ms: u64,
+}
+
+#[cfg(feature = "gfx")]
+pub fn run_capture(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, deadline_ms: u64, cap: CaptureCfg) -> Result<u64, String> {
+    std::fs::create_dir_all(&cap.dir).map_err(|e| format!("capture dir: {e}"))?;
+    let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
+    if !step.is_frame_loop() {
+        return Err("capture needs a frame-loop cart (update() or @cart)".into());
+    }
+    let interval_ms = 1000.0 / cap.fps as f64;
+    let mut shot: u64 = 0;
+    loop {
+        if !alive(host) { break; }
+        let elapsed = host.start.elapsed().as_millis() as u64;
+        if elapsed >= deadline_ms { break; }
+        let t0 = Instant::now();
+        if !step.frame()? { break; }
+        let due = cap.from_ms as f64 + shot as f64 * interval_ms;
+        if (elapsed as f64) >= due {
+            let fb = host.gfx.fb.borrow();
+            let path = cap.dir.join(format!("{shot:04}.png"));
+            fb.save_region_png(0, 0, fb.w as i64, fb.h as i64, &path)?;
+            shot += 1;
+        }
+        let elapsed = t0.elapsed();
+        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+    }
+    Ok(shot)
+}
+
 // Run every `pub fn test_*()` export, each in a fresh VM for isolation. Returns
 // true when all passed. assert/assert_eq failures surface as the test's Err.
 #[cfg(feature = "test")]

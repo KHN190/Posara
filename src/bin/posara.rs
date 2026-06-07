@@ -13,7 +13,7 @@ fn usage() -> ExitCode {
     eprintln!("  posara bench  [--root <dir>] [--frames N] <cart>   (headless, no sleep/vsync — for profilers)");
     eprintln!("  posara disasm [--root <dir>] <cart.abe>");
     eprintln!("  posara dump   [--root <dir>] [--headless] --out <png> [--at-ms T | --at-frame N] [--region x,y,w,h] <cart>");
-    eprintln!("  posara record [--root <dir>] [--headless] --out <wav> --duration <ms> <cart>");
+    eprintln!("  posara record [--root <dir>] [--headless] --out <wav> --duration <ms> [--frames <dir> --fps N --from <ms>] <cart>");
     eprintln!("  BREAK_AT=<fn>:<pc>  env var: dump the register window at that op (host-side breakpoint)");
     ExitCode::from(2)
 }
@@ -187,10 +187,16 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     let mut common = Common { root: None, path: None, headless: false };
     let mut out: Option<PathBuf> = None;
     let mut duration_ms: Option<u64> = None;
+    let mut frames: Option<PathBuf> = None;
+    let mut fps: u32 = 12;
+    let mut from_ms: u64 = 0;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => match args.next() { Some(v) => out = Some(PathBuf::from(v)), None => return usage() },
             "--duration" => match args.next().and_then(|v| v.parse().ok()) { Some(v) => duration_ms = Some(v), None => return usage() },
+            "--frames" => match args.next() { Some(v) => frames = Some(PathBuf::from(v)), None => return usage() },
+            "--fps" => match args.next().and_then(|v| v.parse().ok()) { Some(v) => fps = v, None => return usage() },
+            "--from" => match args.next().and_then(|v| v.parse().ok()) { Some(v) => from_ms = v, None => return usage() },
             "--headless" => common.headless = true,
             _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
             _ => common.path = Some(a),
@@ -218,7 +224,13 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         Err(e) => { eprintln!("record start: {e}"); return ExitCode::from(1); }
     };
     *host.sfx.recorder.borrow_mut() = Some(rec);
-    if let Err(e) = runner::run_until_ms(module, static_names, fn_names, &host, duration_ms) {
+    let run_result = match frames {
+        Some(dir) => runner::run_capture(module, static_names, fn_names, &host, duration_ms,
+            runner::CaptureCfg { dir: dir.clone(), fps, from_ms })
+            .map(|n| eprintln!("• wrote {n} frames to {}", dir.display())),
+        None => runner::run_until_ms(module, static_names, fn_names, &host, duration_ms),
+    };
+    if let Err(e) = run_result {
         eprintln!("{e}");
         return ExitCode::from(1);
     }
