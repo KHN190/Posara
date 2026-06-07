@@ -1,6 +1,6 @@
 <p align="center"><img src="./assets/banner.svg" width="720"></p>
 
-Your creative visualaudio toolkit for MacOS 1-bit aesthetics.
+Your creative visualaudio toolkit for early MacOS aesthetics but modernized.
 
 - **Screen** — minifb
 - **Controller** — 8-button bitmap + last ASCII key
@@ -19,6 +19,10 @@ posara run [--root <dir>] [--profile] [--headless] <cart.abe | cart.pk>
 ```
 
 The interpreter is watched and hot-reloaded.
+
+## Why not P5js / L5
+
+Same capability. Better language features. Direct hardware control. Different taste.
 
 ## License
 
