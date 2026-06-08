@@ -81,6 +81,21 @@ impl Drop for Recorder {
     }
 }
 
+// Write a complete WAV from an in-memory f32 buffer (offline render).
+pub fn write_wav_f32(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) -> Result<(), String> {
+    let f = File::create(path).map_err(|e| e.to_string())?;
+    let mut fd = BufWriter::new(f);
+    write_wav_header(&mut fd, sample_rate, channels, (samples.len() * 2) as u32)?;
+    let mut buf = Vec::with_capacity(8192);
+    for &s in samples {
+        let i = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
+        buf.extend_from_slice(&i.to_le_bytes());
+        if buf.len() >= 8192 { fd.write_all(&buf).map_err(|e| e.to_string())?; buf.clear(); }
+    }
+    if !buf.is_empty() { fd.write_all(&buf).map_err(|e| e.to_string())?; }
+    fd.flush().map_err(|e| e.to_string())
+}
+
 fn write_wav_header(
     fd: &mut BufWriter<File>,
     sample_rate: u32,
