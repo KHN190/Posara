@@ -25,21 +25,26 @@ type World = {
 
 fn bit(v: Int, m: Int) -> Int { v / m % 2 }
 
-// invader palette: black bg, white/gray/dim ramp, amber = edit, teal = play.
+// three-colour system: black bg, white foreground, pink accent (#e8336d).
 fn rgb(r: Int, g: Int, b: Int) -> Int { r * 2048 + g * 32 + b }
 fn c_white() -> Int { rgb(31, 63, 31) }
-fn c_gray()  -> Int { rgb(14, 29, 14) }
-fn c_dim()   -> Int { rgb(9, 19, 9) }
-fn c_amber() -> Int { rgb(31, 46, 0) }
-fn c_teal()  -> Int { rgb(0, 58, 21) }
+fn c_dim()   -> Int { rgb(8, 16, 8) }
+fn c_pink()  -> Int { rgb(29, 12, 13) }       // #e8336d — edit accent
+fn c_teal()  -> Int { rgb(0, 58, 28) }        // selection accent
+fn c_gray()  -> Int { rgb(13, 26, 13) }
 
-// dotted contour: a pixel every 4 along each edge.
-fn dotrect(x: Int, y: Int, w: Int, h: Int, c: Int) -> <Graphics> Unit {
-  let mut i = 0;
-  while i < w { pset(x + i, y, c); pset(x + i, y + h - 1, c); i += 4 };
-  let mut j = 0;
-  while j < h { pset(x, y + j, c); pset(x + w - 1, y + j, c); j += 4 }
+fn load_font() -> <IO> Array<Int> {
+  let fd = fs_open("assets/mono8x16.fnt", 1);
+  let data = fs_read(fd, 1520);
+  let _ = fs_close(fd);
+  data
 }
+fn glyph(font: &Array<Int>, cp: Int, x: Int, y: Int, color: Int) -> <Graphics> Unit {
+  if cp >= 32 && cp < 127 { blitg(font.clone(), (cp - 32) * 128, x, y, 8, 16, color, 0) }
+}
+fn hexd(d: Int) -> Int { if d < 10 { 48 + d } else { 55 + d } }
+// channel initials: BAS TRI LED HAT.
+static CHL: Array<Int> = [66, 84, 76, 72];
 
 fn bpm_of(i: Int) -> Int { match i { 0 => 90, 1 => 112, 2 => 128, _ => 150 } }
 fn step_ms(i: Int) -> Int { 15000 / bpm_of(i) }   // one 16th note
@@ -104,51 +109,61 @@ fn input(w: &mut World) -> <IO> Unit {
   w.prevb = b
 }
 
-fn draw(w: &World, tm: Int) -> <Graphics> Unit {
+fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
   cls(0x0000);
-  for s in 0..NSTEP {
-    let x = X0 + s * CW;
-    if s % 4 == 0 { line(x, Y0 - 10, x, Y0 - 4, c_gray()) }
+  // coordinate frame: channel letters left, step numbers (0 4 8 C) on the beats.
+  for t in 0..NTRK {
+    glyph(font, CHL[t], 18, Y0 + t * CH + CH / 2 - 8, c_gray())
   };
+  for s in 0..NSTEP {
+    if s % 4 == 0 {
+      glyph(font, hexd(s), X0 + s * CW + CW / 2 - 4, Y0 - 26, c_gray())
+    }
+  };
+  // playhead marker: a solid pink tick above the active column (no overlay).
+  if w.playing == 1 {
+    rect(X0 + w.step * CW + CW / 2 - 4, Y0 - 8, 8, 4, c_pink())
+  };
+  // dot matrix (Tenori-on): off = faint dot, on = white disc sized by pitch.
+  // cells in the playing column render solid pink — recolour, never blend.
   for s in 0..NSTEP {
     for t in 0..NTRK {
       let Cell { on, p } = w.grid[s * NTRK + t];
-      let x = X0 + s * CW;
-      let y = Y0 + t * CH;
+      let cx = X0 + s * CW + CW / 2;
+      let cy = Y0 + t * CH + CH / 2;
+      let live = w.playing == 1 && s == w.step;
       if on == 1 {
-        let h = 8 + p * 3;
-        rect(x + 3, y + CH - 4 - h, CW - 6, h, c_white())
+        let r = 4 + p;
+        circ(cx, cy, r, if live { c_pink() } else { c_white() })
       } else {
-        dotrect(x + 3, y + 3, CW - 6, CH - 6, c_dim())
+        let d = if s % 4 == 0 { c_dim() } else { rgb(5, 10, 5) };
+        circ(cx, cy, if live { 2 } else { 1 }, if live { c_pink() } else { d })
       }
     }
   };
-  if w.playing == 1 {
-    rectmix(X0 + w.step * CW, Y0 - 2, CW, NTRK * CH + 4, c_teal(), 60)
-  };
-  if tm / 250 % 2 == 0 {
-    rectb(X0 + w.cx * CW + 1, Y0 + w.cy * CH + 1, CW - 2, CH - 2, c_amber())
-  };
+  // trigger ripple: one solid pink ring from the cell just hit.
   for t in 0..NTRK {
     let age = tm - w.pulse[t];
-    if w.pulse[t] > 0 && age < 360 {
-      circb(X0 + w.step * CW + CW / 2, Y0 + t * CH + CH / 2, 4 + age / 24, c_teal())
-    };
-    let h = if w.pulse[t] > 0 && age < 360 { (360 - age) / 12 } else { 0 };
-    if h > 0 { rect(X0 + t * 30, 288 - h, 18, h, c_amber()) }
+    if w.pulse[t] > 0 && age < 240 {
+      circb(X0 + w.step * CW + CW / 2, Y0 + t * CH + CH / 2, 7 + age / 16, c_pink())
+    }
   };
-  for i in 0..(w.bpm_i + 1) { circ(X0 + i * 12, 40, 3, c_amber()) };
+  // cursor: solid white ring on the edited cell (steady, not blinking).
+  circb(X0 + w.cx * CW + CW / 2, Y0 + w.cy * CH + CH / 2, 12, c_teal());
+  // header: tempo dots + transport.
+  for i in 0..(w.bpm_i + 1) { circ(X0 + i * 12, 36, 3, c_white()) };
   if w.playing == 1 {
-    tri(420, 34, 420, 48, 432, 41, c_teal())
+    tri(440, 30, 440, 44, 452, 37, c_pink())
   } else {
-    rect(420, 34, 5, 14, c_gray());
-    rect(430, 34, 5, 14, c_gray())
+    rect(440, 30, 4, 14, c_white());
+    rect(449, 30, 4, 14, c_white())
   }
 }
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
   screen(480, 320);
+  let font = load_font();
   sfx_inst(0, 0, 5, 150, 55, 120);
   sfx_inst(1, 2, 8, 180, 50, 200);
   sfx_inst(2, 1, 5, 120, 45, 260);
@@ -185,7 +200,7 @@ fn main() -> <frame, Graphics, IO> Unit {
       trigger(&mut w, tm);
       w.next_ms = tm + step_ms(w.bpm_i)
     };
-    draw(&w, tm);
+    draw(&w, &font, tm);
     device_in(0x2001, 1);
     frame.present()
   }

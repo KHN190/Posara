@@ -88,8 +88,10 @@ impl Framebuffer {
     pub fn circ(&mut self, cx: i64, cy: i64, r: i64, c: u16, fill: bool) {
         if r < 0 { return; }
         if fill {
+            // +r ≈ (r+0.5)² radius bias: fills the cardinal spikes the bare
+            // dx²+dy²≤r² discretisation leaves on each axis, so the rim reads round.
             for dy in -r..=r {
-                let dx = (((r * r - dy * dy) as f64).sqrt()) as i64;
+                let dx = (((r * r + r - dy * dy) as f64).sqrt()) as i64;
                 self.line(cx - dx, cy + dy, cx + dx, cy + dy, c);
             }
             return;
