@@ -37,42 +37,45 @@ pub struct Host {
 }
 
 impl Host {
-    pub fn new(root: PathBuf) -> Result<Self, String> { Self::new_with(root, false) }
+    pub fn new(root: PathBuf) -> Result<Self, String> { Self::new_with(root, false, false) }
 
-    pub fn new_with(root: PathBuf, headless: bool) -> Result<Self, String> {
-        Self::build(root, headless, |_root| {
+    pub fn new_with(root: PathBuf, headless: bool, muted: bool) -> Result<Self, String> {
+        Self::build(root, headless, muted, |_root| {
             #[cfg(feature = "midi")]
             return MidiPlugin::new();
         })
     }
 
     // Cart-aware constructor: routes MIDI per `<root>/midi.toml` (see
-    // designs/midi.md). Without a config this is `new_with`.
-    pub fn new_cart(root: PathBuf, headless: bool, entry: &std::path::Path) -> Result<Self, String> {
+    // designs/midi.md). Without a config this is `new_with`. muted = no audio
+    // device (silent run, like --headless for sound).
+    pub fn new_cart(root: PathBuf, headless: bool, muted: bool, entry: &std::path::Path) -> Result<Self, String> {
         #[cfg(not(feature = "midi"))]
         let _ = entry;
-        Self::build(root, headless, |_root| {
+        Self::build(root, headless, muted, |_root| {
             #[cfg(feature = "midi")]
             return MidiPlugin::new_routed(_root, entry);
         })
     }
 
     #[cfg(feature = "midi")]
-    fn build(root: PathBuf, headless: bool, midi: impl FnOnce(&std::path::Path) -> MidiPlugin) -> Result<Self, String> {
+    fn build(root: PathBuf, headless: bool, muted: bool, midi: impl FnOnce(&std::path::Path) -> MidiPlugin) -> Result<Self, String> {
         let midi = midi(&root);
-        Self::assemble(root, headless, midi)
+        Self::assemble(root, headless, muted, midi)
     }
 
     #[cfg(not(feature = "midi"))]
-    fn build(root: PathBuf, headless: bool, _midi: impl FnOnce(&std::path::Path)) -> Result<Self, String> {
-        Self::assemble(root, headless)
+    fn build(root: PathBuf, headless: bool, muted: bool, _midi: impl FnOnce(&std::path::Path)) -> Result<Self, String> {
+        Self::assemble(root, headless, muted)
     }
 
-    fn assemble(root: PathBuf, headless: bool, #[cfg(feature = "midi")] midi: MidiPlugin) -> Result<Self, String> {
+    fn assemble(root: PathBuf, headless: bool, muted: bool, #[cfg(feature = "midi")] midi: MidiPlugin) -> Result<Self, String> {
         #[cfg(not(feature = "gfx"))]
         let _ = headless;
+        #[cfg(not(feature = "sfx"))]
+        let _ = muted;
         #[cfg(feature = "sfx")]
-        let sfx = SfxPlugin::new(root.clone())?;
+        let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
         Ok(Self {
             start: Instant::now(),
             rng: Rc::new(RefCell::new(0x9e3779b9)),

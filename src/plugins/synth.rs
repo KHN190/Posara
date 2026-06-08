@@ -61,7 +61,8 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
         arg(a, 2).clamp(0, 2) as u8, arg(a, 3) as f32, arg(a, 4).max(0) as f32 / 1000.0,
         arg(a, 5).max(0) as f32 / 1000.0, (arg(a, 6).clamp(0, 100) as f32) / 100.0, arg(a, 7).max(0) as f32 / 1000.0));
     native!("synth_lfo", |a| Cmd::SynLfo(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 2) as u8,
-        arg(a, 2).max(0) as f32 / 100.0, (arg(a, 3).clamp(0, 100) as f32) / 100.0));
+        arg(a, 2).clamp(0, 3) as u8, arg(a, 3).max(0) as f32 / 100.0, (arg(a, 4).clamp(0, 100) as f32) / 100.0));
+    native!("synth_pan", |a| Cmd::SynPan(arg(a, 0).max(0) as usize, (arg(a, 1).clamp(-100, 100) as f32) / 100.0));
     native!("synth_unison", |a| Cmd::SynUnison(arg(a, 0).max(0) as usize, arg(a, 1).clamp(1, 7) as u8, arg(a, 2) as f32));
     native!("synth_fx", |a| Cmd::SynFx(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 5) as u8,
         (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as f32));
@@ -80,7 +81,8 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("synth_osc",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],         T::Unit),
         ("synth_filter", vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
         ("synth_env",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("synth_lfo",    vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
+        ("synth_lfo",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],                 T::Unit),
+        ("synth_pan",    vec![T::Int, T::Int],                                         T::Unit),
         ("synth_unison", vec![T::Int, T::Int, T::Int],                                 T::Unit),
         ("synth_fx",     vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
         ("synth_voices", vec![T::Int],                                                 T::Unit),

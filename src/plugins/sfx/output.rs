@@ -59,10 +59,24 @@ pub struct Audio {
     pub meter: Meter,
     pub sample_rate: u32,
     pub channels: u16,
-    _stream: cpal::Stream,
+    _stream: Option<cpal::Stream>,
 }
 
 impl Audio {
+    // No audio device: commands queue and are dropped, everything else runs.
+    // Like --headless for sound. Recording is unavailable in this mode.
+    pub fn silent() -> Result<Self, String> {
+        Ok(Self {
+            cmds: Arc::new(Spsc::new(1024)),
+            rec_ring: Arc::new(Spsc::new(8192)),
+            rec_on: Arc::new(AtomicBool::new(false)),
+            meter: Arc::new(AudioMeter::default()),
+            sample_rate: 44100,
+            channels: 2,
+            _stream: None,
+        })
+    }
+
     pub fn new() -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no output device")?;
@@ -100,7 +114,7 @@ impl Audio {
         Ok(Self {
             cmds, rec_ring, rec_on, meter,
             sample_rate, channels: out_channels as u16,
-            _stream: stream,
+            _stream: Some(stream),
         })
     }
 }

@@ -51,6 +51,7 @@ struct Patch {
     fx_kind: u8,
     fx_amt: f32,
     fx_param: f32,
+    pan: f32,   // -1 left .. 0 centre .. 1 right
 }
 
 impl Default for Patch {
@@ -74,6 +75,7 @@ impl Default for Patch {
             fx_kind: 0,
             fx_amt: 0.0,
             fx_param: 0.0,
+            pan: 0.0,
         }
     }
 }
@@ -303,9 +305,15 @@ impl Synth {
         }
     }
 
-    pub fn lfo(&mut self, pid: usize, target: u8, rate: f32, depth: f32) {
+    pub fn lfo(&mut self, pid: usize, target: u8, wave: u8, rate: f32, depth: f32) {
         if let Some(p) = self.patch(pid) {
-            p.lfo.set(target, 0, rate, depth);
+            p.lfo.set(target, wave, rate, depth);
+        }
+    }
+
+    pub fn pan(&mut self, pid: usize, pos: f32) {
+        if let Some(p) = self.patch(pid) {
+            p.pan = pos.clamp(-1.0, 1.0);
         }
     }
 
@@ -365,19 +373,24 @@ impl Synth {
         for v in self.voices.iter_mut() { v.active = false; }
     }
 
-    pub fn tick(&mut self, sr: f32) -> f32 {
-        let mut total = 0.0f32;
+    pub fn tick(&mut self, sr: f32) -> (f32, f32) {
+        let mut tl = 0.0f32;
+        let mut tr = 0.0f32;
         let mut psum = [0.0f32; 4];
         for i in 0..self.pool {
             let pid = self.voices[i].pid;
             let s = self.voices[i].tick(sr);
-            total += s;
+            // equal-power pan from the voice's patch.
+            let pan = self.voices[i].cfg.pan;
+            let a = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+            tl += s * a.cos();
+            tr += s * a.sin();
             if pid < 4 { psum[pid] += s; }
         }
         for p in 0..4 {
             if psum[p].abs() > self.pid_peak[p] { self.pid_peak[p] = psum[p].abs(); }
         }
-        total
+        (tl, tr)
     }
 
     pub fn take_pid_peaks(&mut self) -> [f32; 4] {
