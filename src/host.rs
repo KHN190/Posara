@@ -22,6 +22,9 @@ use crate::plugin::Plugin;
 // iterates them uniformly through the trait for VM/compiler wiring.
 pub struct Host {
     pub start: Instant,
+    // When Some(ms), now() returns this virtual time instead of wall clock —
+    // offline rendering drives it so timing is deterministic and non-realtime.
+    pub clock: Rc<std::cell::Cell<Option<u64>>>,
     pub rng: Rc<RefCell<u32>>,
     pub root: PathBuf,
     #[cfg(feature = "gfx")]
@@ -78,6 +81,7 @@ impl Host {
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
         Ok(Self {
             start: Instant::now(),
+            clock: Rc::new(std::cell::Cell::new(None)),
             rng: Rc::new(RefCell::new(0x9e3779b9)),
             #[cfg(feature = "gfx")]
             gfx: GfxPlugin::new(headless, root.clone()),
@@ -117,7 +121,7 @@ impl Host {
             vm.install_device(0x20, Box::new(StubDevice::new("Screen", "gfx")));
             vm.install_device(0x80, Box::new(StubDevice::new("Controller", "gfx")));
         }
-        register_time_natives(vm, self.start);
+        register_time_natives(vm, self.start, Rc::clone(&self.clock));
         register_rand_natives(vm, Rc::clone(&self.rng));
         #[cfg(feature = "test")]
         crate::debug::register_assert_natives(vm);
@@ -185,9 +189,10 @@ impl myriad::Device for StubDevice {
     }
 }
 
-fn register_time_natives(vm: &mut VirtualMachine, start: Instant) {
+fn register_time_natives(vm: &mut VirtualMachine, start: Instant, clock: Rc<std::cell::Cell<Option<u64>>>) {
     vm.register_native("now", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
-        Ok((Value::from_int(start.elapsed().as_millis() as i64), false))
+        let ms = clock.get().unwrap_or_else(|| start.elapsed().as_millis() as u64);
+        Ok((Value::from_int(ms as i64), false))
     }));
 }
 

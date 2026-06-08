@@ -1,0 +1,78 @@
+// Album cover, rendered by posara itself: the acid generative forms (cube
+// lattice + curl-noise field) in 1-bit white on black, a vermilion band, and
+// the POSARA wordmark. Square for SoundCloud. Dump one frame after a few
+// seconds so the forms have grown.
+
+use lib::proj::{ draw_poly }
+use lib::curl_noise::{ Curl, cn_new, cn_init, cn_step }
+use lib::cube_slice::{ Cube, cb_new, cb_init, cb_step, cb_grow, cb_map }
+
+fn load_font() -> <IO> Array<Int> {
+  let fd = fs_open("assets/mono8x16.fnt", 1);
+  let data = fs_read(fd, 1520);
+  let _ = fs_close(fd);
+  data
+}
+
+// MSB-first bit weights per column (8x16 font, no bitwise ops in abrase).
+static SHIFT: Array<Int> = [128, 64, 32, 16, 8, 4, 2, 1];
+
+// scaled glyph: each font bit becomes an sc×sc block.
+fn glyph_big(font: &Array<Int>, cp: Int, x: Int, y: Int, sc: Int, color: Int) -> <Graphics> Unit {
+  if cp >= 32 && cp < 127 {
+    let base = (cp - 32) * 16;          // 16 bytes per glyph
+    for row in 0..16 {
+      let byte = font[base + row];
+      for col in 0..8 {
+        if byte / SHIFT[col] % 2 == 1 {
+          rect(x + col * sc, y + row * sc, sc, sc, color)
+        }
+      }
+    }
+  }
+}
+
+@cart
+fn main() -> <frame, Graphics, IO, nondet> Unit {
+  screen(800, 800);
+  let font = load_font();
+
+  let mut curl = cn_new();
+  let mut cube = cb_new();
+  cn_init(&mut curl);
+  cb_init(&mut cube);
+
+  let mut ay = 0.0;
+  loop {
+    cn_step(&mut curl);
+    cb_step(&mut cube);
+    cb_grow(&mut cube);
+    cb_map(&mut cube);
+
+    cls(0x0000);
+    ay = ay + 0.02;
+
+    // cube lattice, centred large.
+    let mut sl = 0;
+    while sl < 9 {
+      draw_poly(cube.cb3x.clone(), cube.cb3y.clone(), cube.cb3z.clone(), sl * 48, cube.cbn[sl], 400, 350, 5.5, ay, 0.42, 1, 0xffff);
+      sl = sl + 1
+    };
+    // curl-noise field around it.
+    let mut s = 0;
+    while s < 10 {
+      draw_poly(curl.csx.clone(), curl.csy.clone(), curl.csz.clone(), s * 48, curl.clen[s], 400, 350, 6.0, ay, 0.42, 0, 0xffff);
+      s = s + 1
+    };
+
+    // vermilion band + POSARA wordmark.
+    rect(0, 672, 800, 128, 59789);   // banner pink #e8336d
+    let codes = [80, 79, 83, 65, 82, 65];   // POSARA, scale 6 → 48px tall
+    for i in 0..6 {
+      glyph_big(&font, codes[i], 196 + i * 72, 700, 6, 0x0000)
+    };
+
+    device_in(0x2001, 1);
+    frame.present()
+  }
+}

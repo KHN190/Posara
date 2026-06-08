@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use posara::{Host, runner};
-use posara::sfx::Recorder;
-use std::sync::Arc;
 
 fn usage() -> ExitCode {
     eprintln!("usage:");
@@ -206,7 +204,8 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     }
     let (Some(out), Some(duration_ms)) = (out, duration_ms) else { return usage(); };
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
+    // Offline render: silent (no audio device), deterministic, faster than real.
+    let host = match Host::new_cart(root.clone(), common.headless, true, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -215,33 +214,14 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
     };
     let (module, static_names, fn_names) = (r.module, r.static_names, r.fn_names);
-    let rec = match Recorder::start(
-        &out,
-        host.sfx.audio.sample_rate,
-        host.sfx.audio.channels,
-        Arc::clone(&host.sfx.audio.rec_ring),
-        Arc::clone(&host.sfx.audio.rec_on),
-    ) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("record start: {e}"); return ExitCode::from(1); }
-    };
-    *host.sfx.recorder.borrow_mut() = Some(rec);
-    let run_result = match frames {
-        Some(dir) => runner::run_capture(module, static_names, fn_names, &host, duration_ms,
-            runner::CaptureCfg { dir: dir.clone(), fps, from_ms })
-            .map(|n| eprintln!("• wrote {n} frames to {}", dir.display())),
-        None => runner::run_until_ms(module, static_names, fn_names, &host, duration_ms),
-    };
-    if let Err(e) = run_result {
-        eprintln!("{e}");
-        return ExitCode::from(1);
+    match runner::run_render(module, static_names, fn_names, &host, duration_ms, &out, frames.clone(), fps, from_ms) {
+        Ok(()) => {
+            if let Some(dir) = &frames { eprintln!("• wrote frames to {}", dir.display()); }
+            eprintln!("• wrote {}", out.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
     }
-    if let Some(r) = host.sfx.recorder.borrow_mut().as_mut() {
-        if let Err(e) = r.stop() { eprintln!("record stop: {e}"); return ExitCode::from(1); }
-    }
-    *host.sfx.recorder.borrow_mut() = None;
-    eprintln!("• wrote {}", out.display());
-    ExitCode::SUCCESS
 }
 
 fn cmd_disasm(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
