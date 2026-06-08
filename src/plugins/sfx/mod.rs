@@ -14,7 +14,7 @@ mod voice;
 
 pub use mixer::Mixer;
 pub use output::{Audio, AudioMeter, AudioSnapshot, CmdProd, Meter, SampleRing};
-pub use record::Recorder;
+pub use record::{Recorder, write_wav_f32};
 
 use std::cell::RefCell;
 use std::path::PathBuf;

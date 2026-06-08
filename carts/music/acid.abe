@@ -1,0 +1,104 @@
+// Acid techno, audio only. A full 64-bar piece built by automation — one 303
+// line evolves: a two-scale filter sweep (fast 16-bar + slow 64-bar) under a
+// resonance that climbs toward the peak, with a delay/reverb breakdown.
+// Visual version: carts/vis/acid.abe.
+
+static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static CLAP: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+static HAT:  Array<Int> = [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0];
+static BASS: Array<Int> = [33,0,33,45, 0,48,0,33, 33,0,52,0, 45,0,48,33];
+static ACC:  Array<Int> = [1,0,0,0, 0,0,1,0, 0,1,0,0, 0,0,1,0];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn setup_synth() -> <IO> Unit {
+  synth_voices(16);
+  synth_osc(0, 0, 1, 0, 0, 100);
+  synth_filter(0, 0, 1400, 8);
+  synth_env(0, 0, 0, 100, 0, 110, 0, 25);
+  synth_env(0, 1, 2, 30, 0, 55, 0, 0);
+
+  // 1 = the 303: saw through a resonant low-pass with a cutoff envelope.
+  synth_osc(1, 0, 3, 0, 0, 100);
+  synth_filter(1, 0, 520, 88);
+  synth_env(1, 0, 0, 100, 2, 260, 35, 80);
+  synth_env(1, 1, 1, 65, 2, 150, 0, 70);
+
+  synth_osc(2, 0, 4, 0, 0, 100);
+  synth_filter(2, 2, 1600, 40);
+  synth_env(2, 0, 0, 100, 0, 120, 0, 60);
+
+  synth_osc(3, 0, 4, 0, 0, 90);
+  synth_filter(3, 1, 7000, 10);
+  synth_env(3, 0, 0, 100, 0, 38, 0, 18)
+}
+
+// triangle 0..peak from a phase 0..period.
+fn tri_wave(ph: Int, period: Int, peak: Int) -> Int {
+  let half = period / 2;
+  let p = if ph < half { ph } else { period - ph };
+  p * peak / half
+}
+
+// resonance climbs toward the peak section, eases in the breakdown.
+fn reso(b: Int) -> Int {
+  if b < 16 { 72 }
+  else if b < 32 { 72 + (b - 16) }          // 72..87
+  else if b < 48 { 88 + (b - 32) / 2 }      // 88..95 peak
+  else if b < 56 { 80 }                      // breakdown
+  else { 74 }
+}
+
+fn play_step(pos: Int, bar: Int, tpose: Int) -> <IO, nondet> Unit {
+  let b = bar % 64;
+  let kick_on = b < 48 || b >= 56;          // breakdown drops the kick
+  let drums = b >= 8 && kick_on;
+
+  if kick_on && KICK[pos] == 1 { synth_on(0, 36, 90, 140) };
+  if drums && CLAP[pos] == 1 { synth_on(2, 60, 70, 120) };
+  if drums && HAT[pos] == 1 { synth_on(3, 72, 40 + ri(15), 40) };
+
+  if b >= 4 {
+    let bn = BASS[pos];
+    if bn != 0 {
+      let acc = ACC[pos];
+      // two-scale sweep: fast 16-bar triangle + slow 64-bar swell.
+      let fast = tri_wave((bar % 16) * 16 + pos, 256, 128);
+      let slow = tri_wave(b, 64, 32);
+      let co = 300 + fast * 13 + slow * 22;
+      synth_filter(1, 0, co, reso(b) + acc * 4);
+      synth_on(1, bn + tpose, 58 + acc * 24 + ri(8), 130)
+    }
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup_synth();
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  let mut tpose = 0;
+  let mut rvb = 0;
+  loop {
+    let t = now();
+    if t >= grid_t {
+      play_step(pos, bar, tpose);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 {
+        bar = bar + 1;
+        let b = bar % 64;
+        tpose = if (b / 8) % 2 == 1 { 5 } else { 0 };
+        // delay through the whole piece, reverb wash only in the breakdown.
+        let fb = if b >= 48 && b < 56 { 66 } else { 45 };
+        bus_delay(345, fb, 44);
+        let wr = if b >= 48 && b < 56 { 1 } else { 0 };
+        if wr != rvb { rvb = wr; if wr == 1 { bus_reverb(60, 45, 30) } else { bus_reverb(0, 0, 0) } }
+      };
+      pos = np;
+      grid_t = grid_t + 115
+    };
+    frame.present()
+  }
+}

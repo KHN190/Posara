@@ -189,24 +189,23 @@ pub fn run_until_frame(module: Module, static_names: Vec<String>, fn_names: Vec<
     Ok(())
 }
 
+// Offline: virtual clock, no sleep — runs to the deadline as fast as possible.
+// Used by `dump --at-ms` so a time-point grab lands instantly, not after T ms.
 pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, deadline_ms: u64) -> Result<(), String> {
+    host.clock.set(Some(0));
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
     if step.is_frame_loop() {
-        let mut overbudget = OverBudgetWarn::new();
-        loop {
+        let mut vms = 0.0f64;
+        while (vms as u64) < deadline_ms {
             if !alive(host) { break; }
-            if host.start.elapsed().as_millis() >= deadline_ms as u128 { break; }
-            let t0 = Instant::now();
-            let s0 = step.steps();
-            let cont = step.frame()?;
-            overbudget.check(step.steps() - s0);
-            if !cont { break; }
-            let elapsed = t0.elapsed();
-            if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+            host.clock.set(Some(vms as u64));
+            if !step.frame()? { break; }
+            vms += 1000.0 / 60.0;
         }
     } else {
         step.frame()?;
     }
+    host.clock.set(None);
     #[cfg(feature = "gfx")]
     {
         let fb = host.gfx.fb.borrow();
@@ -215,6 +214,54 @@ pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<Str
         }
     }
     Ok(())
+}
+
+// Offline render: drive a virtual clock, mix the synth/sfx commands the cart
+// emits straight to a WAV — silent, deterministic, faster than real time. With
+// a frames dir it also saves PNGs on the fps grid (gfx only). No audio device.
+#[cfg(feature = "sfx")]
+pub fn run_render(
+    module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host,
+    dur_ms: u64, out: &Path, frames: Option<PathBuf>, fps: u32, from_ms: u64,
+) -> Result<(), String> {
+    let sr = host.sfx.audio.sample_rate;
+    let ch = host.sfx.audio.channels.max(1) as usize;
+    let mut mixer = crate::sfx::Mixer::new(sr, ch, host.sfx.audio.meter.clone());
+    let spf = (sr / 60).max(1) as usize;       // samples per video frame, per channel
+    let mut frame_buf = vec![0.0f32; spf * ch];
+    let mut samples: Vec<f32> = Vec::with_capacity((dur_ms as usize) * sr as usize / 1000 * ch);
+
+    host.clock.set(Some(0));
+    let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
+    if !step.is_frame_loop() {
+        host.clock.set(None);
+        return Err("render needs a frame-loop cart (update() or @cart)".into());
+    }
+    if let Some(dir) = &frames {
+        std::fs::create_dir_all(dir).map_err(|e| format!("frames dir: {e}"))?;
+    }
+    let interval = 1000.0 / fps as f64;
+    let mut vms = 0.0f64;
+    let mut shot: u64 = 0;
+    while (vms as u64) < dur_ms {
+        host.clock.set(Some(vms as u64));
+        if !step.frame()? { break; }
+        while let Some(cmd) = host.sfx.audio.cmds.try_pop() { mixer.apply(cmd); }
+        mixer.mix(&mut frame_buf);
+        samples.extend_from_slice(&frame_buf);
+        #[cfg(feature = "gfx")]
+        if let Some(dir) = &frames {
+            if vms >= from_ms as f64 + shot as f64 * interval {
+                let fb = host.gfx.fb.borrow();
+                fb.save_region_png(0, 0, fb.w as i64, fb.h as i64, &dir.join(format!("{shot:04}.png")))?;
+                shot += 1;
+            }
+        }
+        vms += 1000.0 / 60.0;
+    }
+    host.clock.set(None);
+    let _ = (from_ms, interval, &mut shot, fps);
+    crate::sfx::write_wav_f32(out, sr, ch as u16, &samples)
 }
 
 // Real-time run that saves a PNG every 1000/fps ms (starting at from_ms) while
