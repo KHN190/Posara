@@ -1,4 +1,4 @@
-<p align="center"><img src="./assets/banner.svg" width="720"></p>
+<p align="center"><img src="./assets/banner.gif" width="720"></p>
 
 Your creative visualaudio toolkit for early MacOS aesthetics but modernized.
 
@@ -7,7 +7,7 @@ Your creative visualaudio toolkit for early MacOS aesthetics but modernized.
 - **Audio** — 4 channels (sample + synth + stereo volume)
 - **MIDI** — note in / out / wires!
 
-Run on MacOS / Linux / Windows. Bare metals TBA.
+Run on MacOS / Linux / Windows. Bare metals TBA. Watch the [trailor](https://www.youtube.com/watch?v=2oGNLFX3syo).
 
 <p align="center"><img src="./assets/showcase.png" width="720"></p>
 
@@ -22,14 +22,14 @@ The interpreter is watched and hot-reloaded.
 
 ```sh
 # try live coding, start with
-posara run carts/music/acid.abe
+posara run carts/vis/acid.abe
 ```
 
 ## Why not P5js / L5
 
 Make your own game console and synthesizers (with visuals)!
 
-> Same capability. Better language. Hardware control. Different taste.
+> Same capability, better language. Hardware control, different taste.
 
 ## License
 
