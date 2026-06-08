@@ -212,8 +212,9 @@ impl Mixer {
                 l += sy; r += sy;
             }
             let s = self.sample.tick(sr) * 0.8;
-            l = (l * 0.25 + s).clamp(-1.0, 1.0);
-            r = (r * 0.25 + s).clamp(-1.0, 1.0);
+            // default amp without hard-clipping dense chords.
+            l = (l * 0.6 + s).tanh();
+            r = (r * 0.6 + s).tanh();
             if l.abs() > out_peak { out_peak = l.abs(); }
             match nc {
                 1 => frame[0] = (l + r) * 0.5,
@@ -229,14 +230,14 @@ impl Mixer {
         // (glider) and synth_* carts both light up the channel meters.
         let mut chv = [0u32; 4];
         for i in 0..4 {
-            ch_peak[i] *= 0.25;
+            ch_peak[i] *= 0.4;
             if self.voices[i].active() { chv[i] = 1; }
         }
         #[cfg(feature = "synth")]
         {
             let sp = self.synth.take_pid_peaks();
             let sv = self.synth.pid_voices();
-            for i in 0..4 { ch_peak[i] += sp[i] * 0.25; chv[i] += sv[i]; }
+            for i in 0..4 { ch_peak[i] += sp[i] * 0.4; chv[i] += sv[i]; }
         }
         self.meter.set_out(out_peak);
         self.meter.set_channels(ch_peak, chv);

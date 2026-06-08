@@ -1,0 +1,74 @@
+// Detroit techno (Jeff Mills / UR lineage): cold 7th-chord stabs over a plain
+// short bass, no acid slide — harmony is the hook. Audio only.
+
+static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static CLAP: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+static HAT:  Array<Int> = [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0];
+static BASS: Array<Int> = [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,0,1,0];
+static STAB: Array<Int> = [0,0,1,0, 0,1,0,0, 0,0,1,0, 0,1,0,1];
+
+// four-bar progression Am7 - Fmaj7 - Cmaj7 - G7, root per bar%4.
+static ROOT: Array<Int> = [45, 41, 48, 43];
+static T3:   Array<Int> = [3, 4, 4, 4];
+static T7:   Array<Int> = [10, 11, 11, 10];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn setup_synth() -> <IO> Unit {
+  synth_voices(16);
+  synth_osc(0, 0, 1, 0, 0, 100);
+  synth_filter(0, 0, 1400, 8);
+  synth_env(0, 0, 0, 100, 0, 110, 0, 25);
+  synth_env(0, 1, 2, 30, 0, 55, 0, 0);
+
+  // 1 = plain short saw bass, low resonance — a stab, no sweep.
+  synth_osc(1, 0, 3, 0, 0, 100);
+  synth_filter(1, 0, 900, 30);
+  synth_env(1, 0, 0, 100, 1, 90, 20, 60);
+
+  // 2 = chord stab: bright saw, medium decay, the Detroit string.
+  synth_osc(2, 0, 3, 0, 0, 80);
+  synth_filter(2, 0, 2200, 45);
+  synth_env(2, 0, 0, 100, 3, 220, 25, 260);
+
+  synth_osc(3, 0, 4, 0, 0, 90);
+  synth_filter(3, 1, 7000, 10);
+  synth_env(3, 0, 0, 100, 0, 38, 0, 18)
+}
+
+fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
+  if KICK[pos] == 1 { synth_on(0, 36, 90, 140) };
+  if CLAP[pos] == 1 { synth_on(2, 60, 55, 120) };
+  if HAT[pos] == 1 { synth_on(3, 72, 36 + ri(14), 40) };
+
+  let ch = bar % 4;
+  let root = ROOT[ch];
+  if BASS[pos] == 1 { synth_on(1, root - 12, 78, 150) };
+  if STAB[pos] == 1 {
+    let v = 46 + ri(10);
+    synth_on(2, root, v, 240);
+    synth_on(2, root + T3[ch], v, 240);
+    synth_on(2, root + 7, v, 240);
+    synth_on(2, root + T7[ch], v - 8, 240)
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup_synth();
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  loop {
+    let t = now();
+    if t >= grid_t {
+      play_step(pos, bar);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 { bar = bar + 1 };
+      pos = np;
+      grid_t = grid_t + 107
+    };
+    frame.present()
+  }
+}

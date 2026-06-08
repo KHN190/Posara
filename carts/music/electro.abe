@@ -1,0 +1,71 @@
+// Electro (Drexciya / 808 lineage): syncopated kick, snare backbeat on 2 & 4,
+// machine hats, a restless detuned bassline — not four-on-the-floor. Audio only.
+
+// kick off the grid: downbeat + pushed/syncopated hits, no straight 4-floor.
+static KICK:  Array<Int> = [1,0,0,1, 0,0,1,0, 0,1,0,0, 1,0,0,0];
+static SNARE: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1];
+static HAT:   Array<Int> = [1,0,1,1, 1,0,1,0, 1,1,1,0, 1,0,1,1];
+// 16th bassline, 0 = rest; semitone offsets from the root.
+static BASS:  Array<Int> = [0,99,0,12, 0,0,3,0, 0,7,0,99, 10,0,3,0];
+
+static ROOT: Array<Int> = [33, 33, 40, 36];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn setup_synth() -> <IO> Unit {
+  synth_voices(16);
+  // 0 = punchy 808 kick with pitch drop.
+  synth_osc(0, 0, 1, 0, 0, 100);
+  synth_filter(0, 0, 1300, 7);
+  synth_env(0, 0, 0, 100, 0, 150, 0, 60);
+  synth_env(0, 1, 2, 34, 0, 70, 0, 0);
+
+  // 1 = detuned square bass, snappy.
+  synth_osc(1, 0, 0, 0, 0, 100);
+  synth_unison(1, 2, 8);
+  synth_filter(1, 0, 1200, 40);
+  synth_env(1, 0, 0, 100, 1, 70, 15, 50);
+
+  // 2 = snare: noise burst, mid band.
+  synth_osc(2, 0, 4, 0, 0, 100);
+  synth_filter(2, 2, 1900, 36);
+  synth_env(2, 0, 0, 100, 0, 95, 0, 40);
+
+  // 3 = tight metallic hat.
+  synth_osc(3, 0, 4, 0, 0, 85);
+  synth_filter(3, 1, 8200, 12);
+  synth_env(3, 0, 0, 100, 0, 28, 0, 14)
+}
+
+fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
+  if KICK[pos] == 1  { synth_on(0, 34, 92, 150) };
+  if SNARE[pos] == 1 { synth_on(2, 62, 70, 95) };
+  if HAT[pos] == 1   { synth_on(3, 74, 30 + ri(16), 28) };
+
+  let root = ROOT[bar % 4];
+  let b = BASS[pos];
+  if b != 0 {
+    let semi = if b == 99 { 0 } else { b };
+    synth_on(1, root + semi, 70 + ri(14), 110)
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup_synth();
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  loop {
+    let t = now();
+    if t >= grid_t {
+      play_step(pos, bar);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 { bar = bar + 1 };
+      pos = np;
+      grid_t = grid_t + 116
+    };
+    frame.present()
+  }
+}

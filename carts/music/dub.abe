@@ -1,0 +1,72 @@
+// Dub techno (Basic Channel / Maurizio): one breathing chord stab, faked tape
+// echo (decaying re-hits baked into STABV), soft 4-floor, lots of space. No
+// delay native yet. Audio only.
+
+static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static HAT:  Array<Int> = [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0];
+// stab on the offbeat, then echo taps trailing off (volume per step).
+static STABV: Array<Int> = [0,0,72,0, 0,43,0,26, 0,15,0,0, 0,0,0,0];
+
+// slow two-chord drift, root per 2-bar block.
+static ROOT: Array<Int> = [38, 43];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn setup_synth() -> <IO> Unit {
+  synth_voices(16);
+  // 0 = soft kick.
+  synth_osc(0, 0, 1, 0, 0, 90);
+  synth_filter(0, 0, 1100, 6);
+  synth_env(0, 0, 0, 100, 0, 130, 0, 40);
+  synth_env(0, 1, 2, 28, 0, 60, 0, 0);
+
+  // 2 = the chord: mellow saw, long release, soft attack — a pad-stab.
+  synth_osc(2, 0, 3, 0, 0, 70);
+  synth_filter(2, 0, 700, 70);
+  synth_env(2, 0, 0, 100, 18, 320, 30, 700);
+
+  // 3 = brushed hat.
+  synth_osc(3, 0, 4, 0, 0, 70);
+  synth_filter(3, 1, 6000, 8);
+  synth_env(3, 0, 0, 100, 0, 30, 0, 20)
+}
+
+fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
+  if KICK[pos] == 1 { synth_on(0, 36, 80, 150) };
+  if HAT[pos] == 1 { synth_on(3, 74, 22 + ri(10), 30) };
+
+  let root = ROOT[(bar / 2) % 2];
+  let v = STABV[pos];
+  if v > 0 {
+    synth_on(2, root, v, 360);
+    synth_on(2, root + 3, v, 360);
+    synth_on(2, root + 7, v, 360);
+    synth_on(2, root + 14, v * 7 / 10, 360)
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup_synth();
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  loop {
+    let t = now();
+    if t >= grid_t {
+      play_step(pos, bar);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 {
+        bar = bar + 1;
+        // slow filter breathing, 8-bar triangle 600..1900 Hz.
+        let p8 = bar % 8;
+        let q = if p8 < 4 { p8 } else { 8 - p8 };
+        synth_filter(2, 0, 600 + q * 320, 74)
+      };
+      pos = np;
+      grid_t = grid_t + 130
+    };
+    frame.present()
+  }
+}
