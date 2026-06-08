@@ -44,10 +44,3 @@ midly = "0.5"
 myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
-
-# Local sibling checkout (CLAUDE.md: ~/Desktop/code/abrase). Lets posara build
-# against unpushed abrase changes. Drop once those land on the dev branch.
-[patch."https://github.com/KHN190/Abrase"]
-myriad-rs = { path = "../abrase/crates/myriad" }
-polka-rs  = { path = "../abrase/crates/polka" }
-abrase    = { path = "../abrase/crates/abrase" }

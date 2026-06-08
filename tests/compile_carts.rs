@@ -4,7 +4,7 @@ use posara::Host;
 use std::path::PathBuf;
 
 fn check(path: &str) {
-    let host = Host::new_with(PathBuf::from("."), true).expect("host init");
+    let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
     let r = posara::runner::compile_abe(&PathBuf::from(path), &host);
     assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
 }

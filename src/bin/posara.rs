@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 fn usage() -> ExitCode {
     eprintln!("usage:");
-    eprintln!("  posara run    [--root <dir>] [--profile] [--headless] [--trace] [--handlers] [--leak] [--debug] <cart.abe | cart.pk>");
+    eprintln!("  posara run    [--root <dir>] [--profile] [--headless] [--trace] [--handlers] [--leak] [--debug] [--mute] <cart.abe | cart.pk>");
     eprintln!("  posara check  [--root <dir>] <cart.abe | cart.pk>");
     eprintln!("  posara test   [--root <dir>] <cart.abe>   (runs pub fn test_*())");
     eprintln!("  posara bench  [--root <dir>] [--frames N] <cart>   (headless, no sleep/vsync — for profilers)");
@@ -28,6 +28,7 @@ struct Common {
     root: Option<PathBuf>,
     path: Option<String>,
     headless: bool,
+    muted: bool,
 }
 
 fn parse_root(common: &mut Common, args: &mut std::iter::Skip<std::env::Args>, key: &str) -> Result<bool, ()> {
@@ -48,13 +49,14 @@ fn resolve_root(common: &Common) -> Option<(PathBuf, PathBuf)> {
 }
 
 fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: false };
+    let mut common = Common { root: None, path: None, headless: false, muted: false };
     let mut profile = false;
     let mut dbg = runner::DebugCfg::default();
     while let Some(a) = args.next() {
         match a.as_str() {
             "--profile" => profile = true,
             "--headless" => common.headless = true,
+            "--mute" => common.muted = true,
             "--trace" => dbg.trace = true,
             "--handlers" => dbg.handlers = true,
             "--leak" => dbg.leak = true,
@@ -64,7 +66,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, &path) {
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -87,7 +89,7 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 }
 
 fn cmd_check(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: true };
+    let mut common = Common { root: None, path: None, headless: true, muted: false };
     while let Some(a) = args.next() {
         match a.as_str() {
             _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
@@ -95,7 +97,7 @@ fn cmd_check(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, &path) {
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -113,7 +115,7 @@ fn cmd_check(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 
 #[cfg(feature = "test")]
 fn cmd_test(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: true };
+    let mut common = Common { root: None, path: None, headless: true, muted: false };
     while let Some(a) = args.next() {
         match a.as_str() {
             _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
@@ -121,7 +123,7 @@ fn cmd_test(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), true, &path) {
+    let host = match Host::new_cart(root.clone(), true, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -138,7 +140,7 @@ fn cmd_test(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 }
 
 fn cmd_dump(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: false };
+    let mut common = Common { root: None, path: None, headless: false, muted: false };
     let mut out: Option<PathBuf> = None;
     let mut at_ms: Option<u64> = None;
     let mut at_frame: Option<u64> = None;
@@ -156,7 +158,7 @@ fn cmd_dump(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     }
     let Some(out) = out else { return usage(); };
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, &path) {
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -184,7 +186,7 @@ fn cmd_dump(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 }
 
 fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: false };
+    let mut common = Common { root: None, path: None, headless: false, muted: false };
     let mut out: Option<PathBuf> = None;
     let mut duration_ms: Option<u64> = None;
     let mut frames: Option<PathBuf> = None;
@@ -204,7 +206,7 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     }
     let (Some(out), Some(duration_ms)) = (out, duration_ms) else { return usage(); };
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, &path) {
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -243,7 +245,7 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 }
 
 fn cmd_disasm(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: true };
+    let mut common = Common { root: None, path: None, headless: true, muted: false };
     while let Some(a) = args.next() {
         match a.as_str() {
             _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
@@ -251,7 +253,7 @@ fn cmd_disasm(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, &path) {
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
@@ -262,7 +264,7 @@ fn cmd_disasm(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 }
 
 fn cmd_bench(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
-    let mut common = Common { root: None, path: None, headless: true };
+    let mut common = Common { root: None, path: None, headless: true, muted: false };
     let mut frames: u64 = 10000;
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -272,7 +274,7 @@ fn cmd_bench(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), true, &path) {
+    let host = match Host::new_cart(root.clone(), true, common.muted, &path) {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
