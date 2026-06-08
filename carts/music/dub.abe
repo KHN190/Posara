@@ -1,13 +1,14 @@
-// Dub techno (Basic Channel / Maurizio): one breathing chord stab, faked tape
-// echo (decaying re-hits baked into STABV), soft 4-floor, lots of space. No
-// delay native yet. Audio only.
+// Dub techno (Basic Channel / Maurizio): one chord stab into real tape delay +
+// reverb wash. A full 64-bar piece built by subtraction — the arrangement moves
+// the delay/reverb/filter knobs and drops the kick out, not by adding tracks.
+// Audio only.
 
 static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
 static HAT:  Array<Int> = [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0];
-// stab on the offbeat, then echo taps trailing off (volume per step).
-static STABV: Array<Int> = [0,0,72,0, 0,43,0,26, 0,15,0,0, 0,0,0,0];
+// a single stab per bar on the offbeat — the delay does the rest.
+static STAB: Array<Int> = [0,0,1,0, 0,0,0,0, 0,0,0,0, 0,0,0,0];
 
-// slow two-chord drift, root per 2-bar block.
+// chord colour drifts every 16 bars (Maurizio-slow).
 static ROOT: Array<Int> = [38, 43];
 
 fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
@@ -31,13 +32,43 @@ fn setup_synth() -> <IO> Unit {
   synth_env(3, 0, 0, 100, 0, 30, 0, 20)
 }
 
-fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
-  if KICK[pos] == 1 { synth_on(0, 36, 80, 150) };
-  if HAT[pos] == 1 { synth_on(3, 74, 22 + ri(10), 30) };
+// --- arrangement curves over the 64-bar cycle (b = bar % 64) ---
 
-  let root = ROOT[(bar / 2) % 2];
-  let v = STABV[pos];
-  if v > 0 {
+// chord low-pass cutoff: dark intro → open → mid-dark dropout → full → back.
+fn cutoff(b: Int) -> Int {
+  if b < 8 { 600 }
+  else if b < 16 { 600 + (b - 8) * 100 }
+  else if b < 32 { 1500 }
+  else if b < 48 { 1100 }
+  else if b < 56 { 1800 + (b - 48) * 90 }
+  else { 2500 - (b - 56) * 230 }
+}
+
+// delay feedback: settled → rising → max in the dropout → pulled back.
+fn feedback(b: Int) -> Int {
+  if b < 16 { 55 }
+  else if b < 32 { 55 + (b - 16) }
+  else if b < 48 { 85 }
+  else if b < 56 { 60 }
+  else { 50 }
+}
+
+// reverb mix: dry-ish groove, wash open in the dropout.
+fn rev_mix(b: Int) -> Int {
+  if b >= 32 && b < 48 { 66 } else { 40 }
+}
+
+fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
+  let b = bar % 64;
+  let kick_on = b < 32 || b >= 48;     // dropout removes the kick 32..47
+  let hat_on = b >= 8 && b < 56;
+
+  if kick_on && KICK[pos] == 1 { synth_on(0, 36, 80, 150) };
+  if hat_on && HAT[pos] == 1 { synth_on(3, 74, 22 + ri(10), 30) };
+
+  let root = ROOT[(b / 16) % 2];
+  if STAB[pos] == 1 {
+    let v = 70;
     synth_on(2, root, v, 360);
     synth_on(2, root + 3, v, 360);
     synth_on(2, root + 7, v, 360);
@@ -49,6 +80,8 @@ fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
 fn main() -> <frame, IO, nondet> Unit {
   srand(now());
   setup_synth();
+  bus_delay(390, 55, 55);
+  bus_reverb(72, 40, 40);
   let mut grid_t = now() + 200;
   let mut pos = 0;
   let mut bar = 0;
@@ -59,10 +92,10 @@ fn main() -> <frame, IO, nondet> Unit {
       let np = if pos >= 15 { 0 } else { pos + 1 };
       if np == 0 {
         bar = bar + 1;
-        // slow filter breathing, 8-bar triangle 600..1900 Hz.
-        let p8 = bar % 8;
-        let q = if p8 < 4 { p8 } else { 8 - p8 };
-        synth_filter(2, 0, 600 + q * 320, 74)
+        let b = bar % 64;
+        synth_filter(2, 0, cutoff(b), 74);
+        bus_delay(390, feedback(b), 55);
+        bus_reverb(72, 40, rev_mix(b))
       };
       pos = np;
       grid_t = grid_t + 130
