@@ -231,8 +231,8 @@ impl Mixer {
             let rv = self.reverb.process((l + r) * 0.5);
             l += rv; r += rv;
             // default amp without hard-clipping dense chords.
-            l = (l * 0.6).tanh();
-            r = (r * 0.6).tanh();
+            l = (l * 0.8).tanh();
+            r = (r * 0.8).tanh();
             if l.abs() > out_peak { out_peak = l.abs(); }
             match nc {
                 1 => frame[0] = (l + r) * 0.5,
