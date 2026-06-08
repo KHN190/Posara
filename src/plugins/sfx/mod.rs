@@ -42,8 +42,13 @@ pub struct SfxPlugin {
 
 impl SfxPlugin {
     pub fn new(root: PathBuf) -> Result<Self, String> {
+        Self::with_audio(root, false)
+    }
+
+    // muted = no audio device (silent run, like --headless for sound).
+    pub fn with_audio(root: PathBuf, muted: bool) -> Result<Self, String> {
         Ok(Self {
-            audio: Audio::new()?,
+            audio: if muted { Audio::silent()? } else { Audio::new()? },
             recorder: Rc::new(RefCell::new(None)),
             root,
         })

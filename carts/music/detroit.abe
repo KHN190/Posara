@@ -27,9 +27,12 @@ fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
 // through), 1 = glassy triangle+square bell (mellower, rings).
 fn stab_timbre(mode: Int) -> <IO> Unit {
   if mode == 0 {
-    synth_osc(2, 0, 3, 0, 0, 95);
-    synth_osc(2, 1, 3, 12, 0, 50);
-    synth_filter(2, 0, 4200, 40)
+    // bright + light: thinner saw body, a clean sine octave for sparkle, and a
+    // high open cutoff with low resonance — brightness from air, not honk.
+    // Attack stays short (env in setup) so the stab keeps its edge.
+    synth_osc(2, 0, 3, 0, 0, 74);
+    synth_osc(2, 1, 1, 12, 0, 44);
+    synth_filter(2, 0, 6500, 14)
   } else {
     synth_osc(2, 0, 2, 0, 0, 95);
     synth_osc(2, 1, 0, 12, 0, 45);
