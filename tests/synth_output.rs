@@ -24,7 +24,8 @@ fn patches_stay_finite_and_bounded() {
 
             let mut peak = 0.0f32;
             for _ in 0..(sr as usize / 2) {
-                let v = s.tick(sr);
+                let (vl, vr) = s.tick(sr);
+                let v = vl + vr;
                 assert!(v.is_finite(), "pid {pid} @ {sr}Hz produced non-finite sample");
                 assert!(v.abs() < 8.0, "pid {pid} @ {sr}Hz blew up: {v}");
                 peak = peak.max(v.abs());

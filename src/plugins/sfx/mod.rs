@@ -1,4 +1,5 @@
 pub mod env;
+mod bus;
 mod fx;
 mod lfo;
 pub mod mixer;
@@ -138,6 +139,12 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
         (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as u32));
     native!("sfx_off", |a| Cmd::Off(arg(a, 0).max(0) as usize));
 
+    // master-bus time effects (affect synth + sfx)
+    native!("bus_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
+        (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
+    native!("bus_reverb", |a| Cmd::BusReverb((arg(a, 0).clamp(0, 100) as f32) / 100.0,
+        (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
+
     // sequencer
     let p = Arc::clone(&cmds);
     vm.register_native("sfx_seq", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
@@ -247,6 +254,8 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("sfx_pan",     vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_fx",      vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_lfo",     vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
+        ("bus_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("bus_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_play",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_playm",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_off",     vec![T::Int],                                          T::Unit),

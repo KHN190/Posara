@@ -19,6 +19,8 @@ pub enum Cmd {
     SeqStop,
     Sample(Vec<u8>, f32, f32),
     SampleStop,
+    BusDelay(u32, f32, f32),
+    BusReverb(f32, f32, f32),
     #[cfg(feature = "synth")]
     SynOsc(usize, usize, u8, i64, f32, f32),
     #[cfg(feature = "synth")]
@@ -26,7 +28,9 @@ pub enum Cmd {
     #[cfg(feature = "synth")]
     SynEnv(usize, usize, u8, f32, f32, f32, f32, f32),
     #[cfg(feature = "synth")]
-    SynLfo(usize, u8, f32, f32),
+    SynLfo(usize, u8, u8, f32, f32),
+    #[cfg(feature = "synth")]
+    SynPan(usize, f32),
     #[cfg(feature = "synth")]
     SynUnison(usize, u8, f32),
     #[cfg(feature = "synth")]
@@ -51,6 +55,8 @@ pub struct Mixer {
     pub out_channels: usize,
     due: Vec<Event>,
     meter: Meter,
+    delay: super::bus::Delay,
+    reverb: super::bus::Reverb,
     #[cfg(feature = "synth")]
     synth: super::synth::Synth,
 }
@@ -65,6 +71,8 @@ impl Mixer {
             out_channels,
             due: Vec::with_capacity(4),
             meter,
+            delay: super::bus::Delay::default(),
+            reverb: super::bus::Reverb::new(sample_rate as f32),
             #[cfg(feature = "synth")]
             synth: super::synth::Synth::new(),
         }
@@ -90,6 +98,8 @@ impl Mixer {
             Cmd::SeqStop => self.seq.stop(),
             Cmd::Sample(b, rate, v) => self.play_sample(b, rate, v),
             Cmd::SampleStop => self.sample.stop(),
+            Cmd::BusDelay(ms, fb, mix) => self.delay.set(ms, fb, mix, self.sample_rate as f32),
+            Cmd::BusReverb(room, damp, mix) => self.reverb.set(room, damp, mix),
             #[cfg(feature = "synth")]
             Cmd::SynOsc(pid, idx, w, semi, fine, lvl) => self.synth.osc(pid, idx, w, semi, fine, lvl),
             #[cfg(feature = "synth")]
@@ -97,7 +107,9 @@ impl Mixer {
             #[cfg(feature = "synth")]
             Cmd::SynEnv(pid, slot, t, d, a, dec, s, r) => self.synth.env(pid, slot, t, d, a, dec, s, r),
             #[cfg(feature = "synth")]
-            Cmd::SynLfo(pid, t, rate, dep) => self.synth.lfo(pid, t, rate, dep),
+            Cmd::SynLfo(pid, t, w, rate, dep) => self.synth.lfo(pid, t, w, rate, dep),
+            #[cfg(feature = "synth")]
+            Cmd::SynPan(pid, pos) => self.synth.pan(pid, pos),
             #[cfg(feature = "synth")]
             Cmd::SynUnison(pid, c, det) => self.synth.unison(pid, c, det),
             #[cfg(feature = "synth")]
@@ -208,13 +220,19 @@ impl Mixer {
             }
             #[cfg(feature = "synth")]
             {
-                let sy = self.synth.tick(sr);
-                l += sy; r += sy;
+                let (sl, sr2) = self.synth.tick(sr);
+                l += sl; r += sr2;
             }
             let s = self.sample.tick(sr) * 0.8;
+            l += s; r += s;
+            // master bus: stereo delay, then mono-fed reverb summed to both.
+            let (dl, dr) = self.delay.process(l, r);
+            l = dl; r = dr;
+            let rv = self.reverb.process((l + r) * 0.5);
+            l += rv; r += rv;
             // default amp without hard-clipping dense chords.
-            l = (l * 0.6 + s).tanh();
-            r = (r * 0.6 + s).tanh();
+            l = (l * 0.6).tanh();
+            r = (r * 0.6).tanh();
             if l.abs() > out_peak { out_peak = l.abs(); }
             match nc {
                 1 => frame[0] = (l + r) * 0.5,
