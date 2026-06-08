@@ -189,24 +189,23 @@ pub fn run_until_frame(module: Module, static_names: Vec<String>, fn_names: Vec<
     Ok(())
 }
 
+// Offline: virtual clock, no sleep — runs to the deadline as fast as possible.
+// Used by `dump --at-ms` so a time-point grab lands instantly, not after T ms.
 pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, deadline_ms: u64) -> Result<(), String> {
+    host.clock.set(Some(0));
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
     if step.is_frame_loop() {
-        let mut overbudget = OverBudgetWarn::new();
-        loop {
+        let mut vms = 0.0f64;
+        while (vms as u64) < deadline_ms {
             if !alive(host) { break; }
-            if host.start.elapsed().as_millis() >= deadline_ms as u128 { break; }
-            let t0 = Instant::now();
-            let s0 = step.steps();
-            let cont = step.frame()?;
-            overbudget.check(step.steps() - s0);
-            if !cont { break; }
-            let elapsed = t0.elapsed();
-            if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+            host.clock.set(Some(vms as u64));
+            if !step.frame()? { break; }
+            vms += 1000.0 / 60.0;
         }
     } else {
         step.frame()?;
     }
+    host.clock.set(None);
     #[cfg(feature = "gfx")]
     {
         let fb = host.gfx.fb.borrow();
