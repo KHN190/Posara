@@ -7,7 +7,9 @@ Your creative visualaudio toolkit for early MacOS aesthetics but modernized.
 - **Audio** — 4 channels (sample + synth + stereo volume)
 - **MIDI** — note in / out / wires!
 
-Run on MacOS / Linux / Windows. Bare metals TBA. Watch the [trailor](https://www.youtube.com/watch?v=2oGNLFX3syo).
+Run on MacOS / Linux / Windows. Bare metals TBA. 
+
+> Listen to the [album](https://soundcloud.com/rusty-ocean-blue/sets/posara-vol-1) made by Posara.
 
 <p align="center"><img src="./assets/showcase.png" width="720"></p>
 
