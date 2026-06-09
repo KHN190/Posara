@@ -2,7 +2,7 @@
 
 use posara::{Button, Controller};
 
-// uxn-style controller bitmap contract (port 0x82): exact bit per button.
+// controller bitmap contract (port 0x82): exact bit per button.
 #[test]
 fn button_bitmap_values() {
     assert_eq!(Button::A as u8, 0x01);

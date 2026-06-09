@@ -1,13 +1,13 @@
 # Input
 
-uxn-style controller: an 8-button bitmap plus the last ASCII key.
+An 8-button bitmap plus the last ASCII key.
 
 ```rust
 let buttons = device_out(0x8002);   // 8-button bitmap
 let key     = device_out(0x8003);   // last ASCII key code
 ```
 
-(Corresponds to uxn controller ports 0x82 / 0x83.)
+(Corresponds to controller ports 0x82 / 0x83.)
 
 ## Button bits
 

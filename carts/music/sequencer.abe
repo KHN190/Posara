@@ -120,36 +120,45 @@ fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
       glyph(font, hexd(s), X0 + s * CW + CW / 2 - 4, Y0 - 26, c_gray())
     }
   };
-  // playhead marker: a solid pink tick above the active column (no overlay).
+  // playhead — a text-size pink block on the active
+  // step's number, digit reversed out. The column dots stay untouched.
   if w.playing == 1 {
-    rect(X0 + w.step * CW + CW / 2 - 4, Y0 - 8, 8, 4, c_pink())
+    let hx = X0 + w.step * CW + CW / 2 - 4;
+    rect(hx - 1, Y0 - 27, 10, 18, c_pink());
+    blitg(font.clone(), (hexd(w.step) - 32) * 128, hx, Y0 - 26, 8, 16, c_pink(), 1)
   };
   // dot matrix (Tenori-on): off = faint dot, on = white disc sized by pitch.
-  // cells in the playing column render solid pink — recolour, never blend.
   for s in 0..NSTEP {
     for t in 0..NTRK {
       let Cell { on, p } = w.grid[s * NTRK + t];
       let cx = X0 + s * CW + CW / 2;
       let cy = Y0 + t * CH + CH / 2;
-      let live = w.playing == 1 && s == w.step;
       if on == 1 {
-        let r = 4 + p;
-        circ(cx, cy, r, if live { c_pink() } else { c_white() })
+        circ(cx, cy, 4 + p, c_white())
       } else {
-        let d = if s % 4 == 0 { c_dim() } else { rgb(5, 10, 5) };
-        circ(cx, cy, if live { 2 } else { 1 }, if live { c_pink() } else { d })
+        circ(cx, cy, 1, if s % 4 == 0 { c_dim() } else { rgb(5, 10, 5) })
       }
     }
   };
-  // trigger ripple: one solid pink ring from the cell just hit.
+  // trigger flash: the struck cell becomes a solid pink block with its disc
+  // reversed out (black) — uxn block-and-invert, no rings.
   for t in 0..NTRK {
-    let age = tm - w.pulse[t];
-    if w.pulse[t] > 0 && age < 240 {
-      circb(X0 + w.step * CW + CW / 2, Y0 + t * CH + CH / 2, 7 + age / 16, c_pink())
+    let Cell { on, p } = w.grid[w.step * NTRK + t];
+    if on == 1 && w.pulse[t] > 0 && tm - w.pulse[t] < 90 {
+      let cx = X0 + w.step * CW + CW / 2;
+      let cy = Y0 + t * CH + CH / 2;
+      rect(X0 + w.step * CW, Y0 + t * CH, CW, CH, c_pink());
+      circ(cx, cy, 4 + p, 0x0000)
     }
   };
-  // cursor: solid white ring on the edited cell (steady, not blinking).
-  circb(X0 + w.cx * CW + CW / 2, Y0 + w.cy * CH + CH / 2, 12, c_teal());
+  // cursor: recolour the edited cell's own mark teal and blink it —
+  // highlights what's there, never invents a note.
+  if tm / 180 % 2 == 0 {
+    let Cell { on, p } = w.grid[w.cx * NTRK + w.cy];
+    let cx = X0 + w.cx * CW + CW / 2;
+    let cy = Y0 + w.cy * CH + CH / 2;
+    if on == 1 { circ(cx, cy, 4 + p, c_teal()) } else { circ(cx, cy, 2, c_teal()) }
+  };
   // header: tempo dots + transport.
   for i in 0..(w.bpm_i + 1) { circ(X0 + i * 12, 36, 3, c_white()) };
   if w.playing == 1 {
