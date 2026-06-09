@@ -1,0 +1,196 @@
+// bright melodic house. ~118 BPM, 96-bar arc that loops. Audio only.
+// house = groove + space: 4-floor kick, offbeat hat, 2&4 clap, syncopated bass,
+// sidechain pump, gappy pluck fed to delay. Development via filter, not notes.
+
+static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static HAT:  Array<Int> = [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0];
+static CLAP: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];   // backbeat 2 & 4
+// syncopated bass: offsets from root-24 (0 sub · 7 fifth · 12 octave), -1 rest.
+static BASS: Array<Int> = [0,-1,-1,12, 0,-1,7,-1, 0,-1,-1,12, 0,7,-1,12];
+// arp riff: chord-tone ladder index into LAD, -1 = rest. Syncopated with holes
+// so it grooves and breathes — NOT a running 16th etude.
+static ARP:  Array<Int> = [0,-1,2,-1, -1,4,-1,2, 0,-1,2,-1, -1,4,2,-1];
+// A2 groove: a 3-note cell (0 2 4) looping over the 16-step bar so the
+// accents rotate against 4/4 — motoric, hypnotic piano ostinato.
+static A2G: Array<Int> = [0,2,4,0, 2,4,0,2, 4,0,2,4, 0,2,4,0];
+// front C G F D; back A F C G (vi IV I V).
+static ROOT:  Array<Int> = [48, 43, 53, 50];
+static ROOT2: Array<Int> = [45, 53, 48, 43];
+static LAD:  Array<Int> = [0, 4, 7, 11, 14, 16];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+// sidechain pump: ducks to 35 on the kick, recovers over ~360ms.
+fn duck(dt: Int) -> Int { if dt < 0 { 100 } else if dt > 360 { 100 } else { 35 + dt * 65 / 360 } }
+
+fn setup() -> <IO> Unit {
+  synth_voices(16);
+  // 0 = kick
+  synth_osc(0, 0, 1, 0, 0, 90);
+  synth_env(0, 0, 0, 100, 0, 120, 0, 42);
+  synth_env(0, 1, 2, 28, 0, 58, 0, 0);
+  // 1 = bass
+  synth_osc(1, 0, 1, 0, 0, 100);
+  synth_filter(1, 0, 480, 18);
+  synth_env(1, 0, 0, 100, 2, 110, 40, 120);
+  // 3 = pad (saw)
+  synth_osc(3, 0, 3, 0, 0, 60);
+  synth_filter(3, 0, 900, 18);
+  synth_env(3, 0, 0, 100, 400, 350, 70, 1300);
+  // 4 = hat (noise)
+  synth_osc(4, 0, 4, 0, 0, 70);
+  synth_filter(4, 1, 9000, 8);
+  synth_env(4, 0, 0, 100, 0, 28, 0, 40);
+  // 5 = clap (band-passed noise burst on 2 & 4)
+  synth_osc(5, 0, 4, 0, 0, 80);
+  synth_filter(5, 1, 1600, 6);
+  synth_env(5, 0, 0, 100, 2, 70, 0, 90);
+  // 6 = lead felt keys: triangle + sine-octave shimmer, gentle detune,
+  // soft LP no resonance. Warm, bright, ringing — not brassy. Whole lead uses it.
+  synth_osc(6, 0, 2, 0, 0, 95);
+  synth_osc(6, 1, 1, 12, 0, 42);
+  synth_unison(6, 3, 8);
+  synth_filter(6, 0, 3200, 12);
+  synth_env(6, 0, 0, 100, 4, 240, 0, 440);
+  // 7 = connective drone: a quiet sustained sub humming under EVERY section
+  // (incl. breakdown) so the song has a through-line, never a void.
+  synth_osc(7, 0, 1, 0, 0, 70);
+  synth_osc(7, 1, 3, 0, 0, 18);
+  synth_filter(7, 0, 520, 18);
+  synth_env(7, 0, 0, 100, 200, 400, 82, 1600);
+  // space: dotted-8th delay throw on the lead + a little room.
+  bus_delay(381, 40, 24);
+  bus_reverb(36, 45, 16)
+}
+
+// sections: intro 0..7 · A1 8..31 · bloom1 32..47 · breakdown 48..51 · A 52..55
+// · A2 56..79 · bloom2 80..87 · intro-outro 88..91 → halt at 92 (finite record).
+fn play_step(pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
+  let b = bar;
+  let ch = (bar / 4) % 4;
+  let second = b >= 56 && b < 88;
+  let root = if second { ROOT2[ch] } else { ROOT[ch] };
+
+  // intro texture drops in mid-A1 (20..21) as a breath so the long A1 stretch
+  // doesn't pound AAAA without relief; 88..91 = 4-bar intro-outro tail.
+  let intro     = b < 8 || (b >= 88 && b < 92) || (b >= 20 && b < 22);
+  let bloom     = (b >= 32 && b < 48) || (b >= 80 && b < 88);
+  let big       = b >= 80 && b < 88;
+  let breakdown = b >= 48 && b < 52;   // 4 bars; 52..55 = 4 bars A, then A2 groove
+  let secb      = b >= 56 && b < 80;   // A2 motoric ostinato (enters fast post-breakdown)
+  let groove    = !intro && !breakdown;   // drums + bass
+  // A-internal breath: drop the kit for the back half of every 8th bar — brief
+  // drum breakdown so A doesn't pound straight through (hat/lead/drone hold).
+  let adrop     = groove && b % 8 == 7 && pos >= 8;
+
+  // debug locator: one line per bar so you can place what plays when.
+  if pos == 0 {
+    let sec = if intro { "intro" } else if breakdown { "breakdown" } else if secb { "secb" } else if bloom { "bloom" } else { "A" };
+    println("bar {bar}  b{b}  {sec}")
+  };
+
+  // pump: bass/pad full duck, lead/clap half (don't pump the melody flat).
+  let pump  = g;
+  let pumpl = 100 - (100 - g) / 2;
+
+  // through-line drone under every section (the soft band, the connective tissue).
+  if b % 2 == 0 && pos == 0 { synth_on(7, root - 24, 34, 2300) };
+
+  // A1 entry is staggered so the kit doesn't slam in after the intro: kick+bass
+  // from b8 (ramping), hat from b10, clap from b12. din = 4-bar fade.
+  let din = if b >= 8 && b < 12 { 55 + (b - 8) * 12 } else { 100 };
+  // offbeat kick on the "& of 4" of every 4th bar = syncopated push into the
+  // next phrase (Underdog-style lift), breaks the metronomic 4-floor.
+  let offkick = b % 4 == 3 && pos == 14;
+  if groove && !adrop && (KICK[pos] == 1 || offkick) {
+    synth_on(0, 36, (if offkick { 76 } else { 88 + ri(6) }) * din * 80 / 10000, 130)
+  };
+  if groove && !adrop && b >= 12 && CLAP[pos] == 1 { synth_on(5, 60, (66 + ri(10)) * pumpl / 100, 120) };
+  // hat: offbeat "tss" + 16th ghosts (busier in bloom/A2) + open accent + roll.
+  let hatbusy = bloom || secb     ;
+  let ghost = hatbusy && pos % 2 == 0;
+  let fill = b % 8 == 7 && pos >= 12;
+  if groove && b >= 10 && (HAT[pos] == 1 || ghost || fill) {
+    let open = pos % 8 == 6;
+    let base = if HAT[pos] == 1 || fill { 42 } else { 16 };   // ghosts quiet
+    synth_on(4, 80, (base + ri(10)) * pumpl / 100, if open { 120 } else { 30 })
+  };
+  // syncopated bass, deep pump.
+  if groove && !adrop {
+    let bn = BASS[pos];
+    if bn >= 0 { synth_on(1, root - 24 + bn, 82 * pump * din / 10000, 200) }
+  };
+
+  // ENGINE: continuous LPF sweep on the lead — rise → plateau → fall over each
+  // 16-bar block, moving every step (development is timbral, not melodic).
+  let ph = (b % 16) * 16 + pos;          // 0..255
+  let up = 88;
+  let p = if ph < up { ph * 128 / up }
+          else if ph <= 168 { 128 }
+          else { (256 - ph) * 128 / up };
+  let sweep = 1600 + p * 18;
+  let co6 = if bloom { sweep + 1400 } else if intro { sweep - 500 } else { sweep };
+  synth_filter(6, 0, co6, 12);
+  if secb {
+    // motoric 3-cell ostinato; accent every 3rd = rotating polyrhythm. Octave
+    // alternates each cell + low anchor on accents = wide up/down domain; the
+    // second half adds a high sparkle to widen further.
+    let h = A2G[pos];
+    let v = if pos % 3 == 0 { 90 } else { 58 };
+    let oct = if (pos / 3) % 2 == 0 { 12 } else { 24 };
+    synth_on(6, root + LAD[h] + oct, v * pumpl / 100, 170);
+    if pos % 3 == 0 { synth_on(6, root + LAD[h] - 12, (v - 32) * pumpl / 100, 220) };
+    if b >= 72 && pos % 2 == 1 { synth_on(6, root + LAD[h] + 24, 36 * pumpl / 100, 140) }
+  } else if breakdown {
+    // atmospheric, not silent: one soft ringing note per half-bar.
+    if pos % 8 == 0 { synth_on(6, root + (if pos == 0 { 12 } else { 7 }), 38, 760) }
+  } else {
+    let d = ARP[pos];
+    // drop the arp's tail 1–2 notes at phrase ends (every 8th bar) — a breath /
+    // anticipation, like the drum dropped-beat.
+    let arpdrop = b % 8 == 7 && pos >= 14;
+    if d >= 0 && !arpdrop {
+      let oct = if bloom { 12 } else { 0 };
+      synth_on(6, root + LAD[d] + oct, 80 * pumpl / 100, 220)
+    }
+  };
+
+  // pad: bloom1 chord, plus a soft fifth swell through the breakdown so the
+  // section is a held atmosphere, not a void. bloom2 breathes over drums.
+  if bloom && !big && pos == 0 {
+    let v = 45;
+    synth_on(3, root, v, 3200);
+    synth_on(3, root + 4, v, 3200);
+    synth_on(3, root + 7, v, 3200)
+  };
+  if breakdown && pos == 0 && b % 2 == 0 {
+    synth_on(3, root, 30, 3600);
+    synth_on(3, root + 7, 26, 3600)
+  }
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup();
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  let mut kick_t = 0 - 1000;
+  loop {
+    let t = now();
+    if bar >= 92 { halt(0) };
+    if t >= grid_t {
+      if KICK[pos] == 1 { kick_t = t };
+      let g = duck(t - kick_t);
+      play_step(pos, bar, g);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 { bar = bar + 1 };
+      pos = np;
+      // swing: hold the downbeat 16ths a touch so the offbeats land late (~11%).
+      let sw = if pos % 2 == 0 { 14 } else { 0 - 14 };
+      grid_t = grid_t + 127 + sw
+    };
+    frame.present()
+  }
+}
