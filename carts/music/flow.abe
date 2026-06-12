@@ -15,10 +15,7 @@ fn m8(x: Int) -> Int { x - (x / 8) * 8 }
 
 // progression: I I vi IV I vi ii V (the Ab↔Fm axis with Db/Bbm/Eb pivots).
 fn chord_at(s: Int) -> Int {
-  if s == 0 { 0 } else if s == 1 { 0 }
-  else if s == 2 { 1 } else if s == 3 { 2 }
-  else if s == 4 { 0 } else if s == 5 { 1 }
-  else if s == 6 { 3 } else { 4 }
+  match s { 0 => 0, 1 => 0, 2 => 1, 3 => 2, 4 => 0, 5 => 1, 6 => 3, _ => 4 }
 }
 
 // THE MOTIF: ladder indices forming an ARCH — rise to the top (5), ease back.
@@ -32,10 +29,13 @@ fn motif(m: Int) -> Int {
 
 // does the lead sound at this grid position? caps at 8th notes.
 fn lead_on(pos: Int, bar: Int) -> Int {
-  if bar < 8 { if m4(pos) == 0 { 1 } else { 0 } }        // intro: quarters
-  else if bar < 72 { if m2(pos) == 0 { 1 } else { 0 } }  // body: 8ths
-  else if bar < 84 { if m4(pos) == 0 { 1 } else { 0 } }  // recede: quarters
-  else { 0 }
+  match bar {
+    0..8   => if m4(pos) == 0 { 1 } else { 0 },   // intro: quarters
+    40..42 => if m4(pos) == 0 { 1 } else { 0 },   // mid-body breath (before 8..72)
+    8..72  => if m2(pos) == 0 { 1 } else { 0 },   // body: 8ths
+    72..84 => if m4(pos) == 0 { 1 } else { 0 },   // recede: quarters
+    _ => 0
+  }
 }
 
 // bass root per chord, octave 2.
@@ -72,6 +72,18 @@ fn tre(c: Int, bar: Int) -> Int {
   }
 }
 
+// DYNAMICS arch: soft start → hotter peak (26..42) → fade through the recede.
+fn lgain(bar: Int) -> Int {
+  match bar {
+    0..8   => 62 + bar * 5,
+    8..26  => 100,
+    26..42 => 110,
+    42..72 => 100,
+    72..84 => 100 - (bar - 72) * 5,
+    _ => 38
+  }
+}
+
 @cart
 fn main() -> <frame, IO, nondet> Unit {
   // ch0 pedal: sine, slow attack, very long release — pedal point.
@@ -84,6 +96,9 @@ fn main() -> <frame, IO, nondet> Unit {
   sfx_pan(2, 70, 100);
   sfx_inst(3, 1, 2, 10, 60, 40);
   sfx_pan(3, 85, 85);
+  // space: dry to start, opens across the arch (set per bar below).
+  bus_reverb(66, 38, 12);
+  bus_delay(375, 32, 10);
 
   let t0 = now();
   srand(t0);
@@ -104,45 +119,64 @@ fn main() -> <frame, IO, nondet> Unit {
     if t >= axis_t {
       step = if step >= 7 { 0 } else { step + 1 };
       chord = chord_at(step);
-      let hold = if dt < 16000 { 4000 } else if dt < 82000 { 4000 }
-                 else if dt < 146000 { 4000 } else { 6000 };
+      let hold = match dt { 0..146000 => 4000, _ => 6000 };
       axis_t = t + hold
     };
 
     if t >= b0_t && dt >= 16000 && dt < 164000 {
       let n = bass_note(chord, rand());
       sfx_playm(0, n, 63 + ri(18), 5500);
-      let gap = if dt < 24000 { 3500 + ri(1500) }
-                else if dt < 52000 { 3000 + ri(1500) }
-                else if dt < 82000 { 2500 + ri(1500) }
-                else if dt < 146000 { 4000 + ri(2500) }
-                else { 6000 + ri(3000) };
+      let gap = match dt {
+        0..24000     => 3500 + ri(1500),
+        24000..52000 => 3000 + ri(1500),
+        52000..82000 => 2500 + ri(1500),
+        82000..146000 => 4000 + ri(2500),
+        _ => 6000 + ri(3000)
+      };
       b0_t = t + gap
     };
 
     if t >= grid_t {
       let oct = if bar >= 26 && bar < 42 { 12 } else { 0 };
 
-      if lead_on(pos, bar) == 1 {
+      // dropped-note breath: every 4th bar silence the lead's tail (pos>=14)…
+      let breath = m4(bar) == 3 && pos >= 14;
+      // …then a syncopated offbeat pickup on the very last 16th pushes into the
+      // next phrase (offbeat lift, like the drum offkick).
+      let offpush = m4(bar) == 3 && pos == 15 && bar >= 8 && bar < 84;
+      let lg = lgain(bar);
+      if lead_on(pos, bar) == 1 && !breath {
         let k = motif(ms);
         let n = arp_pitch(chord, k) + oct;
         let acc = if m8(pos) == 0 { 12 } else { 0 };
-        sfx_playm(1, n, 51 + acc + ri(9), 150);
+        sfx_playm(1, n, (51 + acc + ri(9)) * lg / 100, 150);
         if bar >= 12 && bar < 72 && m8(pos) == 0 && k >= 2 {
-          sfx_playm(2, arp_pitch(chord, k - 2) + oct, 45 + ri(9), 140)
+          sfx_playm(2, arp_pitch(chord, k - 2) + oct, (45 + ri(9)) * lg / 100, 140)
         };
         ms = if ms >= 7 { 0 } else { ms + 1 }
       };
+      if offpush { sfx_playm(1, arp_pitch(chord, motif(ms)) + oct, (44 + ri(8)) * lg / 100, 120) };
 
       if bar >= 10 && bar < 72 && pos == 14 {
-        sfx_playm(3, tre(chord, bar), 45 + ri(9), 150)
+        sfx_playm(3, tre(chord, bar), (45 + ri(9)) * lg / 100, 150)
       };
       if bar >= 26 && bar < 42 && pos == 6 {
-        sfx_playm(3, tre(chord, bar), 42 + ri(9), 140)
+        sfx_playm(3, tre(chord, bar), (42 + ri(9)) * lg / 100, 140)
       };
 
       let np = if pos >= 15 { 0 } else { pos + 1 };
-      if np == 0 { bar += 1 };
+      if np == 0 {
+        bar += 1;
+        // TIMBRE: peak section swaps lead to triangle (odd harmonics = brighter,
+        // sfx has no filter), back to sine after.
+        if bar == 26 { sfx_inst(1, 2, 2, 10, 60, 40) };
+        if bar == 42 { sfx_inst(1, 1, 2, 10, 60, 40) };
+        // SPACE arch: dry intro → wetter body → big open ending.
+        let rmix = match dt { 0..16000 => 12, 16000..82000 => 24, 82000..146000 => 38, _ => 56 };
+        let dmix = match dt { 0..82000 => 12, 82000..146000 => 26, _ => 36 };
+        bus_reverb(66, 38, rmix);
+        bus_delay(375, 34, dmix)
+      };
       pos = np;
       grid_t += 125
     };

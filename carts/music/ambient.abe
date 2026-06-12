@@ -1,0 +1,202 @@
+// Ambient rubato — no grid, no bar. Every voice runs its own elastic clock;
+// the lead breathes like a pianist pushing and pulling time.
+//
+// Identity: late-night solo piano over a slow pad tide. Db major,
+// axis Db–Bbm–Gb–Ab (I vi IV V), chords drift every 10–14s, never on a beat.
+//
+// Engine: the rubato curve itself — each 8-note phrase accelerates through its
+// middle and ritards into its end, then rests 2–5s. Time is the instrument.
+//
+// arch ~170s: sparse open → warmer, sparkle joins → recede to pad alone.
+
+static CR: Array<Int> = [49, 46, 54, 44];        // Db3 Bb2 Gb3 Ab2
+static CT: Array<Int> = [4, 3, 4, 4];
+static CS: Array<Int> = [11, 10, 11, 10];
+
+// progression: I I vi IV · I vi V I — leans home, wanders, returns.
+static PROG: Array<Int> = [0, 0, 1, 2, 0, 1, 3, 0];
+
+// THE MOTIF: an arch over the chord-tone ladder — rise, peak, settle.
+static MOTIF: Array<Int> = [0, 2, 3, 5, 4, 3, 2, 1];
+
+// rubato curve: per-step gap weight (×100). slow out of the gate, flowing
+// through the middle, leaning back hard into the last two notes.
+static RUB: Array<Int> = [130, 100, 80, 70, 75, 90, 120, 160];
+
+fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+// chord-tone ladder over two octaves, oct4 base.
+fn lad(c: Int, k: Int) -> Int {
+  let base = CR[c] + 12;
+  match k {
+    0 => base, 1 => base + CT[c], 2 => base + 7,
+    3 => base + 12, 4 => base + 12 + CT[c], _ => base + 19
+  }
+}
+
+fn setup() -> <IO> Unit {
+  synth_voices(32);
+  // 0 = pad tide core: warm triangle stack, very slow swell, long fall.
+  //     Bow pressure: a slow amp LFO — the level never sits still.
+  synth_osc(0, 0, 2, 0, 0, 60);
+  synth_osc(0, 1, 2, 12, 2, 16);
+  synth_unison(0, 3, 6);
+  synth_filter(0, 0, 1100, 6);
+  synth_env(0, 0, 0, 100, 1200, 800, 75, 3000);
+  synth_lfo(0, 1, 1, 13, 14);
+  // 8/9 = body resonances: saw through a band-pass peak — fixed bands that
+  //     amplify whatever harmonics pass through, like a wood body. Each band
+  //     breathes at its own LFO rate (decorrelated bowing).
+  synth_osc(8, 0, 3, 0, 0, 55);
+  synth_filter(8, 2, 750, 30);
+  synth_env(8, 0, 0, 100, 1500, 800, 70, 2800);
+  synth_lfo(8, 1, 1, 9, 18);
+  synth_osc(9, 0, 3, 0, 0, 50);
+  synth_filter(9, 2, 2200, 26);
+  synth_env(9, 0, 0, 100, 1800, 800, 65, 2600);
+  synth_lfo(9, 1, 1, 17, 22);
+  // 1 = piano lead: LPG (lowpass gate) — amplitude and brightness close
+  //     together, so the decay darkens like a real string instead of fading
+  //     linearly. Octave layer gets +3 cents so the alignment isn't digital.
+  // piano lead: plain LP, no filter sweep — harmonics present at the strike,
+  // smooth decay. (Two-layer strike/body tried, sounded worse — reverted.)
+  // smoky felt piano: felt-damped attack (14ms), dark cutoff, 3-string unison
+  // shimmer, octave stretched sharp, and a whisper of tape wow underneath.
+  synth_osc(1, 0, 2, 0, 0, 84);
+  synth_osc(1, 1, 1, 12, 6, 22);
+  synth_unison(1, 3, 2);
+  synth_filter(1, 0, 1900, 4);
+  synth_env(1, 0, 0, 100, 14, 700, 18, 1100);
+  synth_lfo(1, 0, 1, 22, 2);
+  // 10/11 = soundboard bands: each strike also rings the piano's body — a
+  //     warm band and a high shimmer band, decaying with the note. No LFO:
+  //     a struck board rings, it doesn't breathe.
+  synth_osc(10, 0, 3, 0, 0, 50);
+  synth_filter(10, 2, 900, 24);
+  synth_env(10, 0, 0, 100, 8, 650, 12, 800);
+  synth_osc(11, 0, 3, 0, 0, 44);
+  synth_filter(11, 2, 2600, 22);
+  synth_env(11, 0, 0, 100, 4, 450, 8, 600);
+  // 4 = strike transient: a breath of noise riding each lead note — the
+  //     hammer/finger sound an oscillator attack lacks.
+  synth_osc(4, 0, 4, 0, 0, 70);
+  synth_filter(4, 2, 1400, 10);
+  synth_env(4, 0, 0, 100, 2, 50, 0, 40);
+  // 5 = twig crackle: a tiny noise snap, re-tuned per pop. Forest floor.
+  synth_osc(5, 0, 4, 0, 0, 60);
+  synth_filter(5, 2, 4000, 14);
+  synth_env(5, 0, 0, 100, 0, 12, 0, 14);
+  // 6 = earth thump: low sine with a fast pitch drop — skin, not circuit.
+  synth_osc(6, 0, 1, 0, 0, 100);
+  synth_filter(6, 0, 300, 4);
+  synth_env(6, 0, 0, 100, 2, 220, 0, 260);
+  synth_env(6, 1, 2, 30, 0, 90, 0, 0);
+  // 2 = sub pedal: pure sine, near-static.
+  synth_osc(2, 0, 1, 0, 0, 100);
+  synth_filter(2, 0, 500, 4);
+  synth_env(2, 0, 0, 100, 400, 600, 70, 2500);
+  // 3 = sparkle: high sine pair through an LPG, darker base — rings, then
+  //     the gate closes the highs first. +2 cents un-digitals the octave.
+  synth_osc(3, 0, 1, 0, 0, 64);
+  synth_osc(3, 1, 1, 12, 2, 24);
+  synth_filter(3, 3, 3200, 4);
+  synth_env(3, 0, 0, 100, 30, 900, 0, 1200);
+  synth_env(3, 1, 1, 28, 0, 700, 0, 500);
+  bus_reverb(80, 46, 30);
+  bus_delay(520, 30, 14)
+}
+
+@cart
+fn main() -> <frame, IO, nondet> Unit {
+  srand(now());
+  setup();
+  let t0 = now();
+
+  let mut step = 0;                 // progression index
+  let mut chord = 0;
+  let mut chord_t = t0;             // pad re-voice timer
+  let mut bass_t = t0 + 2000;
+  let mut lead_t = t0 + 4000;       // lead waits — space speaks first
+  let mut ms = 0;                   // motif step
+  let mut spark_t = t0 + 30000;
+  let mut twig_t = t0 + 6000;
+  let mut thump_t = t0 + 14000;
+
+  loop {
+    let t = now();
+    let dt = t - t0;
+
+    // chord tide: drift every 10–14s, re-voice the pad mid-air.
+    if t >= chord_t {
+      chord = PROG[step];
+      step = if step >= 7 { 0 } else { step + 1 };
+      let v = match dt { 0..40000 => 34, 40000..120000 => 42, _ => 31 };
+      let p = CR[chord] + 12;
+      synth_on(0, p, v, 12000);
+      synth_on(0, p + CT[chord], v - 4, 12000);
+      synth_on(0, p + 7, v, 12000);
+      synth_on(0, p + CS[chord], v - 8, 12000);
+      // body bands: root + fifth only (cheap), the band-pass does the rest.
+      synth_on(8, p, 21, 12000);
+      synth_on(8, p + 7, 17, 12000);
+      synth_on(9, p, 12, 12000);
+      synth_on(9, p + 7, 9, 12000);
+      println("chord {chord}  dt {dt}");
+      chord_t = t + 10000 + ri(4000)
+    };
+
+    // sub pedal: re-breathes a little after each chord, off in the recede.
+    if t >= bass_t && dt < 150000 {
+      synth_on(2, CR[chord] - 12, 65 + ri(10), 7000);
+      bass_t = t + 6000 + ri(3000)
+    };
+
+    // the rubato lead: one phrase = MOTIF over the current chord's ladder.
+    // gap stretches by the RUB curve ±jitter; phrase ends rest 2–5s.
+    if t >= lead_t && dt >= 8000 && dt < 158000 {
+      let k = MOTIF[ms];
+      let warm = dt >= 40000 && dt < 120000;
+      let v = if warm { 75 } else { 60 };
+      let vel = v + ri(14);
+      let n = lad(chord, k);
+      synth_on(1, n, vel, 1400);
+      // soundboard rings with the strike, scaled to touch.
+      synth_on(10, n, vel / 4 + 4, 1200);
+      synth_on(11, n, vel / 6 + 2, 900);
+      // hammer breath under the strike, louder when the line sings.
+      synth_on(4, n + 24, 6 + vel / 8 + ri(4), 40);
+      // peak notes get a quiet echo a 10th below — left hand answering.
+      if k == 5 && warm { synth_on(1, lad(chord, 1) - 12, 47 + ri(10), 1600) };
+      ms = if ms >= 7 { 0 } else { ms + 1 };
+      let base = if warm { 520 } else { 640 };
+      let gap = if ms == 0 { 2000 + ri(3000) }
+                else { base * RUB[ms] / 100 + ri(180) };
+      lead_t = t + gap
+    };
+
+    // sparkle: rare high leak, drifts in the warm body only.
+    if t >= spark_t && dt >= 40000 && dt < 140000 {
+      synth_filter(3, 3, 3000 + ri(500), 4);
+      synth_on(3, lad(chord, 3) + 12, 26 + ri(18), 2400);
+      spark_t = t + 7000 + ri(9000)
+    };
+
+    // twig crackle: barely-there pops, each one tuned differently.
+    if t >= twig_t {
+      synth_filter(5, 2, 2500 + ri(3500), 14);
+      synth_on(5, 60, 7 + ri(9), 20);
+      twig_t = t + 1200 + ri(3200)
+    };
+
+    // earth thump: a far heartbeat, never on anything's grid. Doubles
+    // loosely now and then — lub-dub. Rests in the recede.
+    if t >= thump_t && dt < 150000 {
+      synth_on(6, 33 + ri(3), 21 + ri(13), 300);
+      if ri(3) == 0 { thump_t = t + 350 + ri(150) }      // the dub
+      else { thump_t = t + 6000 + ri(6000) }
+    };
+
+    if dt >= 172000 { halt(0) };
+    frame.present()
+  }
+}
