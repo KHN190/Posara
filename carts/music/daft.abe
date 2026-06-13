@@ -24,7 +24,28 @@ static B_BASS: Array<Int> = [12,0,0,7, 0,12,0,0, 7,0,12,0, 0,7,0,12];
 static B_STAB: Array<Int> = [0,0,1,0, 0,1,0,0, 0,0,1,0, 0,1,0,1];
 static B_HAT:  Array<Int> = [1,0,1,1, 0,1,1,0, 1,0,1,1, 0,1,1,0];
 
+// rolled-note queue: stagger chord tones so stacked saws don't slam one sample.
+type Q = { t: Array<Int>, p: Array<Int>, n: Array<Int>, v: Array<Int>, d: Array<Int> }
+
 fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn enq(q: &mut Q, ft: Int, p: Int, n: Int, v: Int, d: Int) -> Unit {
+  let mut i = 0;
+  loop {
+    if i >= 24 { break };
+    if q.t[i] < 0 { q.t[i] = ft; q.p[i] = p; q.n[i] = n; q.v[i] = v; q.d[i] = d; return };
+    i = i + 1
+  }
+}
+
+fn drain(q: &mut Q, t: Int) -> <IO> Unit {
+  let mut i = 0;
+  loop {
+    if i >= 24 { break };
+    if q.t[i] >= 0 && q.t[i] <= t { synth_on(q.p[i], q.n[i], q.v[i], q.d[i]); q.t[i] = 0 - 1 };
+    i = i + 1
+  }
+}
 
 // fake sidechain: gain dips to 35 on the kick, recovers over ~210ms.
 fn duck(dt: Int) -> Int { if dt < 0 { 100 } else if dt > 210 { 100 } else { 35 + dt * 65 / 210 } }
@@ -42,10 +63,10 @@ fn setup() -> <IO> Unit {
   synth_env(1, 0, 0, 100, 1, 80, 30, 90);
   // 2 = disco stab: saw body + a triangle octave (not saw) so the high end is
   // smooth, not raspy when the filter opens.
-  synth_osc(2, 0, 3, 0, 0, 90);
-  synth_osc(2, 1, 2, 12, 0, 44);
-  synth_filter(2, 0, 1400, 70);
-  synth_env(2, 0, 0, 100, 2, 150, 30, 200);
+  synth_osc(2, 0, 3, 0, 0, 64);
+  synth_osc(2, 1, 2, 12, 0, 32);
+  synth_filter(2, 0, 1400, 45);
+  synth_env(2, 0, 0, 100, 4, 150, 30, 200);
   // 3 = clap (noise). 4 = hat.
   synth_osc(3, 0, 4, 0, 0, 100);
   synth_filter(3, 2, 1800, 30);
@@ -90,7 +111,7 @@ fn fill_timbre(mode: Int) -> <IO> Unit {
 
 // Pattern (B): the low underground dance section — own bass riff + dark stab, no
 // bright sweep/fill. Stays four-on-the-floor so the floor keeps moving.
-fn play_b(pos: Int, ch: Int, root: Int, g: Int) -> <IO, nondet> Unit {
+fn play_b(q: &mut Q, t: Int, pos: Int, ch: Int, root: Int, g: Int) -> <IO, nondet> Unit {
   if KICK[pos] == 1 { synth_on(0, 36, 96, 130) };
   if B_HAT[pos] == 1 { synth_on(4, 74, 26 + ri(12), 24) };
   if CLAP[pos] == 1 { synth_on(3, 60, 60, 90) };   // shared 2&4 backbeat
@@ -106,23 +127,23 @@ fn play_b(pos: Int, ch: Int, root: Int, g: Int) -> <IO, nondet> Unit {
     let acc = if pos % 4 == 0 { 88 } else { 64 };
     let v = acc * g / 100;
     synth_filter(6, 0, 850 + acc * 6, 40);
-    synth_on(6, root - 12, v, 260);
-    synth_on(6, root - 12 + T3[ch], v, 260);
-    synth_on(6, root - 12 + 7, v - 6, 260);
-    if acc >= 80 { synth_on(6, root, v - 12, 220) }   // octave on accents = lift
+    enq(q, t, 6, root - 12, v, 260);
+    enq(q, t + 14, 6, root - 12 + T3[ch], v, 260);
+    enq(q, t + 28, 6, root - 12 + 7, v - 6, 260);
+    if acc >= 80 { enq(q, t + 42, 6, root, v - 12, 220) }   // octave on accents = lift
   };
   // carry the A identity in: one sparse disco stab per bar up in its range.
   if pos == 0 {
     synth_filter(2, 0, 1500, 30);
-    synth_on(2, root, 44 * g / 100, 200);
-    synth_on(2, root + T3[ch], 40 * g / 100, 200);
-    synth_on(2, root + 7, 36 * g / 100, 200)
+    enq(q, t, 2, root, 44 * g / 100, 200);
+    enq(q, t + 14, 2, root + T3[ch], 40 * g / 100, 200);
+    enq(q, t + 28, 2, root + 7, 36 * g / 100, 200)
   }
 }
 
 // song sections (finite): lead 0..7 · A1 main+fill 8..55 · B taste 56..59 ·
 // A2 main no-fill 60..67 · B full 68..83 · peel 84..87 · end (halt) 88.
-fn play_step(pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
+fn play_step(q: &mut Q, t: Int, pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
   let ch = (bar / 2) % 4;
   let root = ROOT[ch];
   // connective drone: quiet sustained sub under both A and B (the through-line).
@@ -130,7 +151,7 @@ fn play_step(pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
     synth_on(7, root - 12, 36, 2300)
   };
   let bsec = (bar >= 56 && bar < 60) || (bar >= 68 && bar < 84);
-  if bsec { play_b(pos, ch, root, g); return };
+  if bsec { play_b(q, t, pos, ch, root, g); return };
 
   // air gap (A only): a short breath, last 2 steps of every 16th bar.
   if bar % 16 == 15 && pos >= 14 { return };
@@ -155,7 +176,7 @@ fn play_step(pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
           else if ph <= 128 + h { 128 }
           else { (256 - ph) * 128 / up };
   let co = 500 + p * 16;
-  let reso = 30 + (128 - p) * 34 / 128;
+  let reso = 26 + (128 - p) * 20 / 128;
   let light = p > 88;
 
   // bass on the beat + pattern steps.
@@ -169,12 +190,12 @@ fn play_step(pos: Int, bar: Int, g: Int) -> <IO, nondet> Unit {
     let v = (acc + ri(10)) * g / 100;
     let dur = 120 + acc;
     synth_filter(2, 0, co + acc * 8, reso);
-    synth_on(2, root, v, dur);
-    synth_on(2, root + T3[ch], v - 4, dur);
-    synth_on(2, root + 7, v - 6, dur);
+    enq(q, t, 2, root, v, dur);
+    enq(q, t + 14, 2, root + T3[ch], v - 4, dur);
+    enq(q, t + 28, 2, root + 7, v - 6, dur);
     if !light {
-      synth_on(2, root + T7[ch], v - 10, dur);
-      if acc >= 80 { synth_on(2, root + 12, v - 8, dur) }
+      enq(q, t + 42, 2, root + T7[ch], v - 10, dur);
+      if acc >= 80 { enq(q, t + 56, 2, root + 12, v - 8, dur) }
     }
   };
   if fill_on {
@@ -202,12 +223,20 @@ fn main() -> <frame, IO, nondet> Unit {
   let mut pos = 0;
   let mut bar = 0;
   let mut kick_t = 0 - 1000;
+  let mut q = Q {
+    t: [-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1],
+    p: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    n: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    v: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    d: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+  };
   loop {
     let t = now();
+    drain(&mut q, t);
     if t >= grid_t {
       if KICK[pos] == 1 { kick_t = t };
       let g = duck(t - kick_t);
-      play_step(pos, bar, g);
+      play_step(&mut q, t, pos, bar, g);
       let np = if pos >= 15 { 0 } else { pos + 1 };
       if np == 0 {
         bar = bar + 1;

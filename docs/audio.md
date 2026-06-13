@@ -1,11 +1,14 @@
 # Audio
 
-Two layers, one audio thread. A cart sends commands from the frame loop; the DSP
-runs natively.
+Two sets of instruments to play notes on.
 
-- **synth** — 16-patch polyphonic synthesizer (32-voice pool). What the music
-  carts use.
-- **sfx** — simple ADSR voices, sample playback, and the step sequencer.
+- **synth** — rich polyphonic synth: up to 16 patches, up to 32 notes at once.
+  For full, layered music — pianos, pads, basses together.
+- **sfx** — chiptune kit: up to 4 voices, plus samples and a step sequencer.
+  For retro bleeps, hits, or a tight 4-track feel.
+
+The 4-voice limit is **sfx** only. **synth** has no such limit, so layering many
+sounds is normal, not a trick.
 
 ## Synth
 
