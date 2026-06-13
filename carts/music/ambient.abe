@@ -7,7 +7,11 @@
 // Engine: the rubato curve itself — each 8-note phrase accelerates through its
 // middle and ritards into its end, then rests 2–5s. Time is the instrument.
 //
-// arch ~170s: sparse open → warmer, sparkle joins → recede to pad alone.
+// ENDLESS: a weather system replaces the fixed arch. Energy wanders 0..100
+// (retargeted every 20–40s, eased toward), driving volume, pace, layer
+// presence. Phrases mutate (arch/inverted/rotated/sparse), the progression
+// occasionally wanders off-path, and every few minutes the whole world
+// transposes (fifth/fourth/whole-step) — hours without repeating.
 
 static CR: Array<Int> = [49, 46, 54, 44];        // Db3 Bb2 Gb3 Ab2
 static CT: Array<Int> = [4, 3, 4, 4];
@@ -16,14 +20,34 @@ static CS: Array<Int> = [11, 10, 11, 10];
 // progression: I I vi IV · I vi V I — leans home, wanders, returns.
 static PROG: Array<Int> = [0, 0, 1, 2, 0, 1, 3, 0];
 
-// THE MOTIF: an arch over the chord-tone ladder — rise, peak, settle.
-static MOTIF: Array<Int> = [0, 2, 3, 5, 4, 3, 2, 1];
+// six melodies over the chord-tone ladder — real counterpoint voices, each
+// with its own contour and story, not transposes of one shape.
+static M0: Array<Int> = [0, 2, 3, 5, 4, 3, 2, 1];   // the arch: rise, peak, settle
+static M1: Array<Int> = [2, 3, 5, 5, 4, 2, 1, 0];   // question up, answer home
+static M2: Array<Int> = [5, 4, 3, 2, 3, 1, 1, 0];   // the long sigh, falling
+static M3: Array<Int> = [3, 2, 3, 4, 3, 2, 1, 2];   // circling a still point
+static M4: Array<Int> = [0, 5, 1, 4, 2, 5, 3, 0];   // wide leaps, restless
+static M5: Array<Int> = [1, 2, 1, 3, 2, 4, 3, 2];   // a slow walk uphill
+
+// two bass grooves (semitone offsets from root; rests via gap pattern).
+// G1 heartbeat walk: root–fifth–root–deep octave, even and warm.
+// G2 tide pulse: root held, then a quick fifth-up pickup leaning forward.
+static G1N: Array<Int> = [0, 7, 0, -12];
+static G1T: Array<Int> = [1400, 1300, 1400, 1700];
+static G2N: Array<Int> = [0, 0, 7, -5];
+static G2T: Array<Int> = [1800, 500, 900, 1500];
 
 // rubato curve: per-step gap weight (×100). slow out of the gate, flowing
 // through the middle, leaning back hard into the last two notes.
 static RUB: Array<Int> = [130, 100, 80, 70, 75, 90, 120, 160];
 
 fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
+
+fn melody(idx: Int, m: Int) -> Int {
+  match idx {
+    1 => M1[m], 2 => M2[m], 3 => M3[m], 4 => M4[m], 5 => M5[m], _ => M0[m]
+  }
+}
 
 // chord-tone ladder over two octaves, oct4 base.
 fn lad(c: Int, k: Int) -> Int {
@@ -75,7 +99,7 @@ fn setup() -> <IO> Unit {
   synth_filter(10, 2, 900, 24);
   synth_env(10, 0, 0, 100, 8, 650, 12, 800);
   synth_osc(11, 0, 3, 0, 0, 44);
-  synth_filter(11, 2, 2600, 22);
+  synth_filter(11, 2, 2300, 22);
   synth_env(11, 0, 0, 100, 4, 450, 8, 600);
   // 4 = strike transient: a breath of noise riding each lead note — the
   //     hammer/finger sound an oscillator attack lacks.
@@ -91,16 +115,31 @@ fn setup() -> <IO> Unit {
   synth_filter(6, 0, 300, 4);
   synth_env(6, 0, 0, 100, 2, 220, 0, 260);
   synth_env(6, 1, 2, 30, 0, 90, 0, 0);
+  // 7 = thump bloom: same skin, but the room answers — a long soft tail
+  //     fired only under heavy hits, so weight reads as nearness.
+  synth_osc(7, 0, 1, 0, 0, 100);
+  synth_filter(7, 0, 240, 4);
+  synth_env(7, 0, 0, 100, 30, 700, 0, 1400);
+  synth_env(7, 1, 2, 18, 0, 300, 0, 0);
+  // 12 = bowed drone (morin khuur / cello): saw body + a breath of bow noise,
+  //      dark low-pass, slow bow attack, near-endless sustain. The floor of
+  //      the world — harmonics give it wood and rosin, the sub gives weight.
+  synth_osc(12, 0, 3, 0, 0, 78);
+  synth_osc(12, 1, 4, 0, 0, 7);
+  synth_unison(12, 2, 4);
+  synth_filter(12, 0, 850, 10);
+  synth_env(12, 0, 0, 100, 900, 600, 82, 2400);
+  synth_lfo(12, 1, 1, 11, 12);
   // 2 = sub pedal: pure sine, near-static.
   synth_osc(2, 0, 1, 0, 0, 100);
   synth_filter(2, 0, 500, 4);
   synth_env(2, 0, 0, 100, 400, 600, 70, 2500);
   // 3 = sparkle: high sine pair through an LPG, darker base — rings, then
   //     the gate closes the highs first. +2 cents un-digitals the octave.
-  synth_osc(3, 0, 1, 0, 0, 64);
-  synth_osc(3, 1, 1, 12, 2, 24);
-  synth_filter(3, 3, 3200, 4);
-  synth_env(3, 0, 0, 100, 30, 900, 0, 1200);
+  synth_osc(3, 0, 1, 0, 0, 58);
+  synth_osc(3, 1, 1, 12, 2, 16);
+  synth_filter(3, 3, 2600, 4);
+  synth_env(3, 0, 0, 100, 90, 900, 0, 1400);
   synth_env(3, 1, 1, 28, 0, 700, 0, 500);
   bus_reverb(80, 46, 30);
   bus_delay(520, 30, 14)
@@ -118,20 +157,62 @@ fn main() -> <frame, IO, nondet> Unit {
   let mut bass_t = t0 + 2000;
   let mut lead_t = t0 + 4000;       // lead waits — space speaks first
   let mut ms = 0;                   // motif step
+  let mut mvar = 0;                 // current phrase variant
+  let mut loct = 0;                 // current phrase register shift
+  let mut groove = 0;               // bass figure: 0 pedal · 1 walk · 2 tide
+  let mut gpos = 0;                 // groove step
   let mut spark_t = t0 + 30000;
   let mut twig_t = t0 + 6000;
   let mut thump_t = t0 + 14000;
+  let mut tleft = 0;
+
+  // weather: energy eases toward a wandering target. tr = world transpose.
+  // wx = the sky's character, and which register holds the stage:
+  //   0 clear    — piano forward (mids)
+  //   1 lowlands — drone and sub step up, piano recedes (lows)
+  //   2 shimmer  — sparkle blooms, piano rides high (highs)
+  //   3 storm    — thunder rolls, crackle thickens, ground swells
+  let mut energy = 30;
+  let mut target = 50;
+  let mut wx = 0;
+  let mut wx_t = t0 + 25000;
+  let mut tr = 0;
+  let mut tr_t = t0 + 300000;
 
   loop {
     let t = now();
     let dt = t - t0;
 
+    // weather: retarget every 20–40s; ease 1/4 of the way each re-roll.
+    // the sky's character leans on the energy: storms need heat, lowlands
+    // gather in the quiet, shimmer likes the in-between.
+    if t >= wx_t {
+      if ri(5) == 0 { target = ri(18) }            // occasional deep lull
+      else { target = 20 + ri(80) };
+      energy = energy + (target - energy) / 4;
+      wx = if energy >= 65 { if ri(3) == 0 { 3 } else { if ri(2) == 0 { 2 } else { 0 } } }
+        else if energy < 30 { if ri(2) == 0 { 1 } else { 0 } }
+        else { match ri(4) { 0 => 1, 1 => 2, _ => 0 } };
+      let nm = match wx { 0 => "clear", 1 => "lowlands", 2 => "shimmer", _ => "storm" };
+      println("wx energy {energy} -> {target}  {nm}  tr {tr}");
+      wx_t = t + 20000 + ri(20000)
+    };
+
+    // world transpose: every 4–8 min drift by a 4th/5th/whole-step, only
+    // during a lull so the shift lands as weather, not a jump-cut.
+    if t >= tr_t && energy < 30 {
+      tr = match ri(4) { 0 => 0, 1 => 5, 2 => 7, _ => 0 - 2 };
+      println("transpose {tr}");
+      tr_t = t + 240000 + ri(240000)
+    };
+
     // chord tide: drift every 10–14s, re-voice the pad mid-air.
+    // mostly follows the progression, sometimes wanders off-path.
     if t >= chord_t {
-      chord = PROG[step];
+      chord = if ri(5) == 0 { ri(4) } else { PROG[step] };
       step = if step >= 7 { 0 } else { step + 1 };
-      let v = match dt { 0..40000 => 34, 40000..120000 => 42, _ => 31 };
-      let p = CR[chord] + 12;
+      let v = 30 + energy / 8;
+      let p = CR[chord] + 12 + tr;
       synth_on(0, p, v, 12000);
       synth_on(0, p + CT[chord], v - 4, 12000);
       synth_on(0, p + 7, v, 12000);
@@ -139,64 +220,123 @@ fn main() -> <frame, IO, nondet> Unit {
       // body bands: root + fifth only (cheap), the band-pass does the rest.
       synth_on(8, p, 21, 12000);
       synth_on(8, p + 7, 17, 12000);
-      synth_on(9, p, 12, 12000);
-      synth_on(9, p + 7, 9, 12000);
+      synth_on(9, p, 8, 12000);
+      synth_on(9, p + 7, 6, 12000);
+      // the bow: re-bowed every chord, root + a quieter fifth, an octave
+      // below the pad. Nearly always there; only the deepest lull lifts it.
+      if energy >= 12 {
+        // lowlands and storm push the bow to the front of the stage.
+        let bw = 30 + energy / 6 + (if wx == 1 || wx == 3 { 12 } else { 0 });
+        synth_on(12, p - 24, bw, 13000);
+        synth_on(12, p - 17, bw - 8, 13000)
+      };
       println("chord {chord}  dt {dt}");
       chord_t = t + 10000 + ri(4000)
     };
 
-    // sub pedal: re-breathes a little after each chord, off in the recede.
-    if t >= bass_t && dt < 150000 {
-      synth_on(2, CR[chord] - 12, 65 + ri(10), 7000);
-      bass_t = t + 6000 + ri(3000)
+    // the bass: a long pedal breath, or — when a melody calls for it — one of
+    // two grooves, pulsing its figure on the same elastic clock as the lead.
+    if t >= bass_t {
+      let sv = 55 + energy / 5 + (if wx == 1 || wx == 3 { 10 } else { 0 });
+      if groove == 0 {
+        synth_on(2, CR[chord] - 12 + tr, sv + ri(10), 7000);
+        bass_t = t + 6000 + ri(3000)
+      } else {
+        let gn = if groove == 1 { G1N[gpos] } else { G2N[gpos] };
+        let gt = if groove == 1 { G1T[gpos] } else { G2T[gpos] };
+        // pulse alternates firm and soft — a played figure, not a metronome.
+        let pv = sv - 6 + (if gpos % 2 == 0 { 8 } else { 0 }) + ri(8);
+        synth_on(2, CR[chord] - 12 + tr + gn, pv, gt - 200);
+        gpos = if gpos >= 3 { 0 } else { gpos + 1 };
+        bass_t = t + gt * (700 - energy * 2) / 500 + ri(120)
+      }
     };
 
-    // the rubato lead: one phrase = MOTIF over the current chord's ladder.
-    // gap stretches by the RUB curve ±jitter; phrase ends rest 2–5s.
-    if t >= lead_t && dt >= 8000 && dt < 158000 {
-      let k = MOTIF[ms];
-      let warm = dt >= 40000 && dt < 120000;
-      let v = if warm { 75 } else { 60 };
-      let vel = v + ri(14);
-      let n = lad(chord, k);
-      synth_on(1, n, vel, 1400);
-      // soundboard rings with the strike, scaled to touch.
-      synth_on(10, n, vel / 4 + 4, 1200);
-      synth_on(11, n, vel / 6 + 2, 900);
-      // hammer breath under the strike, louder when the line sings.
-      synth_on(4, n + 24, 6 + vel / 8 + ri(4), 40);
-      // peak notes get a quiet echo a 10th below — left hand answering.
-      if k == 5 && warm { synth_on(1, lad(chord, 1) - 12, 47 + ri(10), 1600) };
+    // the rubato lead: one phrase = a motif variant over the chord's ladder.
+    // gap stretches by the RUB curve ±jitter; phrase ends rest and mutate.
+    // deep lulls silence the piano entirely — pad interludes.
+    if t >= lead_t && dt >= 8000 && energy >= 18 {
+      let k = melody(mvar, ms);
+      let warm = energy >= 55;
+      // lowlands/storm thin the piano out (the ground is speaking),
+      // shimmer sends the line up the octave.
+      let drop = (wx == 1 || wx == 3) && ms % 4 == 3;
+      let oct = loct + (if wx == 2 && k >= 2 { 12 } else if energy >= 80 && k >= 3 { 12 } else { 0 });
+      if !drop {
+        // tops land lighter — a gentle hand, not equal hammers. The piano
+        // yields a step whenever it isn't the featured actor.
+        let back = if wx == 0 { 0 } else { 8 };
+        let vel = 52 + energy / 4 + ri(14) - k * 3 - oct / 2 - back;
+        let n = lad(chord, k) + tr + oct;
+        synth_on(1, n, vel, 1400);
+        // soundboard rings with the strike, scaled to touch.
+        synth_on(10, n, vel / 4 + 4, 1200);
+        synth_on(11, n, vel / 8 + 1, 900);
+        // hammer breath under the strike, louder when the line sings.
+        synth_on(4, n + 24, 6 + vel / 8 + ri(4), 40);
+        // peak notes get a quiet echo a 10th below — left hand answering.
+        if k == 5 && warm { synth_on(1, lad(chord, 1) - 12 + tr, 47 + ri(10), 1600) }
+      };
       ms = if ms >= 7 { 0 } else { ms + 1 };
-      let base = if warm { 520 } else { 640 };
-      let gap = if ms == 0 { 2000 + ri(3000) }
-                else { base * RUB[ms] / 100 + ri(180) };
+      // each sky walks the melody differently: clear sings whole arches,
+      // lowlands sinks and falls, shimmer circles mid-air, storm is restless.
+      let pace = match wx { 1 => 120, 2 => 85, 3 => 95, _ => 100 };
+      let base = (700 - energy * 2) * pace / 100;
+      let gap = if ms == 0 {
+        // pick the next melody from the sky's own songbook.
+        mvar = match wx {
+          1 => if ri(2) == 0 { 2 } else { 5 },     // lowlands: sigh · slow walk
+          2 => if ri(3) == 0 { 1 } else { 3 },     // shimmer: circling · question
+          3 => if ri(3) == 0 { 2 } else { 4 },     // storm: leaps · the sigh
+          _ => match ri(3) { 0 => 1, 1 => 5, _ => 0 }   // clear: arch · question · walk
+        };
+        loct = if wx == 1 && ri(2) == 0 { 0 - 12 } else { 0 };
+        // the bass answers the melody: walking tunes get the heartbeat,
+        // restless ones the tide; sighs lie over a still pedal.
+        groove = match mvar {
+          5 => 1, 1 => if ri(2) == 0 { 1 } else { 0 },
+          4 => 2, 3 => if ri(3) == 0 { 2 } else { 0 },
+          _ => 0
+        };
+        gpos = 0;
+        2000 + ri(3000) + (if energy < 35 { 2500 } else { 0 })
+      } else { base * RUB[ms] / 100 + ri(180) };
       lead_t = t + gap
     };
 
-    // sparkle: rare high leak, drifts in the warm body only.
-    if t >= spark_t && dt >= 40000 && dt < 140000 {
-      synth_filter(3, 3, 3000 + ri(500), 4);
-      synth_on(3, lad(chord, 3) + 12, 26 + ri(18), 2400);
-      spark_t = t + 7000 + ri(9000)
+    // sparkle: rare high leak — under a shimmer sky it takes the stage,
+    // arriving often and a shade brighter.
+    if t >= spark_t && (energy >= 40 || (wx == 2 && energy >= 25)) {
+      synth_filter(3, 3, 2400 + ri(400), 4);
+      let shv = if wx == 2 { 10 } else { 0 };
+      synth_on(3, lad(chord, 3) + 12 + tr, 12 + energy / 4 + shv + ri(20), 2400);
+      spark_t = if wx == 2 { t + 3000 + ri(4000) } else { t + 7000 + ri(9000) }
     };
 
     // twig crackle: barely-there pops, each one tuned differently.
+    // a storm thickens the undergrowth.
     if t >= twig_t {
       synth_filter(5, 2, 2500 + ri(3500), 14);
       synth_on(5, 60, 7 + ri(9), 20);
-      twig_t = t + 1200 + ri(3200)
+      twig_t = if wx == 3 { t + 500 + ri(1400) } else { t + 1200 + ri(3200) }
     };
 
-    // earth thump: a far heartbeat, never on anything's grid. Doubles
-    // loosely now and then — lub-dub. Rests in the recede.
-    if t >= thump_t && dt < 150000 {
-      synth_on(6, 33 + ri(3), 21 + ri(13), 300);
-      if ri(3) == 0 { thump_t = t + 350 + ri(150) }      // the dub
+    // earth thump: a far heartbeat, never on anything's grid. Light hits
+    // stay dry and distant; heavy hits bloom — patch 7 answers like a
+    // bigger room. When the sky favors it (storm, or lowlands with energy)
+    // thumps come in loose bursts: a few hits inside a second or two,
+    // light and heavy mixed, then a rest of three-four seconds.
+    if t >= thump_t && energy >= 25 {
+      let heavy = ri(10) < (if wx == 3 { 6 } else { 3 });
+      let tv = if heavy { 30 + ri(14) } else { 13 + ri(9) };
+      synth_on(6, 33 + ri(3), tv, 300);
+      if heavy { synth_on(7, 31 + ri(3), 4 + tv / 2, 900) };
+      let showcase = wx == 3 || (wx == 1 && energy >= 40);
+      if tleft > 0 { tleft = tleft - 1; thump_t = t + 250 + ri(550) }
+      else if showcase { tleft = 1 + ri(3); thump_t = t + 3000 + ri(1500) }
       else { thump_t = t + 6000 + ri(6000) }
     };
 
-    if dt >= 172000 { halt(0) };
     frame.present()
   }
 }
