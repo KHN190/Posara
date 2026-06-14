@@ -2,10 +2,25 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use myriad::VirtualMachine;
-use myriad::devices::{Console, StdoutConsole, SystemDevice, CONSOLE_ID, SYSTEM_ID};
+use myriad::devices::{Console, SystemDevice, CONSOLE_ID, SYSTEM_ID};
 use polka::{Module, Value};
 
 use crate::Host;
+
+use std::io::Write;
+struct StdoutConsole;
+impl Console for StdoutConsole {
+    fn read_byte(&mut self) -> Result<Option<u8>, String> { Ok(None) }
+    fn write_stdout(&mut self, b: u8) -> Result<(), String> {
+        std::io::stdout().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn write_stderr(&mut self, b: u8) -> Result<(), String> {
+        std::io::stderr().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn flush(&mut self) -> Result<(), String> {
+        std::io::stdout().flush().map_err(|e| e.to_string())
+    }
+}
 
 const FRAME: Duration = Duration::from_micros(16_667);
 
@@ -28,7 +43,8 @@ pub use crate::debug::DebugCfg;
 fn make_vm(host: &Host, static_names: Vec<String>, fn_names: Vec<String>, dbg: DebugCfg) -> VirtualMachine {
     let mut vm = VirtualMachine::new()
         .with_static_names(static_names)
-        .with_fn_names(fn_names);
+        .with_fn_names(fn_names)
+        .with_profile(std::env::var("PROFILE").as_deref() == Ok("1"));
     if dbg.needs_sink() {
         vm = vm.with_debug_sink(crate::debug::sink(dbg.trace, dbg.handlers));
     }
@@ -122,6 +138,65 @@ pub fn compile_abe(_path: &Path, _host: &Host) -> Result<LoadResult, String> {
     Err("posara built without `compiler` feature; only .pk supported".into())
 }
 
+#[cfg(feature = "compiler")]
+pub fn build_crate(entry: &Path, host: &Host, out: &Path) -> Result<PathBuf, String> {
+    let module = compile_abe(entry, host)?.module;
+    let lib_src = polka_rustc::transpile_module_lib(&module)
+        .map_err(|e| format!("transpile: {e}"))?;
+
+    let stem = entry.file_stem().and_then(|s| s.to_str()).unwrap_or("cart");
+    let root = std::fs::canonicalize(default_root(entry)).unwrap_or_else(|_| default_root(entry));
+    let entry_abs = std::fs::canonicalize(entry).unwrap_or_else(|_| entry.to_path_buf());
+    let entry = entry_abs.as_path();
+    let posara = env!("CARGO_MANIFEST_DIR");
+
+    std::fs::create_dir_all(out.join("src")).map_err(|e| format!("mkdir: {e}"))?;
+    std::fs::write(out.join("src/lib.rs"), lib_src).map_err(|e| format!("write lib.rs: {e}"))?;
+
+    let main_src = format!(
+        "use std::path::{{Path, PathBuf}};\n\
+         use std::process::ExitCode;\n\
+         fn main() -> ExitCode {{\n\
+         \x20   let root = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from({root:?}));\n\
+         \x20   let host = match posara::Host::new_cart(root, false, false, Path::new({entry:?})) {{\n\
+         \x20       Ok(h) => h, Err(e) => {{ eprintln!(\"host init: {{e}}\"); return ExitCode::from(1); }}\n\
+         \x20   }};\n\
+         \x20   match posara::runner::run_aot(aotcart::PK, aotcart::register_aot, &host) {{\n\
+         \x20       Ok(code) => ExitCode::from(code as u8),\n\
+         \x20       Err(e) => {{ eprintln!(\"{{e}}\"); ExitCode::from(1) }}\n\
+         \x20   }}\n\
+         }}\n",
+        root = root.to_string_lossy(),
+        entry = entry.to_string_lossy(),
+    );
+    std::fs::write(out.join("src/main.rs"), main_src).map_err(|e| format!("write main.rs: {e}"))?;
+
+    let cargo = format!(
+        "[package]\n\
+         name = \"{stem}-build-rs\"\n\
+         version = \"0.0.0\"\n\
+         edition = \"2024\"\n\n\
+         [lib]\n\
+         name = \"aotcart\"\n\
+         path = \"src/lib.rs\"\n\n\
+         [[bin]]\n\
+         name = \"{stem}\"\n\
+         path = \"src/main.rs\"\n\n\
+         [dependencies]\n\
+         posara = {{ path = {posara:?}, default-features = false, features = [\"gfx\", \"sfx\", \"synth\", \"fs\", \"midi\"] }}\n\
+         myriad-rs = {{ git = \"https://github.com/KHN190/Abrase\", branch = \"dev\" }}\n\
+         polka-rs = {{ git = \"https://github.com/KHN190/Abrase\", branch = \"dev\" }}\n",
+    );
+    std::fs::write(out.join("Cargo.toml"), cargo).map_err(|e| format!("write Cargo.toml: {e}"))?;
+
+    Ok(out.to_path_buf())
+}
+
+#[cfg(not(feature = "compiler"))]
+pub fn build_crate(_entry: &Path, _host: &Host, _out: &Path) -> Result<PathBuf, String> {
+    Err("posara built without `compiler` feature".into())
+}
+
 // Drives a loaded module frame by frame, holding the live VM state. Tests use
 // it to inject input between frames; run_until_ms / run_module wrap it.
 pub struct Stepper<'a> {
@@ -139,8 +214,17 @@ impl<'a> Stepper<'a> {
     }
 
     pub fn start_named(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host) -> Result<Self, String> {
+        Self::start_inner(module, static_names, fn_names, host, |_| {})
+    }
+
+    pub fn start_aot<F: FnOnce(&mut VirtualMachine)>(module: Module, host: &'a Host, register_aot: F) -> Result<Self, String> {
+        Self::start_inner(module, Vec::new(), Vec::new(), host, register_aot)
+    }
+
+    fn start_inner<F: FnOnce(&mut VirtualMachine)>(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host, register_aot: F) -> Result<Self, String> {
         let loaded = myriad::loader::load(module)?;
         let mut vm = make_vm(host, static_names, fn_names, DebugCfg::default());
+        register_aot(&mut vm);
         let cart = is_cart(&loaded.module);
         if cart {
             vm.run_to_yield(&loaded.module)?;
@@ -153,7 +237,10 @@ impl<'a> Stepper<'a> {
 
     pub fn is_frame_loop(&self) -> bool { self.cart || self.has_update }
     pub fn steps(&self) -> u64 { self.vm.steps() }
-    pub fn print_profile(&self) { self.vm.print_profile(); }   // no-ops unless PROFILE=1
+    pub fn exit_code(&self) -> i64 { self.vm.exit_code().unwrap_or(0) }
+    pub fn print_profile(&self) {
+        if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", self.vm.profile_report()); }
+    }
 
     // Run one frame; returns false once the program is finished.
     pub fn frame(&mut self) -> Result<bool, String> {
@@ -323,6 +410,20 @@ pub fn run_tests(module: Module, static_names: Vec<String>, fn_names: Vec<String
     Ok(failed == 0)
 }
 
+pub fn run_aot<F: FnOnce(&mut VirtualMachine)>(pk: &[u8], register_aot: F, host: &Host) -> Result<i64, String> {
+    let module = polka::cartridge::read_pk(pk).map_err(|e| format!("read_pk: {e:?}"))?;
+    let mut step = Stepper::start_aot(module, host, register_aot)?;
+    loop {
+        if !alive(host) { break; }
+        let t0 = Instant::now();
+        if !step.frame()? { break; }
+        let elapsed = t0.elapsed();
+        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+    }
+    step.print_profile();
+    Ok(step.exit_code())
+}
+
 struct OverBudgetWarn { hits: u32, last_log: Instant }
 impl OverBudgetWarn {
     fn new() -> Self { Self { hits: 0, last_log: Instant::now() - Duration::from_secs(10) } }
@@ -345,7 +446,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
     let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
     if !cart && !has_update {
         let v: Value = vm.run_module(&loaded.module)?;   // one-shot self-contained
-        if dbg.leak { vm.dump_live_slots(); }
+        if dbg.leak { eprint!("{}", vm.live_slots_report()); }
         return Ok(v.as_int());
     }
 
@@ -437,6 +538,6 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
         let elapsed = t0.elapsed();
         if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
     };
-    if dbg.leak { vm.dump_live_slots(); }
+    if dbg.leak { eprint!("{}", vm.live_slots_report()); }
     Ok(exit_code)
 }

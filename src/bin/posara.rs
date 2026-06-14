@@ -4,15 +4,26 @@ use std::process::ExitCode;
 use posara::{Host, runner};
 
 fn usage() -> ExitCode {
-    eprintln!("usage:");
-    eprintln!("  posara run    [--root <dir>] [--profile] [--headless] [--trace] [--handlers] [--leak] [--debug] [--mute] <cart.abe | cart.pk>");
-    eprintln!("  posara check  [--root <dir>] <cart.abe | cart.pk>");
-    eprintln!("  posara test   [--root <dir>] <cart.abe>   (runs pub fn test_*())");
-    eprintln!("  posara bench  [--root <dir>] [--frames N] <cart>   (headless, no sleep/vsync — for profilers)");
-    eprintln!("  posara disasm [--root <dir>] <cart.abe>");
-    eprintln!("  posara dump   [--root <dir>] [--headless] --out <png> [--at-ms T | --at-frame N] [--region x,y,w,h] <cart>");
-    eprintln!("  posara record [--root <dir>] [--headless] --out <wav> --duration <ms> [--frames <dir> --fps N --from <ms>] <cart>");
-    eprintln!("  BREAK_AT=<fn>:<pc>  env var: dump the register window at that op (host-side breakpoint)");
+    eprintln!("usage: posara <command> [flags] <cart.abe | cart.pk>");
+    eprintln!();
+    eprintln!("  run      run a cart in a window (or --headless)");
+    eprintln!("  check    typecheck + lint, no run");
+    eprintln!("  test     run every pub fn test_*()");
+    eprintln!("  bench    headless N frames, no vsync — for profilers");
+    eprintln!("  disasm   dump bytecode");
+    eprintln!("  dump     grab a PNG at a time/frame");
+    eprintln!("  record   render a WAV (+ optional PNG frames)");
+    eprintln!("  build    transpile to a Rust crate (PK + native bridge) for cargo build");
+    eprintln!();
+    eprintln!("flags:");
+    eprintln!("  common   --root <dir>");
+    eprintln!("  build    --out <dir>");
+    eprintln!("  run      --headless --mute --profile --trace --handlers --leak --debug");
+    eprintln!("  bench    --frames N");
+    eprintln!("  dump     --headless --out <png> [--at-ms T | --at-frame N] [--region x,y,w,h]");
+    eprintln!("  record   --headless --out <wav> --duration <ms> [--frames <dir> --fps N --from <ms>]");
+    eprintln!();
+    eprintln!("env: BREAK_AT=<fn>:<pc>  dump the register window at that op");
     ExitCode::from(2)
 }
 
@@ -82,6 +93,29 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     match runner::run_module(module, static_names, fn_names, &host, reload, profile, dbg) {
         Ok(code) if code == 0 => ExitCode::SUCCESS,
         Ok(code) => ExitCode::from((code as i32).clamp(0, 255) as u8),
+        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
+    }
+}
+
+fn cmd_build(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
+    let mut common = Common { root: None, path: None, headless: true, muted: false };
+    let mut out: Option<PathBuf> = None;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--out" => match args.next() { Some(v) => out = Some(PathBuf::from(v)), None => return usage() },
+            _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
+            _ => common.path = Some(a),
+        }
+    }
+    let Some((root, path)) = resolve_root(&common) else { return usage(); };
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("cart");
+    let out = out.unwrap_or_else(|| PathBuf::from(format!("{stem}-build-rs")));
+    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
+        Ok(h) => h,
+        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
+    };
+    match runner::build_crate(&path, &host, &out) {
+        Ok(dir) => { eprintln!("• wrote crate {}\n  build: cargo build --release --manifest-path {}/Cargo.toml", dir.display(), dir.display()); ExitCode::SUCCESS }
         Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
     }
 }
@@ -280,6 +314,7 @@ fn main() -> ExitCode {
         "disasm" => cmd_disasm(args),
         "dump"   => cmd_dump(args),
         "record" => cmd_record(args),
+        "build"  => cmd_build(args),
         _        => usage(),
     }
 }

@@ -123,7 +123,6 @@ impl Host {
         }
         register_time_natives(vm, self.start, Rc::clone(&self.clock));
         register_rand_natives(vm, Rc::clone(&self.rng));
-        #[cfg(feature = "test")]
         crate::debug::register_assert_natives(vm);
     }
 
@@ -145,10 +144,7 @@ impl Host {
         compiler.register_host_fn("now",   vec![],       T::Int,   io_eff())?;
         compiler.register_host_fn("rand",  vec![],       T::Float, vec![EffectItem { name: vec!["nondet".into()], arg: None }])?;
         compiler.register_host_fn("srand", vec![T::Int], T::Unit,  vec![EffectItem { name: vec!["nondet".into()], arg: None }])?;
-        #[cfg(feature = "test")]
-        {
-            compiler.register_host_fn("assert", vec![T::Bool, T::String], T::Unit, vec![])?;
-        }
+        compiler.register_host_fn("assert", vec![T::Bool, T::String], T::Unit, vec![])?;
         Ok(())
     }
 }

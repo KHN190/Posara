@@ -9,7 +9,7 @@ description = "General OS Myriad runtime."
 
 [features]
 default = ["compiler", "fs", "gfx", "sfx", "synth", "midi", "test"]
-compiler = ["dep:abrase"]
+compiler = ["dep:abrase", "dep:polka-rustc"]
 fs = []
 gfx = ["dep:minifb"]
 sfx = ["dep:cpal"]
@@ -44,3 +44,4 @@ midly = "0.5"
 myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
+polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }

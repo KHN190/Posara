@@ -1,7 +1,6 @@
 use myriad::{DebugEvent, DebugSink};
 use myriad::debug::render_fn_label;
 
-#[cfg(feature = "test")]
 pub fn register_assert_natives(vm: &mut myriad::VirtualMachine) {
     use std::rc::Rc;
     use myriad::{NativeCtx, Value, read_string};
