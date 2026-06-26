@@ -83,6 +83,11 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         ret_unit()
     }));
     let f = Rc::clone(&fb);
+    vm.register_native("win_pos", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+        f.borrow_mut().win_pos(arg(a, 0), arg(a, 1));
+        ret_unit()
+    }));
+    let f = Rc::clone(&fb);
     vm.register_native("rectmix", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().rect_mix(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16, arg(a, 5));
         ret_unit()
@@ -317,6 +322,7 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("screen",      vec![T::Int, T::Int],                              T::Unit),
         ("screen_off",  vec![],                                            T::Unit),
         ("cls",     vec![T::Int],                                          T::Unit),
+        ("win_pos", vec![T::Int, T::Int],                                  T::Unit),
         ("pset",    vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("rect",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
         ("rectb",   vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),

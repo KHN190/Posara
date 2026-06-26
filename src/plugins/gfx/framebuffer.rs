@@ -54,6 +54,14 @@ impl Framebuffer {
         for px in self.buf.iter_mut() { *px = c; }
     }
 
+    // Move the window to a desktop position. No-op when headless. Lets a cart
+    // place itself so the collection lays out as a deliberate map (lib/layout).
+    pub fn win_pos(&mut self, x: i64, y: i64) {
+        if let Some(w) = self.window.as_mut() {
+            w.set_position(x as isize, y as isize);
+        }
+    }
+
     pub fn pset(&mut self, x: i64, y: i64, c: u16) {
         if x < 0 || y < 0 { return; }
         let (x, y) = (x as usize, y as usize);
