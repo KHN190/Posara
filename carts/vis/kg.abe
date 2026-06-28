@@ -27,7 +27,7 @@ fn main() -> <frame, Graphics, IO> Unit {
     let t = now();
     let f = t / 83 % NF;
     cls(0x0000);
-    sprite(sheet.clone(), f * FW * FH, 208, 88, FW, FH, 100);
+    sprite(&sheet, f * FW * FH, 208, 88, FW, FH, 100, 256);
     device_in(0x2001, 1);
     frame.present()
   }

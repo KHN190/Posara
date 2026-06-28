@@ -54,6 +54,17 @@ impl Framebuffer {
         for px in self.buf.iter_mut() { *px = c; }
     }
 
+    // Alpha-blend a single RGB565 pixel over the existing one (a: 0..256). Used
+    // by sprite_mix to crossfade pre-rendered frames mid-rotation.
+    pub fn pset_a(&mut self, x: i64, y: i64, c: u16, a: i64) {
+        if x < 0 || y < 0 { return; }
+        let (x, y) = (x as usize, y as usize);
+        if x >= self.w || y >= self.h { return; }
+        let a = a.clamp(0, 256) as u32;
+        let i = y * self.w + x;
+        self.buf[i] = blend565(self.buf[i], c, a);
+    }
+
     // Move the window to a desktop position. No-op when headless. Lets a cart
     // place itself so the collection lays out as a deliberate map (lib/layout).
     pub fn win_pos(&mut self, x: i64, y: i64) {
