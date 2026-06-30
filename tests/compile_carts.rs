@@ -28,13 +28,13 @@ fn fuji_compiles() { check("carts/games/fuji.abe"); }
 fn song_compiles() { check("carts/music/song.abe"); }
 
 #[test]
-fn ride_compiles() { check("carts/music/ride.abe"); }
+fn detroit_compiles() { check("carts/music/detroit.abe"); }
 
 #[test]
 fn acid_compiles() { check("carts/vis/acid.abe"); }
 
 #[test]
-fn flute_compiles() { check("carts/vis/flute.abe"); }
+fn kg_compiles() { check("carts/vis/kg.abe"); }
 
 #[test]
 fn micro_compiles() { check("carts/vis/micro.abe"); }

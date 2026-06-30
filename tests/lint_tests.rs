@@ -228,3 +228,77 @@ fn screen_called_once_no_multi_warn() {
     let m = module_with(vec![screen_native(), Chunk::Bytecode(chunk)], vec![update_export(1)]);
     assert!(!has(&lint_module(&m), "screen_multi_call"));
 }
+
+// ── #4: effect-dispatch ABI ports are known (regression: real carts emit
+//        0xE100/0xE200 for every effectful call — must NOT be flagged) ─────────
+
+#[test]
+fn effect_dispatch_ports_not_flagged() {
+    for port in [0xE100u64, 0xE101, 0xE102, 0xE200] {
+        let mut chunk = bc();
+        chunk.constants.extend([port, 0u64]);
+        chunk.code.push(OpCode::PushConst(Register(0), 0));
+        chunk.code.push(OpCode::PushConst(Register(1), 1));
+        chunk.code.push(OpCode::Deo(Register(1), Register(0)));
+        let m = module_with(vec![Chunk::Bytecode(chunk)], vec![]);
+        assert!(!has(&lint_module(&m), "device_port_out_of_range"), "port {port:#06x} wrongly flagged");
+    }
+}
+
+// ── #4: const propagation across calls / arithmetic / branches ────────────────
+
+#[test]
+fn port_const_survives_call() {
+    // port loaded, a Call intervenes, then Deo — caller regs survive a call,
+    // so the bad port must still be flagged.
+    let mut chunk = bc();
+    chunk.constants.extend([0xDEADu64, 0u64]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Call(Register(5), 0));
+    chunk.code.push(OpCode::Deo(Register(1), Register(0)));
+
+    let m = module_with(vec![cls_native(), Chunk::Bytecode(chunk)], vec![]);
+    assert!(has(&lint_module(&m), "device_port_out_of_range"));
+}
+
+#[test]
+fn call_clobbers_only_dest_reg() {
+    // a Call whose dest IS the port reg invalidates it → cannot prove port → silent.
+    let mut chunk = bc();
+    chunk.constants.extend([0xDEADu64, 0u64]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Call(Register(0), 0));
+    chunk.code.push(OpCode::Deo(Register(1), Register(0)));
+
+    let m = module_with(vec![cls_native(), Chunk::Bytecode(chunk)], vec![]);
+    assert!(!has(&lint_module(&m), "device_port_out_of_range"));
+}
+
+#[test]
+fn port_via_addimm_fires() {
+    let mut chunk = bc();
+    chunk.constants.extend([0xDE00u64, 0u64]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::AddImm(Register(0), Register(0), 5));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Deo(Register(1), Register(0)));
+
+    let m = module_with(vec![Chunk::Bytecode(chunk)], vec![]);
+    assert!(has(&lint_module(&m), "device_port_out_of_range"));
+}
+
+#[test]
+fn branch_clears_const_no_false_positive() {
+    // const set before a branch must not leak past it (soundness over recall).
+    let mut chunk = bc();
+    chunk.constants.extend([0xDEADu64, 0u64]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Jz(Register(1), 1));
+    chunk.code.push(OpCode::Deo(Register(1), Register(0)));
+
+    let m = module_with(vec![Chunk::Bytecode(chunk)], vec![]);
+    assert!(!has(&lint_module(&m), "device_port_out_of_range"));
+}

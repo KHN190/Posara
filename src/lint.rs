@@ -42,11 +42,18 @@ const DRAW_NATIVES: &[&str] = &[
     "circ", "circb", "tri", "trib", "pal", "blit", "blitg", "blitr", "sprite", "save_png",
 ];
 
+// System, Console, Screen, Controller, MIDI + abrase effect-dispatch ABI
+// ports (0xE0/E1/E2: DISPATCH_ID/MODULE_ID, every effectful cart emits these).
+pub const KNOWN_DEVICE_IDS: &[u8] = &[0x00, 0x10, 0x20, 0x80, 0x90, 0xE0, 0xE1, 0xE2];
+
 fn known_device(id: u8) -> bool {
-    matches!(id, 0x00 | 0x10 | 0x20 | 0x80 | 0x90 | 0xE0 | 0xE1 | 0xE2)
+    KNOWN_DEVICE_IDS.contains(&id)
 }
 
-// first-seen presence of a fact, with its source line when debug info survives.
+fn fold(a: Option<u64>, b: Option<u64>, f: impl Fn(u64, u64) -> u64) -> Option<u64> {
+    match (a, b) { (Some(x), Some(y)) => Some(f(x, y)), _ => None }
+}
+
 #[derive(Default, Clone)]
 struct Fact { hit: bool, line: Option<usize> }
 impl Fact {
@@ -64,7 +71,6 @@ struct FnFacts {
     screen_sites: Vec<Option<usize>>,
 }
 
-// transitive closure of `seed` over the call graph.
 fn reachable(seed: &[usize], facts: &[FnFacts]) -> BTreeSet<usize> {
     let mut seen: BTreeSet<usize> = BTreeSet::new();
     let mut stack: Vec<usize> = seed.iter().copied().collect();
@@ -92,7 +98,6 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
         _ => None,
     }).collect();
     let update_fid = module.exports.iter().find(|e| e.name == "update").map(|e| e.fn_id as usize);
-    let start_fid = module.exports.iter().find(|e| e.name == "start").map(|e| e.fn_id as usize);
 
     let mut warns: Vec<PosaraLint> = Vec::new();
     let mut facts: Vec<FnFacts> = vec![FnFacts::default(); module.functions.len()];
@@ -110,7 +115,15 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
             match op {
                 OpCode::PushConst(r, idx) => reg_const[r.0 as usize] = bc.constants.get(*idx as usize).copied(),
                 OpCode::Move(d, s) | OpCode::Copy(d, s) => reg_const[d.0 as usize] = reg_const[s.0 as usize],
-                OpCode::Call(_, fid) => {
+                OpCode::AddImm(d, s, imm) => reg_const[d.0 as usize] = reg_const[s.0 as usize].map(|v| v.wrapping_add(*imm as i64 as u64)),
+                OpCode::SubImm(d, s, imm) => reg_const[d.0 as usize] = reg_const[s.0 as usize].map(|v| v.wrapping_sub(*imm as i64 as u64)),
+                OpCode::Add(d, a, b) => reg_const[d.0 as usize] = fold(reg_const[a.0 as usize], reg_const[b.0 as usize], |x, y| x.wrapping_add(y)),
+                OpCode::Sub(d, a, b) => reg_const[d.0 as usize] = fold(reg_const[a.0 as usize], reg_const[b.0 as usize], |x, y| x.wrapping_sub(y)),
+                OpCode::Or(d, a, b) => reg_const[d.0 as usize] = fold(reg_const[a.0 as usize], reg_const[b.0 as usize], |x, y| x | y),
+                OpCode::Shl(d, a, b) => reg_const[d.0 as usize] = fold(reg_const[a.0 as usize], reg_const[b.0 as usize], |x, y| x.wrapping_shl(y as u32)),
+                OpCode::Jmp(_) | OpCode::Jz(_, _) | OpCode::Jnz(_, _) => reg_const = [None; 256],
+                OpCode::CallReg(d, _) => reg_const[d.0 as usize] = None,
+                OpCode::Call(d, fid) => {
                     let fid = *fid as usize;
                     facts[fidx].callees.push(fid);
                     if Some(fid) == screen_id {
@@ -125,7 +138,8 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
                         if let Some(l) = line_at(oi) { w = w.with_line(l); }
                         warns.push(w);
                     }
-                    reg_const = [None; 256];
+                    // callee gets its own window; only dest is clobbered.
+                    reg_const[d.0 as usize] = None;
                 }
                 OpCode::Dei(_, p) | OpCode::Deo(_, p) => {
                     if let Some(port) = reg_const[p.0 as usize] {
@@ -145,30 +159,21 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
         }
     }
 
-    // reachability: screen/draw from any entry; commit must be reachable from update.
-    let mut any_seed: Vec<usize> = vec![module.entry];
-    if let Some(s) = start_fid { any_seed.push(s); }
-    if let Some(u) = update_fid { any_seed.push(u); }
-    let reach_any = reachable(&any_seed, &facts);
+    // only the per-frame commit is gated on reachability from update().
     let reach_update = update_fid.map(|u| reachable(&[u], &facts)).unwrap_or_default();
 
-    let first = |set: &BTreeSet<usize>, pick: &dyn Fn(&FnFacts) -> &Fact| -> Option<(usize, Option<usize>)> {
-        set.iter().filter_map(|&f| {
-            let fa = pick(&facts[f]);
-            if fa.hit { Some((f, fa.line)) } else { None }
-        }).next()
+    let any = |pick: &dyn Fn(&FnFacts) -> &Fact| -> Option<Option<usize>> {
+        facts.iter().filter(|f| pick(f).hit).map(|f| pick(f).line).next()
     };
+    let opens = any(&|f| &f.opens_screen);
+    let draws = any(&|f| &f.draws);
+    let commit_in_update = reach_update.iter().any(|&f| facts[f].commits.hit);
 
-    let opens = first(&reach_any, &|f| &f.opens_screen);
-    let draws = first(&reach_any, &|f| &f.draws);
-    let commit_in_update = first(&reach_update, &|f| &f.commits);
-
-    // screen() must be called exactly once, and not from update().
-    let screen_sites: usize = reach_any.iter().map(|&f| facts[f].screen_sites.len()).sum();
+    let screen_sites: usize = facts.iter().map(|f| f.screen_sites.len()).sum();
     if screen_sites > 1 {
         let mut w = PosaraLint::new("screen_multi_call",
             format!("screen() called from {screen_sites} sites; it must be called exactly once"));
-        if let Some((_, Some(l))) = opens { w = w.with_line(l); }
+        if let Some(Some(l)) = opens { w = w.with_line(l); }
         warns.push(w);
     }
     if update_fid.is_some() {
@@ -183,16 +188,16 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
         }
     }
 
-    if update_fid.is_some() && opens.is_some() && commit_in_update.is_none() {
+    if update_fid.is_some() && opens.is_some() && !commit_in_update {
         let mut w = PosaraLint::new("missing_commit_frame",
             "opens a screen but update() never commits it (device_in(0x2001,1)); window stays blank");
-        if let Some((_, Some(l))) = opens { w = w.with_line(l); }
+        if let Some(Some(l)) = opens { w = w.with_line(l); }
         warns.push(w);
     }
     if draws.is_some() && opens.is_none() {
         let mut w = PosaraLint::new("draw_without_screen",
             "draws but never opens a screen (screen()/device_in(0x2000,..)); framebuffer is 0x0, nothing shows");
-        if let Some((_, Some(l))) = draws { w = w.with_line(l); }
+        if let Some(Some(l)) = draws { w = w.with_line(l); }
         warns.push(w);
     }
     for (p, line) in &bad_ports {
