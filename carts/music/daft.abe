@@ -77,7 +77,7 @@ fn setup() -> <IO> Unit {
   // 5 = fill voice. Envelope + tremolo are constant; the oscillators/filter are
   // set by fill_timbre() and swapped each section. Warm, not piercing.
   synth_env(5, 0, 0, 100, 4, 200, 18, 460);
-  synth_lfo(5, 1, 0, 55, 22);     // gentle amp tremolo
+  synth_lfo(5, 0, 0, 55, 22);     // gentle amp tremolo
   fill_timbre(0);
   // 6 = pattern B low stab: punchy rhythmic chord, brighter than a breakdown so the
   // B section reads as a confident drop, not a dark hole.

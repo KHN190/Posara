@@ -67,18 +67,18 @@ fn setup() -> <IO> Unit {
   synth_unison(0, 3, 6);
   synth_filter(0, 0, 1100, 6);
   synth_env(0, 0, 0, 100, 1200, 800, 75, 3000);
-  synth_lfo(0, 1, 1, 13, 14);
+  synth_lfo(0, 0, 1, 13, 14);
   // 8/9 = body resonances: saw through a band-pass peak — fixed bands that
   //     amplify whatever harmonics pass through, like a wood body. Each band
   //     breathes at its own LFO rate (decorrelated bowing).
   synth_osc(8, 0, 3, 0, 0, 55);
   synth_filter(8, 2, 750, 30);
   synth_env(8, 0, 0, 100, 1500, 800, 70, 2800);
-  synth_lfo(8, 1, 1, 9, 18);
+  synth_lfo(8, 0, 1, 9, 18);
   synth_osc(9, 0, 3, 0, 0, 50);
   synth_filter(9, 2, 2200, 26);
   synth_env(9, 0, 0, 100, 1800, 800, 65, 2600);
-  synth_lfo(9, 1, 1, 17, 22);
+  synth_lfo(9, 0, 1, 17, 22);
   // 1 = piano lead: LPG (lowpass gate) — amplitude and brightness close
   //     together, so the decay darkens like a real string instead of fading
   //     linearly. Octave layer gets +3 cents so the alignment isn't digital.
@@ -91,7 +91,7 @@ fn setup() -> <IO> Unit {
   synth_unison(1, 3, 2);
   synth_filter(1, 0, 1900, 4);
   synth_env(1, 0, 0, 100, 14, 700, 18, 1100);
-  synth_lfo(1, 0, 1, 22, 2);
+  synth_lfo(1, 2, 1, 22, 2);
   // 10/11 = soundboard bands: each strike also rings the piano's body — a
   //     warm band and a high shimmer band, decaying with the note. No LFO:
   //     a struck board rings, it doesn't breathe.
@@ -129,7 +129,7 @@ fn setup() -> <IO> Unit {
   synth_unison(12, 2, 4);
   synth_filter(12, 0, 850, 10);
   synth_env(12, 0, 0, 100, 900, 600, 82, 2400);
-  synth_lfo(12, 1, 1, 11, 12);
+  synth_lfo(12, 0, 1, 11, 12);
   // 2 = sub pedal: pure sine, near-static.
   synth_osc(2, 0, 1, 0, 0, 100);
   synth_filter(2, 0, 500, 4);

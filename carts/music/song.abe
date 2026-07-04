@@ -17,7 +17,7 @@ fn main() -> <frame, Graphics, IO> Unit {
   synth_unison(0, 2, 2);
   synth_filter(0, 0, 1800, 5);
   synth_env(0, 0, 0, 100, 8, 480, 8, 420);
-  synth_lfo(0, 0, 1, 18, 2);
+  synth_lfo(0, 2, 1, 18, 2);
 
   // 1 = bass pedal: dark sine weight.
   synth_osc(1, 0, 1, 0, 0, 100);

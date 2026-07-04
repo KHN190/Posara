@@ -26,15 +26,21 @@ let key     = device_out(0x8003);   // last ASCII key code
 
 ## Example
 
-How `carts/games/invader.abe` tests a bit (no bitwise operator — division + modulo):
-
 ```rust
-fn bit_set(v: Int, mask: Int) -> Int { v / mask % 2 }
+const PAD: Int = 0x8002;
+type Btn = A | B | Select | Start | Up | Down | Left | Right;
 
-let b = device_out(0x8002);
-if bit_set(b, 0x80) == 1 { /* Right */ };
-if bit_set(b, 0x10) == 1 { /* Up */ };
-if bit_set(b, 0x01) == 1 { /* A */ };
+fn btn_mask(b: Btn) -> Int {
+  match b {
+    A => 0x01, B => 0x02, Select => 0x04, Start => 0x08,
+    Up => 0x10, Down => 0x20, Left => 0x40, Right => 0x80,
+  }
+}
+fn keydown(bits: Int, b: Btn) -> Bool { (bits & btn_mask(b)) != 0 }
+
+let bits = device_out(PAD);
+if keydown(bits, Up) { /* Up */ };
+if keydown(bits, A)  { /* A  */ };
 ```
 
 ## API

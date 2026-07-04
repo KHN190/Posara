@@ -223,9 +223,9 @@ impl Voice {
         let m = if self.lfo.enabled() { self.lfo.tick(sr) } else { 0.0 };
         let (mut p_mul, mut cut_mul, mut amp_lfo) = (1.0f32, 1.0f32, 1.0f32);
         match self.lfo.target {
-            0 => p_mul = (2.0f32).powf(m),
-            1 => amp_lfo = (1.0 + m).max(0.0),
-            2 => cut_mul = (2.0f32).powf(m * 2.0),
+            TGT_AMP => amp_lfo = (1.0 + m).max(0.0),
+            TGT_CUTOFF => cut_mul = (2.0f32).powf(m * 2.0),
+            TGT_PITCH => p_mul = (2.0f32).powf(m),
             _ => {}
         }
 

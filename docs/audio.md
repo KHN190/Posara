@@ -1,134 +1,130 @@
 # Audio
 
-Two sets of instruments to play notes on.
+Two instrument sets to play notes on.
 
-- synth — rich polyphonic synth: up to 16 patches, up to 32 notes at once.
+- synth — polyphonic synth: up to 16 patches sharing a 32-voice pool.
   For full, layered music — pianos, pads, basses together.
-- sfx — chiptune kit: up to 4 voices, plus samples and a step sequencer.
+- sfx — chiptune kit: 4 voices, plus samples and a step sequencer.
   For retro bleeps, hits, or a tight 4-track feel.
 
-The 4-voice limit is sfx only. synth has no such limit, so layering many
-sounds is normal, not a trick.
+Both address notes by MIDI number (0..127), volumes and most amounts by 0..100,
+times in ms. A patch (synth) or channel (sfx) is a reusable timbre you
+configure once, then trigger many notes on.
 
 ## Synth
 
-```rust
-synth_voices(n)                                    // voice pool size, max 32
-
-synth_osc(pid, idx, wave, semi, fine, level)       // osc idx 0|1
-synth_filter(pid, kind, cutoff_hz, reso)
-synth_env(pid, slot, target, depth, atk, dec, sus, rel)   // slot 0|1, times in ms
-synth_lfo(pid, target, rate_cHz, depth)
-synth_unison(pid, count, detune_cents)             // count 1..7
-synth_fx(pid, kind, amt, param)
-
-synth_on(pid, note, vol, dur_ms)                   // trigger a note
-synth_off(pid, note)                               // release a held note
-synth_stop(pid)                                     // release all notes on a patch
-synth_panic()                                       // kill every voice
-```
-
-A patch (`pid` 0..15) is a fixed voice graph; configure it once, then play it by
-id. Each `synth_on` allocates one of the shared voices (oldest stolen when full).
+A patch `pid` (0..15) is a timbre: two oscillators → filter → amp, shaped by two
+envelopes, one LFO, optional unison and an insert effect.
 
 ```
-osc0 + osc1  →  filter  →  ×amp  →  insert FX  →  mix
+osc0 + osc1  →  filter  →  ×amp  →  insert FX  →  pan → mix
    ▲              ▲                    ▲
  env0/env1       LFO              unison detune
 ```
 
-- osc ×2 — `wave` `0` square · `1` sine · `2` triangle · `3` saw · `4` noise;
-  `semi` + `fine` (cents) detune; `level` 0..100.
-- filter — `kind` `0` low-pass · `1` high-pass · `2` band-pass · `3` LPG;
-  `cutoff_hz`, `reso` 0..100.
-- env ×2 — each routes to a `target`: `0` amp · `1` cutoff · `2` pitch;
-  `depth` scales the amount, then ADSR in ms (`sus` 0..100).
-- lfo ×1 — `target` `0` pitch · `1` amp · `2` cutoff; `rate_cHz` in units of
-  0.01 Hz; `depth`.
-- unison — stack `count` detuned copies, spread by `detune_cents`.
-- fx — one insert per patch: `kind` `1` bitcrush · `2` drive · `3` lopass ·
-  `4` hipass · `5` ring; `amt` 0..100, `param` = cutoff / ring Hz.
+### Voice pool
+
+- `synth_voices(n)` — how many notes can sound at once across all patches.
+  Default 8, max 32; beyond the pool the oldest voice is stolen. Global setting,
+  call anytime.
+
+### Build a patch
+
+- `synth_osc(pid, idx, wave, semi, fine, level)` — set oscillator `idx` (0 or 1).
+  `wave` 0 sq · 1 sin · 2 tri · 3 saw · 4 noise; `semi` pitch offset in semitones,
+  `fine` detune in cents, `level` mix 0..100.
+- `synth_filter(pid, kind, cutoff_hz, reso)` — one filter after the oscillators.
+  `kind` 0 LP · 1 HP · 2 BP · 3 LPG; `cutoff_hz` corner frequency, `reso` 0..100.
+- `synth_env(pid, slot, target, depth, atk, dec, sus, rel)` — one of two envelopes
+  (`slot` 0 or 1) driving `target` 0 amp · 1 cutoff · 2 pitch. `depth` = how far it
+  moves the target; `atk`/`dec`/`rel` in ms, `sus` level 0..100.
+- `synth_lfo(pid, target, wave, rate_cHz, depth)` — one LFO on `target` 0 amp ·
+  1 cutoff · 2 pitch (same order as env). `wave` 0..3 (same codes); `rate_cHz` in
+  0.01 Hz steps; `depth` 0..100.
+- `synth_unison(pid, count, detune_cents)` — stack `count` (1..7) detuned copies
+  spread by `detune_cents` for a fatter sound.
+- `synth_fx(pid, kind, amt, param)` — one insert effect. `kind` 1 bitcrush ·
+  2 drive · 3 lopass · 4 hipass · 5 ring; `amt` 0..100; `param` = cutoff Hz
+  (lopass/hipass) or ring frequency Hz.
+- `synth_pan(pid, pos)` — stereo position, `pos` −100 left · 0 center · 100 right.
+
+### Play
+
+- `synth_on(pid, note, vol, dur_ms)` — trigger `note` at `vol` 0..100 for `dur_ms`.
+- `synth_off(pid, note)` — release one held note early.
+- `synth_stop(pid)` — release every note on a patch.
+- `synth_panic()` — kill all voices immediately.
 
 ```rust
 // 303-ish acid bass on patch 1.
-synth_osc(1, 0, 3, 0, 0, 100);            // saw
-synth_filter(1, 0, 520, 88);              // resonant low-pass
-synth_env(1, 0, 0, 100, 2, 260, 35, 80);  // amp ADSR
-synth_env(1, 1, 1, 65, 2, 150, 0, 70);    // cutoff env = the squelch
+synth_osc(1, 0, 3, 0, 0, 100);            // osc0, saw (wave 3), 0 semi/0 fine, level 100
+synth_filter(1, 0, 520, 88);              // low-pass (kind 0), cutoff 520Hz, reso 88
+synth_env(1, 0, 0, 100, 2, 260, 35, 80);  // slot0 → amp,    depth100, A2 D260 S35 R80
+synth_env(1, 1, 1, 65, 2, 150, 0, 70);    // slot1 → cutoff, the squelch
 synth_on(1, 45, 90, 130);                 // play MIDI 45
 ```
 
 ## sfx
 
-```rust
-sfx_inst(ch, wave, atk_ms, dec_ms, sus, rel_ms)    // configure an ADSR voice
-sfx_playm(ch, note, vol, dur_ms)                   // play a MIDI note on it
-sfx_tone(freq_hz, dur_ms, vol, ch)                 // one-shot at a raw frequency
-sfx_pan(ch, l, r)                                  // 0..100 each side
-sfx_fx(ch, kind, amt, param)                       // same fx kinds as synth
-sfx_lfo(ch, target, wave, rate_cHz, depth)
-sfx_sample(...)                                     // PCM sample playback
-sfx_seq([ ev0, ev1, ... ])                          // queue sequencer events
-sfx_track(...)                                       // load a generated track
-```
+Four fixed channels (`ch` 0..3), each an ADSR voice. Lighter than a synth patch —
+fire-and-forget. `wave` codes match the synth.
 
-`wave` codes match the synth. Fire-and-forget; lighter than a synth patch.
+### Configure & play
+
+- `sfx_inst(ch, wave, atk, dec, sus, rel)` — set a channel's ADSR voice.
+  `atk`/`dec`/`rel` ms, `sus` 0..100.
+- `sfx_playm(ch, note, vol, dur_ms)` — play MIDI `note` on it.
+- `sfx_play(ch, freq_hz, vol, dur_ms)` — same, but a raw frequency instead of a note.
+- `sfx_off(ch)` — stop a channel.
+
+### One-shots
+
+- `sfx_tone(freq_hz, dur_ms, vol, ch)` — a single tone at `freq_hz`.
+- `sfx_noise(dur_ms, vol, ch)` — a single noise burst.
+- `sfx_wave(wave, freq_hz, dur_ms, vol, ch)` — a single shot on a chosen `wave`.
+
+### Per-channel shaping
+
+- `sfx_pan(ch, l, r)` — per-side level, `l`/`r` 0..100 each.
+- `sfx_fx(ch, kind, amt, param)` — insert effect, same kinds/args as `synth_fx`.
+- `sfx_lfo(ch, target, wave, rate_cHz, depth)` — LFO, same args as `synth_lfo`.
 
 ### Step sequencer
 
-Queue events in one call; the audio thread fires them on the grid. Pack each
-event into an integer:
+Queue events once; the audio thread fires them on a grid. Pack each event into one
+integer by bit-shifting its fields into place:
 
 ```rust
 fn ev(tick, ch, note, vol, dur) -> Int {
-  tick + ch*65536 + note*524288 + vol*134217728 + dur*17179869184
+  tick | (ch << 16) | (note << 19) | (vol << 27) | (dur << 34)
 }
-sfx_seq([ ev(0, 0, 36, 90, 2), ev(4, 0, 36, 90, 2) ])
+sfx_seq([ ev(0, 0, 36, 90, 2), ev(4, 0, 36, 90, 2) ], 120);
 ```
 
-Field shifts: `tick` (low) · `ch ×65536` · `note ×524288` · `vol ×134217728` ·
-`dur ×17179869184`. `sfx_track` loads output from `midi2track`.
+Field layout — `offset · width`: `tick` 0·16 · `ch` 16·3 · `note` 19·8 ·
+`vol` 27·7 · `dur` 34·hi.
+
+- `sfx_seq(events: Array<Int>, ms_per_tick)` — queue packed events on the grid.
+- `sfx_seqstop()` — stop the sequencer.
+- `sfx_track(data: Array<Int>, ms_per_tick)` — play a `midi2track` output (see
+  [midi.md](midi.md)).
+
+### Samples
+
+- `sfx_sample(pcm: Array<Int>, rate_hz, vol)` — play a PCM buffer.
+- `sfx_samplestop()` — stop sample playback.
+
+## Master bus
+
+Global, applied to synth + sfx together.
+
+- `mx_delay(time_ms, feedback, mix)` — delay; `time_ms` tap time, `feedback`/`mix` 0..100.
+- `mx_reverb(size, damp, mix)` — reverb; `size` room, `damp` high-freq damping, `mix` wet, all 0..100.
+- `mx_record_start(path: String) -> Int` — start WAV capture (needs `fs`).
+- `mx_record_stop() -> Int` — stop capture.
 
 ## Examples
 
 - synth with visuals — `carts/vis/acid.abe`
-- synth only - `carts/music/detroit.abe`, `dub.abe`, `electro.abe`
+- synth only — `carts/music/detroit.abe`, `dub.abe`, `electro.abe`
 - MIDI in / out / routing — [midi.md](midi.md)
-
-## API
-
-`pid`/`ch` = patch/channel id, `vol`/`sus`/`reso` = 0..100, times in ms.
-
-Synth (polyphonic, up to 32 voices)
-- `synth_voices(n)` — voice pool size, max 32.
-- `synth_osc(pid, idx, wave, semi, fine, level)` — osc `idx` 0|1; wave 0 sq·1 sin·2 tri·3 saw·4 noise.
-- `synth_filter(pid, kind, cutoff_hz, reso)` — kind 0 LP·1 HP·2 BP·3 LPG.
-- `synth_env(pid, slot, target, depth, atk, dec, sus, rel)` — env 0|1 → target 0 amp·1 cutoff·2 pitch.
-- `synth_lfo(pid, target, rate_cHz, depth)` — target 0 pitch·1 amp·2 cutoff; rate in 0.01 Hz.
-- `synth_pan(pid, pos)` — stereo position 0..100.
-- `synth_unison(pid, count, detune_cents)` — stack count 1..7 detuned copies.
-- `synth_fx(pid, kind, amt, param)` — insert fx 1 bitcrush·2 drive·3 lopass·4 hipass·5 ring.
-- `synth_on(pid, note, vol, dur_ms)` — trigger a note.
-- `synth_off(pid, note)` / `synth_stop(pid)` / `synth_panic()` — release note / patch / all.
-
-sfx (chiptune, 4 voices)
-- `sfx_inst(ch, wave, atk, dec, sus, rel)` — configure an ADSR voice.
-- `sfx_playm(ch, note, vol, dur_ms)` — play a MIDI note on it.
-- `sfx_play(ch, freq_hz, vol, dur_ms)` — same, raw frequency.
-- `sfx_off(ch)` — stop a channel.
-- `sfx_tone(freq_hz, dur_ms, vol, ch)` — one-shot tone.
-- `sfx_noise(dur_ms, vol, ch)` — one-shot noise burst.
-- `sfx_wave(wave, freq_hz, dur_ms, vol, ch)` — one-shot on a raw waveform.
-- `sfx_pan(ch, l, r)` — per-side level 0..100.
-- `sfx_fx(ch, kind, amt, param)` — same fx kinds as synth.
-- `sfx_lfo(ch, target, wave, rate_cHz, depth)` — modulation.
-
-Sequencer & samples
-- `sfx_seq(events: Array<Int>, ms_per_tick)` — queue packed events (see above) / `sfx_seqstop()`.
-- `sfx_track(data: Array<Int>, ms_per_tick)` — load a `midi2track` output.
-- `sfx_sample(pcm: Array<Int>, rate_hz, vol)` — play PCM / `sfx_samplestop()`.
-
-Master bus & record
-- `mx_delay(time_ms, feedback, mix)` — global delay (synth + sfx).
-- `mx_reverb(size, damp, mix)` — global reverb, all 0..100.
-- `mx_record_start(path: String) -> Int` / `mx_record_stop() -> Int` — WAV capture (needs `fs`).
