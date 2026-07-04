@@ -36,3 +36,13 @@ if bit_set(b, 0x80) == 1 { /* Right */ };
 if bit_set(b, 0x10) == 1 { /* Up */ };
 if bit_set(b, 0x01) == 1 { /* A */ };
 ```
+
+## API
+
+Devices are port-addressed: `port = device_id << 8 | sub`. `device_out(port) -> Int` reads, `device_in(port, val)` writes. `<IO>`.
+
+Controller (device `0x80`, read-only)
+- `device_out(0x8002) -> Int` — 8-button bitmap (A `0x01` B `0x02` Select `0x04` Start `0x08` Up `0x10` Down `0x20` Left `0x40` Right `0x80`).
+- `device_out(0x8003) -> Int` — last ASCII key code.
+
+Screen (device `0x20`) and MIDI (device `0x90`) use the same `device_in`/`device_out` form — see [graphics.md](graphics.md) / [midi.md](midi.md).

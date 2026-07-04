@@ -59,3 +59,31 @@ blitg(FONT, (cp - 32) * 128, x, y, 8, 16, color, mode)
 ```
 
 Asset loading: see [system.md](system.md#files). Examples: `carts/basic/sprite.abe`, `carts/basic/text.abe`.
+
+## API
+
+All `<Graphics>` unless marked. Color = RGB565 Int.
+
+Screen
+- `screen(w, h)` — set canvas size.
+- `screen_off()` — headless (no window).
+- `cls(color)` — clear whole screen.
+- `win_pos(x, y)` — place the window.
+- `pal(idx: 0..15, rgb888)` — set palette entry (for indexed `sprite`).
+
+Primitives
+- `pset(x, y, color)` — one pixel.
+- `line(x0, y0, x1, y1, color)` — segment.
+- `linew(x0, y0, x1, y1, thick, color)` — thick line.
+- `rect(x, y, w, h, color)` / `rectb(…)` — filled / border rectangle.
+- `rectmix(x, y, w, h, color, alpha)` — alpha-blended rectangle.
+- `circ(cx, cy, r, color)` / `circb(…)` — filled / border circle.
+- `tri(x0,y0,x1,y1,x2,y2,color)` / `trib(…)` — filled / border triangle.
+- `dither(c1, c2)` — set the 2-color dither pair.
+
+Blit
+- `blitg(data, bit_off, x, y, w, h, color, mode)` — 1bpp bitmap, tinted; `mode = (rot<<4)|op`, op `0` replace `1` XOR.
+- `blitr(data, bit_off, x, y, w, h, color, mode)` — raw-color sibling of `blitg` (source carries color).
+- `blit(data, x, y, w, h, color)` `<IO>` — draw a decoded PNG buffer.
+- `sprite(&data, byte_off, x, y, w, h, scale, alpha)` `<IO>` — indexed sprite; scale = percent, alpha `0..256`.
+- `save_png(x, y, w, h, path)` `<IO>` — dump a screen region to PNG.

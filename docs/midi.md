@@ -73,3 +73,13 @@ Start order free (missing ends retry every 2s). Undeclared carts fall back to fi
 ## Tools
 
 `midi2track` converts a standard MIDI file into an `.abe` track cart (see `carts/music/song.abe`). Live examples: `carts/music/sequencer.abe`, `carts/music/tracker.abe`.
+
+## API
+
+MIDI is device `0x90` (port = `0x90 << 8 | sub`). `device_out` reads, `device_in` writes. `<IO>`. Touching it first time opens the ports.
+
+- `device_out(0x9000) -> Int` — pop oldest incoming event, `0` if queue empty.
+- `device_out(0x9001) -> Int` — queued event count (drain once per frame).
+- `device_in(0x9002, msg)` — send a message: `msg = status | d1<<8 | d2<<16` (dest chosen by routing).
+
+Event/message packing: `status | d1<<8 | d2<<16 | src<<24` (incoming carries `src`). Unpack with `/` and `%`.

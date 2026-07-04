@@ -2,12 +2,12 @@
 
 Two sets of instruments to play notes on.
 
-- **synth** — rich polyphonic synth: up to 16 patches, up to 32 notes at once.
+- synth — rich polyphonic synth: up to 16 patches, up to 32 notes at once.
   For full, layered music — pianos, pads, basses together.
-- **sfx** — chiptune kit: up to 4 voices, plus samples and a step sequencer.
+- sfx — chiptune kit: up to 4 voices, plus samples and a step sequencer.
   For retro bleeps, hits, or a tight 4-track feel.
 
-The 4-voice limit is **sfx** only. **synth** has no such limit, so layering many
+The 4-voice limit is sfx only. synth has no such limit, so layering many
 sounds is normal, not a trick.
 
 ## Synth
@@ -37,16 +37,16 @@ osc0 + osc1  →  filter  →  ×amp  →  insert FX  →  mix
  env0/env1       LFO              unison detune
 ```
 
-- **osc** ×2 — `wave` `0` square · `1` sine · `2` triangle · `3` saw · `4` noise;
+- osc ×2 — `wave` `0` square · `1` sine · `2` triangle · `3` saw · `4` noise;
   `semi` + `fine` (cents) detune; `level` 0..100.
-- **filter** — `kind` `0` low-pass · `1` high-pass · `2` band-pass · `3` LPG;
+- filter — `kind` `0` low-pass · `1` high-pass · `2` band-pass · `3` LPG;
   `cutoff_hz`, `reso` 0..100.
-- **env** ×2 — each routes to a `target`: `0` amp · `1` cutoff · `2` pitch;
+- env ×2 — each routes to a `target`: `0` amp · `1` cutoff · `2` pitch;
   `depth` scales the amount, then ADSR in ms (`sus` 0..100).
-- **lfo** ×1 — `target` `0` pitch · `1` amp · `2` cutoff; `rate_cHz` in units of
+- lfo ×1 — `target` `0` pitch · `1` amp · `2` cutoff; `rate_cHz` in units of
   0.01 Hz; `depth`.
-- **unison** — stack `count` detuned copies, spread by `detune_cents`.
-- **fx** — one insert per patch: `kind` `1` bitcrush · `2` drive · `3` lopass ·
+- unison — stack `count` detuned copies, spread by `detune_cents`.
+- fx — one insert per patch: `kind` `1` bitcrush · `2` drive · `3` lopass ·
   `4` hipass · `5` ring; `amt` 0..100, `param` = cutoff / ring Hz.
 
 ```rust
@@ -94,3 +94,41 @@ Field shifts: `tick` (low) · `ch ×65536` · `note ×524288` · `vol ×13421772
 - synth with visuals — `carts/vis/acid.abe`
 - synth only - `carts/music/detroit.abe`, `dub.abe`, `electro.abe`
 - MIDI in / out / routing — [midi.md](midi.md)
+
+## API
+
+`pid`/`ch` = patch/channel id, `vol`/`sus`/`reso` = 0..100, times in ms.
+
+Synth (polyphonic, up to 32 voices)
+- `synth_voices(n)` — voice pool size, max 32.
+- `synth_osc(pid, idx, wave, semi, fine, level)` — osc `idx` 0|1; wave 0 sq·1 sin·2 tri·3 saw·4 noise.
+- `synth_filter(pid, kind, cutoff_hz, reso)` — kind 0 LP·1 HP·2 BP·3 LPG.
+- `synth_env(pid, slot, target, depth, atk, dec, sus, rel)` — env 0|1 → target 0 amp·1 cutoff·2 pitch.
+- `synth_lfo(pid, target, rate_cHz, depth)` — target 0 pitch·1 amp·2 cutoff; rate in 0.01 Hz.
+- `synth_pan(pid, pos)` — stereo position 0..100.
+- `synth_unison(pid, count, detune_cents)` — stack count 1..7 detuned copies.
+- `synth_fx(pid, kind, amt, param)` — insert fx 1 bitcrush·2 drive·3 lopass·4 hipass·5 ring.
+- `synth_on(pid, note, vol, dur_ms)` — trigger a note.
+- `synth_off(pid, note)` / `synth_stop(pid)` / `synth_panic()` — release note / patch / all.
+
+sfx (chiptune, 4 voices)
+- `sfx_inst(ch, wave, atk, dec, sus, rel)` — configure an ADSR voice.
+- `sfx_playm(ch, note, vol, dur_ms)` — play a MIDI note on it.
+- `sfx_play(ch, freq_hz, vol, dur_ms)` — same, raw frequency.
+- `sfx_off(ch)` — stop a channel.
+- `sfx_tone(freq_hz, dur_ms, vol, ch)` — one-shot tone.
+- `sfx_noise(dur_ms, vol, ch)` — one-shot noise burst.
+- `sfx_wave(wave, freq_hz, dur_ms, vol, ch)` — one-shot on a raw waveform.
+- `sfx_pan(ch, l, r)` — per-side level 0..100.
+- `sfx_fx(ch, kind, amt, param)` — same fx kinds as synth.
+- `sfx_lfo(ch, target, wave, rate_cHz, depth)` — modulation.
+
+Sequencer & samples
+- `sfx_seq(events: Array<Int>, ms_per_tick)` — queue packed events (see above) / `sfx_seqstop()`.
+- `sfx_track(data: Array<Int>, ms_per_tick)` — load a `midi2track` output.
+- `sfx_sample(pcm: Array<Int>, rate_hz, vol)` — play PCM / `sfx_samplestop()`.
+
+Master bus & record
+- `bus_delay(time_ms, feedback, mix)` — global delay (synth + sfx).
+- `bus_reverb(size, damp, mix)` — global reverb, all 0..100.
+- `sfx_record_start(path: String) -> Int` / `sfx_record_stop() -> Int` — WAV capture (needs `fs`).

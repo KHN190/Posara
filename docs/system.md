@@ -51,3 +51,27 @@ The `<…>` on a function signature is its effect set, annotated by the capabili
 | `<nondet>` | uses `rand()` |
 
 Composable, e.g. `-> <Graphics, IO> Unit`.
+
+## API
+
+Time & random
+- `now() -> Int` `<IO>` — millisecond timer.
+- `rand() -> Float` `<nondet>` — random in `[0, 1)`.
+- `srand(seed: Int)` `<IO>` — seed the RNG.
+
+Control & console
+- `halt(code: Int)` `<IO>` — end the frame loop, return exit code.
+- `println(s: String)` `<IO>` — write line to stdout.
+
+Files (all `<IO>`; `fd` from `fs_open`, `-1` on error)
+- `fs_open(path: String, mode: Int) -> Int` — open, return fd. mode = OR of `1` read `2` write `4` create `8` append `16` truncate.
+- `fs_read(fd, n: Int) -> Array<Int>` — read n bytes, zero-padded past EOF (arrays have no len).
+- `fs_reads(fd, n: Int) -> String` — read n bytes as UTF-8 text.
+- `fs_write(fd, data: Array<Int>) -> Int` — write bytes, return count.
+- `fs_writes(fd, s: String) -> Int` — write text, return byte count.
+- `fs_seek(fd, off: Int, whence: Int) -> Int` — move cursor, return new pos. whence `0` start `1` cur `2` end; `fs_seek(fd,0,2)` = file size.
+- `fs_close(fd) -> Int` — close fd.
+- `fs_exists(path: String) -> Int` — `1` if exists else `0`.
+- `fs_list(dir: String) -> String` — newline-joined sorted names (carts can't parse String; needs byte-returning variant to be usable).
+- `fs_mkdir(path: String) -> Int` — create directory.
+- `fs_remove(path: String) -> Int` — delete file.
