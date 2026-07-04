@@ -36,7 +36,7 @@ let data = fs_read(fd, 1520);                    // read N bytes
 let _    = fs_close(fd);
 ```
 
-Full set: `fs_open` / `fs_read` / `fs_read_text` / `fs_write` / `fs_write_text` / `fs_seek` / `fs_close`, plus `fs_exists` / `fs_list` / `fs_mkdir` / `fs_remove`.
+Full set: `fs_open` / `fs_read` / `fs_reads` / `fs_write` / `fs_writes` / `fs_seek` / `fs_close`, plus `fs_exists` / `fs_list` / `fs_mkdir` / `fs_remove`.
 
 Idiom: load once in `main` before the frame loop, keep the data in a local. See `carts/basic/text.abe` / `carts/basic/sprite.abe`.
 

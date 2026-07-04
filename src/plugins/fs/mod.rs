@@ -156,7 +156,7 @@ pub fn register_natives(vm: &mut VirtualMachine, root: PathBuf, fds: Rc<RefCell<
         Ok((Value::from_handle(slot, gen_), true))
     }));
     let fdt = Rc::clone(&fds);
-    vm.register_native("fs_read_text", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    vm.register_native("fs_reads", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
         let mut buf = vec![0u8; n];
         let got = {
@@ -179,7 +179,7 @@ pub fn register_natives(vm: &mut VirtualMachine, root: PathBuf, fds: Rc<RefCell<
         match f.write(&bytes) { Ok(w) => ret_int(w as i64), Err(_) => ret_int(-1) }
     }));
     let fdt = Rc::clone(&fds);
-    vm.register_native("fs_write_text", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    vm.register_native("fs_writes", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let fd = arg(a, 0);
         let Some(s) = a.get(1).and_then(|v| read_string(ctx.heap, *v)) else { return ret_int(-1); };
         let mut t = fdt.borrow_mut();
@@ -202,9 +202,9 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("fs_close",      vec![T::Int],                   T::Int),
         ("fs_seek",       vec![T::Int, T::Int, T::Int],   T::Int),
         ("fs_read",       vec![T::Int, T::Int],           arr_int()),
-        ("fs_read_text",  vec![T::Int, T::Int],           T::String),
+        ("fs_reads",  vec![T::Int, T::Int],           T::String),
         ("fs_write",      vec![T::Int, arr_int()],        T::Int),
-        ("fs_write_text", vec![T::Int, T::String],        T::Int),
+        ("fs_writes", vec![T::Int, T::String],        T::Int),
     ]
 }
 
