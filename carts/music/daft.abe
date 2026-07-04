@@ -90,8 +90,8 @@ fn setup() -> <IO> Unit {
   synth_osc(7, 1, 3, 0, 0, 20);
   synth_filter(7, 0, 520, 20);
   synth_env(7, 0, 0, 100, 200, 400, 82, 1600);
-  bus_reverb(50, 45, 26);
-  bus_delay(250, 38, 24)
+  mx_reverb(50, 45, 26);
+  mx_delay(250, 38, 24)
 }
 
 // two fill voices, alternating every 16 bars — both warm so they sit with the
@@ -251,13 +251,13 @@ fn main() -> <frame, IO, nondet> Unit {
         // underground dance feel; peel pulls back.
         let bsec = (bar >= 56 && bar < 60) || (bar >= 68 && bar < 84);
         if bsec {
-          bus_reverb(40, 46, 16); bus_delay(250, 40, 24)
+          mx_reverb(40, 46, 16); mx_delay(250, 40, 24)
         } else if bar >= 84 {
-          bus_reverb(46, 45, 22); bus_delay(250, 34, 22)   // = lead space
+          mx_reverb(46, 45, 22); mx_delay(250, 34, 22)   // = lead space
         } else if bar < 24 {
-          bus_reverb(46, 45, 22); bus_delay(250, 34, 22)
+          mx_reverb(46, 45, 22); mx_delay(250, 34, 22)
         } else {
-          bus_reverb(56, 44, 32); bus_delay(250, 46, 32)
+          mx_reverb(56, 44, 32); mx_delay(250, 46, 32)
         }
       };
       pos = np;

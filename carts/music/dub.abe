@@ -80,8 +80,8 @@ fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
 fn main() -> <frame, IO, nondet> Unit {
   srand(now());
   setup_synth();
-  bus_delay(390, 55, 55);
-  bus_reverb(72, 40, 40);
+  mx_delay(390, 55, 55);
+  mx_reverb(72, 40, 40);
   let mut grid_t = now() + 200;
   let mut pos = 0;
   let mut bar = 0;
@@ -94,8 +94,8 @@ fn main() -> <frame, IO, nondet> Unit {
         bar = bar + 1;
         let b = bar % 64;
         synth_filter(2, 0, cutoff(b), 74);
-        bus_delay(390, feedback(b), 55);
-        bus_reverb(72, 40, rev_mix(b))
+        mx_delay(390, feedback(b), 55);
+        mx_reverb(72, 40, rev_mix(b))
       };
       pos = np;
       grid_t = grid_t + 130

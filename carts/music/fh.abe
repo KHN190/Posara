@@ -59,8 +59,8 @@ fn setup() -> <IO> Unit {
   synth_filter(7, 0, 520, 18);
   synth_env(7, 0, 0, 100, 200, 400, 82, 1600);
   // space: dotted-8th delay throw on the lead + a little room.
-  bus_delay(381, 40, 24);
-  bus_reverb(36, 45, 16)
+  mx_delay(381, 40, 24);
+  mx_reverb(36, 45, 16)
 }
 
 // sections: intro 0..7 · A1 8..31 · bloom1 32..47 · breakdown 48..51 · A 52..55

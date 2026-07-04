@@ -129,6 +129,6 @@ Sequencer & samples
 - `sfx_sample(pcm: Array<Int>, rate_hz, vol)` — play PCM / `sfx_samplestop()`.
 
 Master bus & record
-- `bus_delay(time_ms, feedback, mix)` — global delay (synth + sfx).
-- `bus_reverb(size, damp, mix)` — global reverb, all 0..100.
-- `sfx_record_start(path: String) -> Int` / `sfx_record_stop() -> Int` — WAV capture (needs `fs`).
+- `mx_delay(time_ms, feedback, mix)` — global delay (synth + sfx).
+- `mx_reverb(size, damp, mix)` — global reverb, all 0..100.
+- `mx_record_start(path: String) -> Int` / `mx_record_stop() -> Int` — WAV capture (needs `fs`).

@@ -145,9 +145,9 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
     native!("sfx_off", |a| Cmd::Off(arg(a, 0).max(0) as usize));
 
     // master-bus time effects (affect synth + sfx)
-    native!("bus_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
+    native!("mx_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
         (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
-    native!("bus_reverb", |a| Cmd::BusReverb((arg(a, 0).clamp(0, 100) as f32) / 100.0,
+    native!("mx_reverb", |a| Cmd::BusReverb((arg(a, 0).clamp(0, 100) as f32) / 100.0,
         (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
 
     // sequencer
@@ -216,7 +216,7 @@ pub fn register_record_natives(
     let rs = Rc::clone(&rec);
     let rg = Arc::clone(&ring);
     let en = Arc::clone(&enabled);
-    vm.register_native("sfx_record_start", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    vm.register_native("mx_record_start", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let Some(rel) = a.first().copied().and_then(|v| read_string(ctx.heap, v)) else {
             return Ok((Value::from_int(-1), false));
         };
@@ -228,18 +228,18 @@ pub fn register_record_natives(
         }
         match Recorder::start(&path, sample_rate, channels, Arc::clone(&rg), Arc::clone(&en)) {
             Ok(r) => { *rs.borrow_mut() = Some(r); Ok((Value::from_int(0), false)) }
-            Err(e) => { eprintln!("sfx_record_start: {e}"); Ok((Value::from_int(-1), false)) }
+            Err(e) => { eprintln!("mx_record_start: {e}"); Ok((Value::from_int(-1), false)) }
         }
     }));
     let rs = Rc::clone(&rec);
-    vm.register_native("sfx_record_stop", Rc::new(move |_ctx: &mut NativeCtx, _a: &[Value]| {
+    vm.register_native("mx_record_stop", Rc::new(move |_ctx: &mut NativeCtx, _a: &[Value]| {
         let mut slot = rs.borrow_mut();
         let Some(r) = slot.as_mut() else {
             return Ok((Value::from_int(-1), false));
         };
         let result = match r.stop() {
             Ok(()) => 0,
-            Err(e) => { eprintln!("sfx_record_stop: {e}"); -1 }
+            Err(e) => { eprintln!("mx_record_stop: {e}"); -1 }
         };
         *slot = None;
         Ok((Value::from_int(result), false))
@@ -259,8 +259,8 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("sfx_pan",     vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_fx",      vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_lfo",     vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("bus_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("bus_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("mx_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("mx_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_play",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_playm",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_off",     vec![T::Int],                                          T::Unit),
@@ -272,8 +272,8 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
     ];
     #[cfg(feature = "fs")]
     {
-        decls.push(("sfx_record_start", vec![T::String], T::Int));
-        decls.push(("sfx_record_stop",  vec![],          T::Int));
+        decls.push(("mx_record_start", vec![T::String], T::Int));
+        decls.push(("mx_record_stop",  vec![],          T::Int));
     }
     decls
 }

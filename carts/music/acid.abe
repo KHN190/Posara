@@ -92,9 +92,9 @@ fn main() -> <frame, IO, nondet> Unit {
         tpose = if (b / 8) % 2 == 1 { 5 } else { 0 };
         // delay through the whole piece, reverb wash only in the breakdown.
         let fb = if b >= 48 && b < 56 { 66 } else { 45 };
-        bus_delay(345, fb, 44);
+        mx_delay(345, fb, 44);
         let wr = if b >= 48 && b < 56 { 1 } else { 0 };
-        if wr != rvb { rvb = wr; if wr == 1 { bus_reverb(60, 45, 30) } else { bus_reverb(0, 0, 0) } }
+        if wr != rvb { rvb = wr; if wr == 1 { mx_reverb(60, 45, 30) } else { mx_reverb(0, 0, 0) } }
       };
       pos = np;
       grid_t = grid_t + 115

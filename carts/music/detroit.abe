@@ -158,7 +158,7 @@ fn main() -> <frame, IO, nondet> Unit {
         let wr = if nb >= 52 && nb < 60 { 1 } else { 0 };
         if wr != rvb {
           rvb = wr;
-          if wr == 1 { bus_reverb(70, 45, 42) } else { bus_reverb(0, 0, 0) }
+          if wr == 1 { mx_reverb(70, 45, 42) } else { mx_reverb(0, 0, 0) }
         }
       };
       pos = np;

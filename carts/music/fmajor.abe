@@ -56,8 +56,8 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
   synth_filter(6, 2, 4000, 14);
   synth_env(6, 0, 0, 100, 0, 14, 0, 16);
 
-  bus_reverb(50, 46, 16);
-  bus_delay(500, 22, 6);
+  mx_reverb(50, 46, 16);
+  mx_delay(500, 22, 6);
 
   // Piano = 144 BPM, felt piano patch
   // EV = [onset_ms, note, vol, dur_ms] * 2736, loop

@@ -141,8 +141,8 @@ fn setup() -> <IO> Unit {
   synth_filter(3, 3, 2600, 4);
   synth_env(3, 0, 0, 100, 90, 900, 0, 1400);
   synth_env(3, 1, 1, 28, 0, 700, 0, 500);
-  bus_reverb(80, 46, 30);
-  bus_delay(520, 30, 14)
+  mx_reverb(80, 46, 30);
+  mx_delay(520, 30, 14)
 }
 
 @cart
