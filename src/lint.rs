@@ -93,6 +93,7 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
     };
     let screen_id = native_id("screen");
     let screen_off_id = native_id("screen_off");
+    let commit_id = native_id("commit");
     let draw_ids: BTreeSet<usize> = module.functions.iter().enumerate().filter_map(|(i, c)| match c {
         Chunk::Native(n) if DRAW_NATIVES.contains(&n.name.as_str()) => Some(i),
         _ => None,
@@ -131,6 +132,7 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
                         facts[fidx].opens_screen.set(line_at(oi));
                         seen_screen_here = true;
                     }
+                    if Some(fid) == commit_id { facts[fidx].commits.set(line_at(oi)); }
                     if draw_ids.contains(&fid) { facts[fidx].draws.set(line_at(oi)); }
                     if Some(fid) == screen_off_id && seen_screen_here {
                         let mut w = PosaraLint::new("screen_order",

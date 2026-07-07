@@ -77,6 +77,13 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         f.borrow_mut().set_headless();
         ret_unit()
     }));
+    // Public cart-facing frame flush. Same effect as writing the screen device's
+    // commit port; that port stays as the internal transport (see gfx/device.rs).
+    let f = Rc::clone(&fb);
+    vm.register_native("commit", Rc::new(move |_: &mut NativeCtx, _a: &[Value]| {
+        f.borrow_mut().commit()?;
+        ret_unit()
+    }));
     let f = Rc::clone(&fb);
     vm.register_native("cls", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().cls(arg(a, 0) as u16);
@@ -268,22 +275,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         let (slot, gen_) = data.as_handle();
         let cells = ctx.heap.cell_data(slot, gen_)?;
         let mut fbm = f.borrow_mut();
-        let dw = (w * pct / 100).max(1);
-        let dh = (h * pct / 100).max(1);
-        let opaque = alpha >= 256;
-        for dy in 0..dh {
-            let sy = dy * 100 / pct;
-            for dx in 0..dw {
-                let sx = dx * 100 / pct;
-                let n = off + (sy * w + sx) as usize;
-                let byte = cells.get(n / 2).copied().unwrap_or(0);
-                let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
-                if idx == 0 { continue; }
-                let c = fbm.palette[idx];
-                if opaque { fbm.pset(x0 + dx, y0 + dy, c); }
-                else { fbm.pset_a(x0 + dx, y0 + dy, c, alpha); }
-            }
-        }
+        fbm.blit_4bpp(|i| cells.get(i).copied().unwrap_or(0) as u8, off, x0, y0, w, h, pct, alpha);
         ret_unit()
     }));
 }
@@ -323,6 +315,7 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
     vec![
         ("screen",      vec![T::Int, T::Int],                              T::Unit),
         ("screen_off",  vec![],                                            T::Unit),
+        ("commit",      vec![],                                            T::Unit),
         ("cls",     vec![T::Int],                                          T::Unit),
         ("win_pos", vec![T::Int, T::Int],                                  T::Unit),
         ("pset",    vec![T::Int, T::Int, T::Int],                          T::Unit),

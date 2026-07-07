@@ -716,7 +716,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     let t = now();
     let b = device_out(0x8002);
     frame_step(&mut w, b, t);
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

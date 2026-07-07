@@ -7,6 +7,9 @@ use polka::Value;
 
 use super::Framebuffer;
 
+// Internal transport for the screen. Carts use the public natives
+// (`screen`/`screen_off`/`commit`); these ports are the low-level bus those
+// natives (and advanced carts) route through, not the default path.
 pub const SCREEN_ID: u8 = 0x20;
 pub const PORT_CONFIGURE: u8 = 0x00;
 pub const PORT_COMMIT:    u8 = 0x01;

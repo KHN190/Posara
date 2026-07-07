@@ -134,7 +134,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
       draw_poly(curl.csx.clone(), curl.csy.clone(), curl.csz.clone(), s * 48, curl.clen[s], 400, 168, 1.2, ay, 0.42, 0, 0x0000);
       s = s + 1
     };
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

@@ -270,7 +270,7 @@ fn main() -> <frame, Graphics, IO> Unit {
       if w.row >= NR { w.row = 0; w.play_ph = (w.play_ph + 1) % NPH }
     };
     draw(&w, &font, tm);
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

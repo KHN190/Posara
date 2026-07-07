@@ -127,7 +127,7 @@ fn main() -> <frame, Graphics, IO> Unit {
     let sy = (t / 30) % 320;
     rect(0, sy, 480, 1, 0x0000);
 
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

@@ -2,9 +2,8 @@ fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
 
 @cart
 fn main() -> <frame, Graphics, IO, nondet> Unit {
-  let cfg = 160 + 120 * 65536 + 1 * 4294967296;
   screen_off();
-  device_in(0x2000, cfg);
+  screen(160, 120);
   cls(0x0000);
 
   synth_voices(28);
@@ -128,7 +127,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     };
 
     cls(0x0000);
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

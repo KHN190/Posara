@@ -26,7 +26,7 @@ fn main() -> <frame, Graphics, IO> Unit {
     let deg = (t / 20) % 360;
     blitr(spr.clone(), 200, 150, 64, 64, 0x0000, 0, deg);
 
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

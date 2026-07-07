@@ -210,7 +210,7 @@ fn main() -> <frame, Graphics, IO> Unit {
       w.next_ms = tm + step_ms(w.bpm_i)
     };
     draw(&w, &font, tm);
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

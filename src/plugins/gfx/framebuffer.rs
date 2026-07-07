@@ -11,11 +11,12 @@ pub struct Framebuffer {
     pub headless: bool,
     pub palette: [u16; 16],
     pub commits: u64,
+    lum_scratch: Vec<i32>,
 }
 
 impl Framebuffer {
     pub fn new() -> Self {
-        Self { w: 0, h: 0, format: 0, buf: vec![], out: vec![], window: None, alive: true, headless: false, palette: [0; 16], commits: 0 }
+        Self { w: 0, h: 0, format: 0, buf: vec![], out: vec![], window: None, alive: true, headless: false, palette: [0; 16], commits: 0, lum_scratch: vec![] }
     }
 
     // Must be called before configure() to take effect; otherwise the window
@@ -54,8 +55,7 @@ impl Framebuffer {
         for px in self.buf.iter_mut() { *px = c; }
     }
 
-    // Alpha-blend a single RGB565 pixel over the existing one (a: 0..256). Used
-    // by sprite_mix to crossfade pre-rendered frames mid-rotation.
+    // Alpha-blend a single RGB565 pixel over the existing one (a: 0..256).
     pub fn pset_a(&mut self, x: i64, y: i64, c: u16, a: i64) {
         if x < 0 || y < 0 { return; }
         let (x, y) = (x as usize, y as usize);
@@ -65,11 +65,55 @@ impl Framebuffer {
         self.buf[i] = blend565(self.buf[i], c, a);
     }
 
-    // Move the window to a desktop position. No-op when headless. Lets a cart
-    // place itself so the collection lays out as a deliberate map (lib/layout).
+    // Move the window to a desktop position. No-op when headless.
     pub fn win_pos(&mut self, x: i64, y: i64) {
         if let Some(w) = self.window.as_mut() {
             w.set_position(x as isize, y as isize);
+        }
+    }
+
+    // 4bpp palette blit shared by the `sprite` (u64-cell source) and
+    // `sprite_file` (raw byte source) natives. `get` returns the packed byte at
+    // a 4bpp *byte* index; two pixels per byte, high nibble first, index 0
+    // transparent. `pct` scales, `alpha` 256 = opaque fast path.
+    pub fn blit_4bpp<F: Fn(usize) -> u8>(
+        &mut self, get: F, off: usize, x0: i64, y0: i64, w: i64, h: i64, pct: i64, alpha: i64,
+    ) {
+        if w <= 0 || h <= 0 { return; }
+        let opaque = alpha >= 256;
+        // Hot case (full-screen frame playback): unscaled, opaque, fully
+        // on-screen. Skip the per-pixel divide and pset bounds branch.
+        if pct == 100 && opaque
+            && x0 >= 0 && y0 >= 0
+            && x0 + w <= self.w as i64 && y0 + h <= self.h as i64
+        {
+            let (fw, pal) = (self.w, self.palette);
+            let (bx, by) = (x0 as usize, y0 as usize);
+            for y in 0..h as usize {
+                let drow = (by + y) * fw + bx;
+                let srow = y * w as usize;
+                for x in 0..w as usize {
+                    let n = off + srow + x;
+                    let idx = ((get(n / 2) >> (4 * (1 - (n & 1)))) & 0xF) as usize;
+                    if idx != 0 { self.buf[drow + x] = pal[idx]; }
+                }
+            }
+            return;
+        }
+        let dw = (w * pct / 100).max(1);
+        let dh = (h * pct / 100).max(1);
+        for dy in 0..dh {
+            let sy = dy * 100 / pct;
+            for dx in 0..dw {
+                let sx = dx * 100 / pct;
+                let n = off + (sy * w + sx) as usize;
+                let byte = get(n / 2);
+                let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
+                if idx == 0 { continue; }
+                let c = self.palette[idx];
+                if opaque { self.pset(x0 + dx, y0 + dy, c); }
+                else { self.pset_a(x0 + dx, y0 + dy, c, alpha); }
+            }
         }
     }
 
@@ -117,12 +161,14 @@ impl Framebuffer {
     pub fn dither(&mut self, dark: u16, light: u16) {
         let (w, h) = (self.w, self.h);
         if w == 0 || h == 0 { return; }
-        let mut lum: Vec<i32> = self.buf.iter().map(|&c| {
+        let mut lum = std::mem::take(&mut self.lum_scratch); // reuse allocation across calls
+        lum.clear();
+        lum.extend(self.buf.iter().map(|&c| {
             let r = ((c >> 11) & 0x1F) as i32 * 255 / 31;
             let g = ((c >> 5)  & 0x3F) as i32 * 255 / 63;
             let b = ( c        & 0x1F) as i32 * 255 / 31;
             (r * 77 + g * 150 + b * 29) >> 8
-        }).collect();
+        }));
         for y in 0..h {
             for x in 0..w {
                 let i = y * w + x;
@@ -138,6 +184,7 @@ impl Framebuffer {
                 }
             }
         }
+        self.lum_scratch = lum; // return the buffer for reuse next call
     }
 
     pub fn commit(&mut self) -> Result<(), String> {

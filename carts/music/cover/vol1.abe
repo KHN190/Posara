@@ -72,7 +72,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
       glyph_big(&font, codes[i], 196 + i * 72, 700, 6, 0x0000)
     };
 
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }

@@ -101,6 +101,9 @@ fn arg(args: &[Value], i: usize) -> i64 {
     args.get(i).copied().unwrap_or(Value::ZERO).as_int()
 }
 
+// A 0..100 cart integer as a 0.0..1.0 gain/ratio — the sfx control convention.
+fn pct(args: &[Value], i: usize) -> f32 { (arg(args, i).clamp(0, 100) as f32) / 100.0 }
+
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 
 // Every sfx native pushes one Cmd onto the lock-free ring; the audio thread
@@ -119,36 +122,36 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
 
     // legacy fire-and-forget sugar
     native!("sfx_tone", |a| Cmd::Tone(arg(a, 0) as f32, arg(a, 1).max(0) as u32,
-        (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as u32));
+        pct(a, 2), arg(a, 3).max(0) as u32));
     native!("sfx_noise", |a| Cmd::Noise(arg(a, 0).max(0) as u32,
-        (arg(a, 1).clamp(0, 100) as f32) / 100.0, arg(a, 2).max(0) as u32));
+        pct(a, 1), arg(a, 2).max(0) as u32));
     native!("sfx_wave", |a| Cmd::Wave(arg(a, 0).clamp(0, 4) as u8, arg(a, 1) as f32,
-        arg(a, 2).max(0) as u32, (arg(a, 3).clamp(0, 100) as f32) / 100.0, arg(a, 4).max(0) as u32));
+        arg(a, 2).max(0) as u32, pct(a, 3), arg(a, 4).max(0) as u32));
 
     // synth patch
     native!("sfx_inst", |a| Cmd::Inst(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 4) as u8,
         arg(a, 2).max(0) as u32, arg(a, 3).max(0) as u32,
-        (arg(a, 4).clamp(0, 100) as f32) / 100.0, arg(a, 5).max(0) as u32));
+        pct(a, 4), arg(a, 5).max(0) as u32));
     native!("sfx_pan", |a| Cmd::Pan(arg(a, 0).max(0) as usize,
-        (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
+        pct(a, 1), pct(a, 2)));
     native!("sfx_fx", |a| Cmd::Fx(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 5) as u8,
-        (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as f32));
+        pct(a, 2), arg(a, 3).max(0) as f32));
     native!("sfx_lfo", |a| Cmd::Lfo(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 2) as u8,
         arg(a, 2).clamp(0, 3) as u8, arg(a, 3).max(0) as f32 / 100.0,
-        (arg(a, 4).clamp(0, 100) as f32) / 100.0));
+        pct(a, 4)));
 
     // trigger
     native!("sfx_play", |a| Cmd::Play(arg(a, 0).max(0) as usize, arg(a, 1) as f32,
-        (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as u32));
+        pct(a, 2), arg(a, 3).max(0) as u32));
     native!("sfx_playm", |a| Cmd::PlayMidi(arg(a, 0).max(0) as usize, arg(a, 1),
-        (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as u32));
+        pct(a, 2), arg(a, 3).max(0) as u32));
     native!("sfx_off", |a| Cmd::Off(arg(a, 0).max(0) as usize));
 
     // master-bus time effects (affect synth + sfx)
     native!("mx_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
-        (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
-    native!("mx_reverb", |a| Cmd::BusReverb((arg(a, 0).clamp(0, 100) as f32) / 100.0,
-        (arg(a, 1).clamp(0, 100) as f32) / 100.0, (arg(a, 2).clamp(0, 100) as f32) / 100.0));
+        pct(a, 1), pct(a, 2)));
+    native!("mx_reverb", |a| Cmd::BusReverb(pct(a, 0),
+        pct(a, 1), pct(a, 2)));
 
     // sequencer
     let p = Arc::clone(&cmds);
@@ -191,7 +194,7 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
     vm.register_native("sfx_sample", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let buf = a.first().copied().unwrap_or(Value::NONE);
         let rate = arg(a, 1).max(1) as f32;
-        let vol = (arg(a, 2).clamp(0, 100) as f32) / 100.0;
+        let vol = pct(a, 2);
         if buf.is_handle_none() { return ret_unit(); }
         let (slot, gen_) = buf.as_handle();
         let cells = ctx.heap.cell_data(slot, gen_)?;

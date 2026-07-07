@@ -67,6 +67,21 @@ fn missing_commit_frame_suppressed_when_committed() {
 }
 
 #[test]
+fn missing_commit_frame_suppressed_by_commit_native() {
+    // update() that calls screen() then the commit() native — no port write.
+    let mut chunk = bc();
+    chunk.constants.extend([320u64, 240]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Call(Register(2), 0)); // screen (fn 0)
+    chunk.code.push(OpCode::Call(Register(2), 1)); // commit (fn 1)
+
+    let commit_native = Chunk::Native(NativeChunk { name: "commit".into(), param_count: 0 });
+    let m = module_with(vec![screen_native(), commit_native, Chunk::Bytecode(chunk)], vec![update_export(2)]);
+    assert!(!has(&lint_module(&m), "missing_commit_frame"));
+}
+
+#[test]
 fn missing_commit_frame_no_update_no_warn() {
     let mut chunk = bc();
     chunk.constants.extend([320u64, 240]);

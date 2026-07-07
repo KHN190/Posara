@@ -686,7 +686,7 @@ fn draw_fog_buf(fog_buf: &Array<Int>, b: Int, dk: Int) -> <Graphics> Unit {
     tick_fog(&mut fog_buf, fr, t);
     draw_fog_buf(&fog_buf, b, dk);
     dither(0, 0xffff);
-    device_in(0x2001, 1);
+    commit();
     fr = fr + 1;
     frame.present()
   }

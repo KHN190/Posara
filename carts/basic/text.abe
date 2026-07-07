@@ -35,7 +35,7 @@ fn main() -> <frame, Graphics, IO> Unit {
     draw_text(&font, [80, 79, 83, 65, 82, 65], 6, 24, 24, 0x0000, 0);   // POSARA black, REPLACE
     rect(20, 60, 104, 20, 0x0000);                                      // black bar
     draw_text(&font, [80, 79, 83, 65, 82, 65], 6, 24, 62, 0xffff, 1);   // white XOR -> reverse video
-    device_in(0x2001, 1);
+    commit();
     frame.present()
   }
 }
