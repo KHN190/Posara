@@ -88,68 +88,6 @@ fn blit_4bpp_clips_out_of_bounds() {
 }
 
 #[test]
-#[ignore]
-fn blit_bench() {
-    use std::time::Instant;
-    let (w, h) = (480i64, 320i64);
-    let px = (w * h) as usize;
-    let data: Vec<u8> = (0..px / 2).map(|i| (i as u8) | 0x11).collect();
-    let n = 400;
-
-    let mut f = fb(w as usize, h as usize);
-    for i in 0..16 { f.palette[i] = (i as u16) * 0x1111; }
-
-    let t = Instant::now();
-    for _ in 0..n {
-        f.blit_4bpp(|i| data.get(i).copied().unwrap_or(0), 0, 0, 0, w, h, 100, 256);
-    }
-    let cur = t.elapsed();
-
-
-    let pal = f.palette;
-    let fw = f.w;
-    let t = Instant::now();
-    for _ in 0..n {
-        for y in 0..h as usize {
-            let row = y * fw;
-            let srow = y * w as usize;
-            for x in 0..w as usize {
-                let sn = srow + x;
-                let byte = data[sn / 2];
-                let idx = ((byte >> (4 * (1 - (sn & 1)))) & 0xF) as usize;
-                if idx != 0 { f.buf[row + x] = pal[idx]; }
-            }
-        }
-    }
-    let fast = t.elapsed();
-    println!("blit_4bpp {:?}  fastpath {:?}  speedup {:.2}x", cur, fast, cur.as_secs_f64() / fast.as_secs_f64());
-}
-
-#[test]
-#[ignore]
-fn dither_bench() {
-    use std::time::Instant;
-    let (w, h) = (480usize, 320usize);
-    let n = 400;
-    let mut f = fb(w, h);
-    for (i, p) in f.buf.iter_mut().enumerate() { *p = (i as u16).wrapping_mul(2654); }
-
-    let t = Instant::now();
-    for _ in 0..n { f.dither(0x0000, 0xFFFF); }
-    let reuse = t.elapsed();
-
-    let src: Vec<u16> = (0..w * h).map(|i| (i as u16).wrapping_mul(2654)).collect();
-    let mut sink = 0u64;
-    let t = Instant::now();
-    for _ in 0..n {
-        let lum: Vec<i32> = src.iter().map(|&c| c as i32).collect();
-        sink = sink.wrapping_add(lum[0] as u64);
-    }
-    let alloc_only = t.elapsed();
-    println!("dither(reuse) {:?}  fresh-alloc-only {:?}  (sink {})", reuse, alloc_only, sink);
-}
-
-#[test]
 fn cls_fills_whole_buffer() {
     let mut f = fb(3, 3);
     f.cls(0x1234);

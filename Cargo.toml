@@ -93,3 +93,11 @@ path = "tests/gfx/registration_test.rs"
 [[test]]
 name = "sfx_registration_test"
 path = "tests/sfx/registration_test.rs"
+
+[[test]]
+name = "lang_fs_test"
+path = "tests/lang/fs_test.rs"
+
+[[test]]
+name = "midi_dispatch_test"
+path = "tests/midi/dispatch_test.rs"

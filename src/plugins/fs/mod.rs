@@ -4,7 +4,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-use myriad::{alloc_string, read_string, NativeCtx, Value, VirtualMachine};
+use myriad::{alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine};
 
 const F_READ: i64 = 1;
 const F_WRITE: i64 = 2;
@@ -155,6 +155,18 @@ pub fn register_natives(vm: &mut VirtualMachine, root: PathBuf, fds: Rc<RefCell<
         let _ = got;
         Ok((Value::from_handle(slot, gen_), true))
     }));
+    // Like fs_read but returns Bytes (8 bytes packed per heap word, vs one byte
+    // per u64 word). For large sprite/sample buffers the 8x heap saving matters.
+    let fdt = Rc::clone(&fds);
+    vm.register_native("fs_readb", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+        let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
+        let mut buf = vec![0u8; n];
+        {
+            let mut t = fdt.borrow_mut();
+            match t.get(fd) { Some(f) => { let _ = f.read(&mut buf); }, None => return ret_int(-1) }
+        };
+        Ok((alloc_bytes(ctx.heap, &buf)?, true))
+    }));
     let fdt = Rc::clone(&fds);
     vm.register_native("fs_reads", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
@@ -202,6 +214,7 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("fs_close",      vec![T::Int],                   T::Int),
         ("fs_seek",       vec![T::Int, T::Int, T::Int],   T::Int),
         ("fs_read",       vec![T::Int, T::Int],           arr_int()),
+        ("fs_readb",      vec![T::Int, T::Int],           T::Named("Bytes".into())),
         ("fs_reads",  vec![T::Int, T::Int],           T::String),
         ("fs_write",      vec![T::Int, arr_int()],        T::Int),
         ("fs_writes", vec![T::Int, T::String],        T::Int),

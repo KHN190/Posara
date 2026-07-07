@@ -7,7 +7,7 @@ use polka::Value;
 
 use super::Framebuffer;
 
-pub const SCREEN_ID: u8 = 0x20;
+pub const SCREEN_ID: u8 = crate::devices::SCREEN;
 pub const PORT_CONFIGURE: u8 = 0x00;
 pub const PORT_COMMIT:    u8 = 0x01;
 

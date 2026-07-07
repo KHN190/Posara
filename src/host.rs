@@ -115,11 +115,11 @@ impl Host {
     pub fn install(&self, vm: &mut VirtualMachine) {
         for p in self.plugin_list() { p.install(vm); }
         #[cfg(not(feature = "midi"))]
-        vm.install_device(0x90, Box::new(StubDevice::new("MIDI", "midi")));
+        vm.install_device(crate::devices::MIDI, Box::new(StubDevice::new("MIDI", "midi")));
         #[cfg(not(feature = "gfx"))]
         {
-            vm.install_device(0x20, Box::new(StubDevice::new("Screen", "gfx")));
-            vm.install_device(0x80, Box::new(StubDevice::new("Controller", "gfx")));
+            vm.install_device(crate::devices::SCREEN, Box::new(StubDevice::new("Screen", "gfx")));
+            vm.install_device(crate::devices::CONTROLLER, Box::new(StubDevice::new("Controller", "gfx")));
         }
         register_time_natives(vm, self.start, Rc::clone(&self.clock));
         register_rand_natives(vm, Rc::clone(&self.rng));

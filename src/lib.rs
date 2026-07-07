@@ -1,3 +1,4 @@
+pub mod devices;
 pub mod plugin;
 pub mod plugins;
 pub mod debug;

@@ -34,8 +34,8 @@ pub fn from_abrase_lint(w: &abrase::lint::Lint) -> PosaraLint {
     p
 }
 
-const SCREEN_CONFIG_PORT: u64 = 0x2000;
-const SCREEN_COMMIT_PORT: u64 = 0x2001;
+const SCREEN_CONFIG_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x00);
+const SCREEN_COMMIT_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x01);
 
 const DRAW_NATIVES: &[&str] = &[
     "cls", "pset", "rect", "rectb", "rectmix", "dither", "line", "linew",
@@ -44,7 +44,7 @@ const DRAW_NATIVES: &[&str] = &[
 
 // System, Console, Screen, Controller, MIDI + abrase effect-dispatch ABI
 // ports (0xE0/E1/E2: DISPATCH_ID/MODULE_ID, every effectful cart emits these).
-pub const KNOWN_DEVICE_IDS: &[u8] = &[0x00, 0x10, 0x20, 0x80, 0x90, 0xE0, 0xE1, 0xE2];
+pub const KNOWN_DEVICE_IDS: &[u8] = crate::devices::KNOWN_IDS;
 
 fn known_device(id: u8) -> bool {
     KNOWN_DEVICE_IDS.contains(&id)

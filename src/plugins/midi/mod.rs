@@ -14,7 +14,7 @@ pub mod router;
 
 use router::{self as midi_router, Dest, NodeKind, RoutePlan};
 
-pub const MIDI_ID: u8 = 0x90;
+pub const MIDI_ID: u8 = crate::devices::MIDI;
 pub(crate) const PORT_EVENT: u8 = 0x00;
 pub(crate) const PORT_COUNT: u8 = 0x01;
 pub(crate) const PORT_SEND: u8 = 0x02;

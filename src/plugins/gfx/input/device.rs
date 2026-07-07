@@ -8,7 +8,7 @@ use polka::Value;
 use crate::gfx::Framebuffer;
 use super::Controller;
 
-pub const CONTROLLER_ID: u8 = 0x80;
+pub const CONTROLLER_ID: u8 = crate::devices::CONTROLLER;
 pub(crate) const PORT_BUTTONS: u8 = 0x02;
 pub(crate) const PORT_KEY:     u8 = 0x03;
 

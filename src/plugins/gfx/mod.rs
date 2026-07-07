@@ -283,10 +283,9 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         let pct = match a.get(6) { Some(v) => v.as_int().max(1), None => 100 };
         let alpha = match a.get(7) { Some(v) => v.as_int(), None => 256 };
         if data.is_handle_none() || w <= 0 || h <= 0 { return ret_unit(); }
-        let (slot, gen_) = data.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
+        let Some(bytes) = myriad::read_bytes(ctx.heap, data) else { return ret_unit(); };
         let mut fbm = f.borrow_mut();
-        fbm.blit_4bpp(|i| cells.get(i).copied().unwrap_or(0) as u8, off, x0, y0, w, h, pct, alpha);
+        fbm.blit_4bpp(|i| bytes.get(i).copied().unwrap_or(0), off, x0, y0, w, h, pct, alpha);
         ret_unit()
     });
     names
@@ -324,7 +323,7 @@ pub fn host_fn_io_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::t
 pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
     use abrase::ty::Type as T;
     let arr_int = || T::Generic { name: "Array".into(), args: vec![T::Int] };
-    let ref_arr = || T::Reference { is_mut: false, inner: Box::new(arr_int()) };
+    let ref_bytes = || T::Reference { is_mut: false, inner: Box::new(T::Named("Bytes".into())) };
     vec![
         ("screen",      vec![T::Int, T::Int],                              T::Unit),
         ("screen_off",  vec![],                                            T::Unit),
@@ -346,6 +345,6 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("blit",    vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
         ("blitg",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
         ("blitr",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("sprite",  vec![ref_arr(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("sprite",  vec![ref_bytes(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
     ]
 }

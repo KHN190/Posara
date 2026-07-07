@@ -9,20 +9,24 @@ fn check(path: &str) {
     assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
 }
 
-fn check_src(tag: &str, src: &str) {
+// compile AND run one-shot, so a missing/misnamed native surfaces at dispatch,
+// not just at type-check.
+fn run_src(tag: &str, src: &str) {
     use std::io::Write;
+    use posara::runner::{compile_abe, Stepper};
     let mut p = std::env::temp_dir();
     p.push(format!("posara_{tag}.abe"));
     std::fs::File::create(&p).unwrap().write_all(src.as_bytes()).unwrap();
     let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
-    let r = posara::runner::compile_abe(&p, &host);
+    let r = compile_abe(&p, &host).unwrap_or_else(|e| panic!("{tag} compile:\n{e}"));
+    let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
+    step.frame().unwrap_or_else(|e| panic!("{tag} dispatch:\n{e}"));
     std::fs::remove_file(&p).ok();
-    assert!(r.is_ok(), "{tag} failed to compile:\n{}", r.err().unwrap());
 }
 
 #[test]
-fn snd_prefixed_names_compile() {
-    check_src("snd_names", "@cart\nfn main() -> <IO> Unit {\n  snd_voices(8);\n  snd_osc(0, 0, 1, 0, 0, 80);\n  snd_on(0, 60, 80, 500);\n  snd_bus_reverb(20, 30, 40);\n  ()\n}\n");
+fn snd_prefixed_names_dispatch() {
+    run_src("snd_names", "@cart\nfn main() -> <frame, IO> Unit {\n  snd_voices(8);\n  snd_osc(0, 0, 1, 0, 0, 80);\n  snd_on(0, 60, 80, 500);\n  snd_bus_reverb(20, 30, 40);\n  loop { frame.present() }\n}\n");
 }
 
 #[test]
