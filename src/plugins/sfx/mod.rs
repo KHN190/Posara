@@ -101,7 +101,6 @@ fn arg(args: &[Value], i: usize) -> i64 {
     args.get(i).copied().unwrap_or(Value::ZERO).as_int()
 }
 
-// A 0..100 cart integer as a 0.0..1.0 gain/ratio — the sfx control convention.
 fn pct(args: &[Value], i: usize) -> f32 { (arg(args, i).clamp(0, 100) as f32) / 100.0 }
 
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
@@ -109,7 +108,8 @@ fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 // Every sfx native pushes one Cmd onto the lock-free ring; the audio thread
 // drains it. Ring full → command dropped (`let _`), which only happens under
 // absurd command spam — control rate is tiny vs the 1024-slot ring.
-pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
+pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
+    let mut names = Vec::new();
     macro_rules! native {
         ($name:literal, |$a:ident| $cmd:expr) => {{
             let p = Arc::clone(&cmds);
@@ -117,6 +117,7 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
                 push(&p, $cmd);
                 ret_unit()
             }));
+            names.push($name);
         }};
     }
 
@@ -148,14 +149,14 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
     native!("sfx_off", |a| Cmd::Off(arg(a, 0).max(0) as usize));
 
     // master-bus time effects (affect synth + sfx)
-    native!("mx_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
+    native!("snd_bus_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
         pct(a, 1), pct(a, 2)));
-    native!("mx_reverb", |a| Cmd::BusReverb(pct(a, 0),
+    native!("snd_bus_reverb", |a| Cmd::BusReverb(pct(a, 0),
         pct(a, 1), pct(a, 2)));
 
     // sequencer
     let p = Arc::clone(&cmds);
-    vm.register_native("sfx_seq", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let pattern = a.first().copied().unwrap_or(Value::NONE);
         let ms_per_tick = arg(a, 1).max(1) as u32;
         if pattern.is_handle_none() { return ret_unit(); }
@@ -164,12 +165,14 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
         let events: Vec<seq::Event> = cells.iter().map(|&w| seq::unpack(w as i64)).collect();
         push(&p, Cmd::Seq(events, ms_per_tick));
         ret_unit()
-    }));
+    }) as myriad::NativeFn;
+    vm.register_native("snd_seq", g);
+    names.push("snd_seq");
     // sfx_track: like sfx_seq but the array is a packed byte stream (each elem's
     // low 8 bits = one byte), 8 LE bytes per i64 event — the layout fs_read gives
     // from a .trk asset. All-zero words (padding) skipped.
     let p = Arc::clone(&cmds);
-    vm.register_native("sfx_track", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let bytes = a.first().copied().unwrap_or(Value::NONE);
         let ms_per_tick = arg(a, 1).max(1) as u32;
         if bytes.is_handle_none() { return ret_unit(); }
@@ -185,13 +188,15 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
         }
         push(&p, Cmd::Seq(events, ms_per_tick));
         ret_unit()
-    }));
-    native!("sfx_seqstop", |_a| Cmd::SeqStop);
+    }) as myriad::NativeFn;
+    vm.register_native("snd_track", g);
+    names.push("snd_track");
+    native!("snd_seqstop", |_a| Cmd::SeqStop);
 
     // sfx_sample: play a 1-bit delta-sigma stream (fs_read bytes, low 8 bits =
     // one byte, MSB-first) at `rate` Hz — the mp32sample playback path.
     let p = Arc::clone(&cmds);
-    vm.register_native("sfx_sample", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let buf = a.first().copied().unwrap_or(Value::NONE);
         let rate = arg(a, 1).max(1) as f32;
         let vol = pct(a, 2);
@@ -201,8 +206,11 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
         let bytes: Vec<u8> = cells.iter().map(|&c| (c & 0xFF) as u8).collect();
         push(&p, Cmd::Sample(bytes, rate, vol));
         ret_unit()
-    }));
-    native!("sfx_samplestop", |_a| Cmd::SampleStop);
+    }) as myriad::NativeFn;
+    vm.register_native("snd_sample", g);
+    names.push("snd_sample");
+    native!("snd_samplestop", |_a| Cmd::SampleStop);
+    names
 }
 
 #[cfg(feature = "fs")]
@@ -214,12 +222,12 @@ pub fn register_record_natives(
     channels: u16,
     root: PathBuf,
     rec: RecorderSlot,
-) {
+) -> Vec<&'static str> {
     let r = root.clone();
     let rs = Rc::clone(&rec);
     let rg = Arc::clone(&ring);
     let en = Arc::clone(&enabled);
-    vm.register_native("mx_record_start", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    let start = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let Some(rel) = a.first().copied().and_then(|v| read_string(ctx.heap, v)) else {
             return Ok((Value::from_int(-1), false));
         };
@@ -233,9 +241,10 @@ pub fn register_record_natives(
             Ok(r) => { *rs.borrow_mut() = Some(r); Ok((Value::from_int(0), false)) }
             Err(e) => { eprintln!("mx_record_start: {e}"); Ok((Value::from_int(-1), false)) }
         }
-    }));
+    });
+    vm.register_native("snd_bus_record_start", start);
     let rs = Rc::clone(&rec);
-    vm.register_native("mx_record_stop", Rc::new(move |_ctx: &mut NativeCtx, _a: &[Value]| {
+    let stop = Rc::new(move |_ctx: &mut NativeCtx, _a: &[Value]| {
         let mut slot = rs.borrow_mut();
         let Some(r) = slot.as_mut() else {
             return Ok((Value::from_int(-1), false));
@@ -246,7 +255,9 @@ pub fn register_record_natives(
         };
         *slot = None;
         Ok((Value::from_int(result), false))
-    }));
+    });
+    vm.register_native("snd_bus_record_stop", stop);
+    vec!["snd_bus_record_start", "snd_bus_record_stop"]
 }
 
 #[cfg(feature = "compiler")]
@@ -262,21 +273,21 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("sfx_pan",     vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_fx",      vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_lfo",     vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("mx_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("mx_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("snd_bus_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("snd_bus_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("sfx_play",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_playm",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
         ("sfx_off",     vec![T::Int],                                          T::Unit),
-        ("sfx_seq",     vec![arr_int(), T::Int],                               T::Unit),
-        ("sfx_track",   vec![arr_int(), T::Int],                               T::Unit),
-        ("sfx_sample",  vec![arr_int(), T::Int, T::Int],                       T::Unit),
-        ("sfx_samplestop", vec![],                                             T::Unit),
-        ("sfx_seqstop", vec![],                                                T::Unit),
+        ("snd_seq",     vec![arr_int(), T::Int],                               T::Unit),
+        ("snd_track",   vec![arr_int(), T::Int],                               T::Unit),
+        ("snd_sample",  vec![arr_int(), T::Int, T::Int],                       T::Unit),
+        ("snd_samplestop", vec![],                                             T::Unit),
+        ("snd_seqstop", vec![],                                                T::Unit),
     ];
     #[cfg(feature = "fs")]
     {
-        decls.push(("mx_record_start", vec![T::String], T::Int));
-        decls.push(("mx_record_stop",  vec![],          T::Int));
+        decls.push(("snd_bus_record_start", vec![T::String], T::Int));
+        decls.push(("snd_bus_record_stop",  vec![],          T::Int));
     }
     decls
 }

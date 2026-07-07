@@ -45,3 +45,51 @@ myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
 polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
+
+[[test]]
+name = "gfx_framebuffer_test"
+path = "tests/gfx/framebuffer_test.rs"
+
+[[test]]
+name = "gfx_raster_test"
+path = "tests/gfx/raster_test.rs"
+
+[[test]]
+name = "gfx_controller_test"
+path = "tests/gfx/controller_test.rs"
+
+[[test]]
+name = "sfx_spsc_test"
+path = "tests/sfx/spsc_test.rs"
+
+[[test]]
+name = "sfx_synth_output_test"
+path = "tests/sfx/synth_output_test.rs"
+
+[[test]]
+name = "sfx_env_test"
+path = "tests/sfx/env_test.rs"
+
+[[test]]
+name = "lang_compile_carts_test"
+path = "tests/lang/compile_carts_test.rs"
+
+[[test]]
+name = "lang_lint_test"
+path = "tests/lang/lint_test.rs"
+
+[[test]]
+name = "lang_break_at_test"
+path = "tests/lang/break_at_test.rs"
+
+[[test]]
+name = "midi_router_test"
+path = "tests/midi/midi_router_test.rs"
+
+[[test]]
+name = "gfx_registration_test"
+path = "tests/gfx/registration_test.rs"
+
+[[test]]
+name = "sfx_registration_test"
+path = "tests/sfx/registration_test.rs"

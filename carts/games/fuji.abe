@@ -154,7 +154,7 @@ fn draw_sky_buf(sky_buf: &Array<Int>) -> <Graphics> Unit {
   while cy < 320 {
     let mut cx = 0;
     while cx < 480 {
-      rect(cx, cy, cell, cell, sky_buf[(cy / cell) * 40 + cx / cell]);
+      gfx_rect(cx, cy, cell, cell, sky_buf[(cy / cell) * 40 + cx / cell]);
       cx = cx + cell
     };
     cy = cy + cell
@@ -318,9 +318,9 @@ fn draw_mt_body_cached(mt_row_buf: &Array<Int>, gr: Int) -> <Graphics> Unit {
       let roh = dome + (MTNR[y] - 128) * dome / 512;
       let lo  = MTOFF_L[y];
       let ro  = MTOFF_R[y];
-      rect(cxm - loh, y, loh + roh, 1, color);
+      gfx_rect(cxm - loh, y, loh + roh, 1, color);
       let fac = MT_GRASS_FAC[y];
-      if fac > 0 { rect(cxm - lo * fac / 256, y, (lo + ro) * fac / 256, 1, gr) }
+      if fac > 0 { gfx_rect(cxm - lo * fac / 256, y, (lo + ro) * fac / 256, 1, gr) }
     };
     y = y + 1
   }
@@ -381,7 +381,7 @@ fn draw_mt_tex_cached(mt_tex_buf: &Array<Int>) -> <Graphics> Unit {
     let mut cx = xl;
     while cx < x1 {
       let c = mt_tex_buf[(cy / cell) * 80 + cx / cell];
-      if c != 0 { rect(cx, cy, cell, cell, c) };
+      if c != 0 { gfx_rect(cx, cy, cell, cell, c) };
       cx = cx + cell
     };
     cy = cy + cell
@@ -452,8 +452,8 @@ fn clump(cx: Int, cy: Int, depth: Int, la: Int, leaf: Int, leaf2: Int, bid: Int)
   let rs  = rad * sa / 256;
   let hc  = h * ca / 256;
   let hs  = h * sa / 256;
-  tri(cx + rs, cy - rc, cx - rc - hs, cy - rs + hc, cx + rc - hs, cy + rs + hc, lc);
-  tri(cx - rs, cy + rc, cx - rc + hs, cy - rs - hc, cx + rc + hs, cy + rs - hc, lc)
+  gfx_tri(cx + rs, cy - rc, cx - rc - hs, cy - rs + hc, cx + rc - hs, cy + rs + hc, lc);
+  gfx_tri(cx - rs, cy + rc, cx - rc + hs, cy - rs - hc, cx + rc + hs, cy + rs - hc, lc)
 }
 
 fn collect_branch(segs: &mut Array<Int>, n: Int, off: Int, x0: Int, y0: Int, ang: Int, len: Int, depth: Int, ba: Int, tw: Int, lr: Int, sway: Int, dep: Int, bid: Int) -> Int {
@@ -485,7 +485,7 @@ fn draw_tree_segs(segs: &Array<Int>, n: Int, off: Int, dep: Int, trunk: Int, lea
     let tw    = segs[base+4];
     let depth = segs[base+5] / 100;
     let bid   = segs[base+5] % 100;
-    linew(x0, y0, x1, y1, tw, trunk);
+    gfx_linew(x0, y0, x1, y1, tw, trunk);
     if depth < dep && la > 20 { clump(x1, y1, depth, la, leaf, leaf2, bid) };
     j = j + 1
   }
@@ -589,7 +589,7 @@ fn draw_snow_sliced(snow_buf: &mut Array<Int>, frame: Int, yp: Int, dk: Int) -> 
           snow_buf[idx] = warp - carve
         };
         let d = alt + snow_buf[idx] - (256 - amt);
-        if d > 24 { rect(cx, cy, cell, cell, white) };
+        if d > 24 { gfx_rect(cx, cy, cell, cell, white) };
         cx = cx + cell
       };
       cy = cy + cell
@@ -633,7 +633,7 @@ fn draw_fog_buf(fog_buf: &Array<Int>, b: Int, dk: Int) -> <Graphics> Unit {
     let mut cx = 0;
     while cx < 480 {
       let d = fog_buf[(cy / cell) * 40 + cx / cell];
-      if d > 4 { rectmix(cx, cy, cell, cell, mistc, d) };
+      if d > 4 { gfx_rectmix(cx, cy, cell, cell, mistc, d) };
       cx = cx + cell
     };
     cy = cy + cell
@@ -641,7 +641,7 @@ fn draw_fog_buf(fog_buf: &Array<Int>, b: Int, dk: Int) -> <Graphics> Unit {
 }
 
 @cart fn main() -> <frame, Graphics, IO> Unit {
-  screen(480, 320);
+  gfx_screen(480, 320);
   let mut sky_buf    = [0; 1080];
   let mut snow_buf   = [0; 8000];
   let mut fog_buf    = [0; 600];
@@ -685,8 +685,8 @@ fn draw_fog_buf(fog_buf: &Array<Int>, b: Int, dk: Int) -> <Graphics> Unit {
     draw_trees(&tree_segs, &tree_seg_n, &tree_dep, si, sj, sf, dk);
     tick_fog(&mut fog_buf, fr, t);
     draw_fog_buf(&fog_buf, b, dk);
-    dither(0, 0xffff);
-    commit();
+    gfx_dither(0, 0xffff);
+    gfx_commit();
     fr = fr + 1;
     frame.present()
   }

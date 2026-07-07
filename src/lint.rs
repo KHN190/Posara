@@ -87,7 +87,7 @@ fn reachable(seed: &[usize], facts: &[FnFacts]) -> BTreeSet<usize> {
 pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
     let native_id = |want: &str| -> Option<usize> {
         module.functions.iter().enumerate().find_map(|(i, c)| match c {
-            Chunk::Native(n) if n.name == want => Some(i),
+            Chunk::Native(n) if n.name == want || n.name.strip_prefix("gfx_") == Some(want) => Some(i),
             _ => None,
         })
     };
@@ -95,7 +95,7 @@ pub fn lint_module(module: &Module) -> Vec<PosaraLint> {
     let screen_off_id = native_id("screen_off");
     let commit_id = native_id("commit");
     let draw_ids: BTreeSet<usize> = module.functions.iter().enumerate().filter_map(|(i, c)| match c {
-        Chunk::Native(n) if DRAW_NATIVES.contains(&n.name.as_str()) => Some(i),
+        Chunk::Native(n) if DRAW_NATIVES.contains(&n.name.strip_prefix("gfx_").unwrap_or(&n.name)) => Some(i),
         _ => None,
     }).collect();
     let update_fid = module.exports.iter().find(|e| e.name == "update").map(|e| e.fn_id as usize);

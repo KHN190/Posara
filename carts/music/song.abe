@@ -4,27 +4,27 @@
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
-  screen_off();
-  screen(160, 120);
-  cls(0x0000);
+  gfx_screen_off();
+  gfx_screen(160, 120);
+  gfx_cls(0x0000);
 
-  synth_voices(24);
+  snd_voices(24);
 
   // 0 = felt piano: soft attack, short tail so notes don't smear into a wash.
-  synth_osc(0, 0, 2, 0, 0, 86);
-  synth_osc(0, 1, 1, 12, 5, 12);
-  synth_unison(0, 2, 2);
-  synth_filter(0, 0, 1800, 5);
-  synth_env(0, 0, 0, 100, 8, 480, 8, 420);
-  synth_lfo(0, 2, 1, 18, 2);
+  snd_osc(0, 0, 2, 0, 0, 86);
+  snd_osc(0, 1, 1, 12, 5, 12);
+  snd_unison(0, 2, 2);
+  snd_filter(0, 0, 1800, 5);
+  snd_env(0, 0, 0, 100, 8, 480, 8, 420);
+  snd_lfo(0, 2, 1, 18, 2);
 
   // 1 = bass pedal: dark sine weight.
-  synth_osc(1, 0, 1, 0, 0, 100);
-  synth_filter(1, 0, 480, 4);
-  synth_env(1, 0, 0, 100, 120, 800, 35, 900);
+  snd_osc(1, 0, 1, 0, 0, 100);
+  snd_filter(1, 0, 480, 4);
+  snd_env(1, 0, 0, 100, 120, 800, 35, 900);
 
-  mx_reverb(22, 50, 20);
-  mx_delay(420, 30, 10);
+  snd_bus_reverb(22, 50, 20);
+  snd_bus_delay(420, 30, 10);
 
   let EV = [
     0,44,56,1625,28,56,52,1347,1500,55,43,875,2500,58,58,500,3000,51,25,125,3028,63,59,472,3056,75,38,444,3500,60,55,1000,3528,72,37,472,4000,58,48,750,4028,72,29,472,4500,44,39,500,4528,67,66,972,4750,56,47,750,5000,44,40,500,5028,63,44,222,5250,60,35,250,5500,44,33,500,5528,56,52,5847,5556,68,73,1069,6000,44,35,750,6750,44,39,500,
@@ -61,15 +61,15 @@ fn main() -> <frame, Graphics, IO> Unit {
       if EV[idx * 4] <= pt {
         let note = EV[idx * 4 + 1];
         let p = if note < 50 { 1 } else { 0 };
-        synth_on(p, note, EV[idx * 4 + 2], EV[idx * 4 + 3]);
+        snd_on(p, note, EV[idx * 4 + 2], EV[idx * 4 + 3]);
         idx = idx + 1
       } else { idx = idx }
     } else {
       idx = 0; t0 = t
     };
 
-    cls(0x0000);
-    commit();
+    gfx_cls(0x0000);
+    gfx_commit();
     frame.present()
   }
 }

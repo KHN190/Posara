@@ -82,6 +82,21 @@ fn missing_commit_frame_suppressed_by_commit_native() {
 }
 
 #[test]
+fn missing_commit_frame_suppressed_by_gfx_prefixed_commit() {
+    let mut chunk = bc();
+    chunk.constants.extend([320u64, 240]);
+    chunk.code.push(OpCode::PushConst(Register(0), 0));
+    chunk.code.push(OpCode::PushConst(Register(1), 1));
+    chunk.code.push(OpCode::Call(Register(2), 0)); // gfx_screen (fn 0)
+    chunk.code.push(OpCode::Call(Register(2), 1)); // gfx_commit (fn 1)
+
+    let gfx_screen = Chunk::Native(NativeChunk { name: "gfx_screen".into(), param_count: 2 });
+    let gfx_commit = Chunk::Native(NativeChunk { name: "gfx_commit".into(), param_count: 0 });
+    let m = module_with(vec![gfx_screen, gfx_commit, Chunk::Bytecode(chunk)], vec![update_export(2)]);
+    assert!(!has(&lint_module(&m), "missing_commit_frame"));
+}
+
+#[test]
 fn missing_commit_frame_no_update_no_warn() {
     let mut chunk = bc();
     chunk.constants.extend([320u64, 240]);

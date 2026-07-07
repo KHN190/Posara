@@ -9,6 +9,22 @@ fn check(path: &str) {
     assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
 }
 
+fn check_src(tag: &str, src: &str) {
+    use std::io::Write;
+    let mut p = std::env::temp_dir();
+    p.push(format!("posara_{tag}.abe"));
+    std::fs::File::create(&p).unwrap().write_all(src.as_bytes()).unwrap();
+    let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
+    let r = posara::runner::compile_abe(&p, &host);
+    std::fs::remove_file(&p).ok();
+    assert!(r.is_ok(), "{tag} failed to compile:\n{}", r.err().unwrap());
+}
+
+#[test]
+fn snd_prefixed_names_compile() {
+    check_src("snd_names", "@cart\nfn main() -> <IO> Unit {\n  snd_voices(8);\n  snd_osc(0, 0, 1, 0, 0, 80);\n  snd_on(0, 60, 80, 500);\n  snd_bus_reverb(20, 30, 40);\n  ()\n}\n");
+}
+
 #[test]
 fn hello_compiles() { check("carts/basic/hello.abe"); }
 

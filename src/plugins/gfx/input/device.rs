@@ -9,8 +9,8 @@ use crate::gfx::Framebuffer;
 use super::Controller;
 
 pub const CONTROLLER_ID: u8 = 0x80;
-pub const PORT_BUTTONS: u8 = 0x02;
-pub const PORT_KEY:     u8 = 0x03;
+pub(crate) const PORT_BUTTONS: u8 = 0x02;
+pub(crate) const PORT_KEY:     u8 = 0x03;
 
 pub struct ControllerDevice {
     controller: Rc<RefCell<Controller>>,
@@ -23,10 +23,7 @@ impl ControllerDevice {
     }
 
     fn refresh(&self) {
-        let fb = self.fb.borrow();
-        if let Some(win) = fb.window.as_ref() {
-            self.controller.borrow_mut().poll(win);
-        }
+        super::poll_controller(&self.controller, &self.fb);
     }
 }
 

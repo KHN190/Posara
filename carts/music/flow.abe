@@ -97,8 +97,8 @@ fn main() -> <frame, IO, nondet> Unit {
   sfx_inst(3, 1, 2, 10, 60, 40);
   sfx_pan(3, 85, 85);
   // space: dry to start, opens across the arch (set per bar below).
-  mx_reverb(66, 38, 12);
-  mx_delay(375, 32, 10);
+  snd_bus_reverb(66, 38, 12);
+  snd_bus_delay(375, 32, 10);
 
   let t0 = now();
   srand(t0);
@@ -174,8 +174,8 @@ fn main() -> <frame, IO, nondet> Unit {
         // SPACE arch: dry intro → wetter body → big open ending.
         let rmix = match dt { 0..16000 => 12, 16000..82000 => 24, 82000..146000 => 38, _ => 56 };
         let dmix = match dt { 0..82000 => 12, 82000..146000 => 26, _ => 36 };
-        mx_reverb(66, 38, rmix);
-        mx_delay(375, 34, dmix)
+        snd_bus_reverb(66, 38, rmix);
+        snd_bus_delay(375, 34, dmix)
       };
       pos = np;
       grid_t += 125

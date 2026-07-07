@@ -42,7 +42,8 @@ fn arg(args: &[Value], i: usize) -> i64 {
 
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 
-pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
+pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
+    let mut names = Vec::new();
     macro_rules! native {
         ($name:literal, |$a:ident| $cmd:expr) => {{
             let p = Arc::clone(&cmds);
@@ -50,45 +51,47 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) {
                 push(&p, $cmd);
                 ret_unit()
             }));
+            names.push($name);
         }};
     }
 
-    native!("synth_osc", |a| Cmd::SynOsc(arg(a, 0).max(0) as usize, arg(a, 1).max(0) as usize,
+    native!("snd_osc", |a| Cmd::SynOsc(arg(a, 0).max(0) as usize, arg(a, 1).max(0) as usize,
         arg(a, 2).clamp(0, 4) as u8, arg(a, 3), arg(a, 4) as f32, (arg(a, 5).clamp(0, 100) as f32) / 100.0));
-    native!("synth_filter", |a| Cmd::SynFilter(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 3) as u8,
+    native!("snd_filter", |a| Cmd::SynFilter(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 3) as u8,
         arg(a, 2).max(0) as f32, arg(a, 3) as f32));
-    native!("synth_env", |a| Cmd::SynEnv(arg(a, 0).max(0) as usize, arg(a, 1).max(0) as usize,
+    native!("snd_env", |a| Cmd::SynEnv(arg(a, 0).max(0) as usize, arg(a, 1).max(0) as usize,
         arg(a, 2).clamp(0, 2) as u8, arg(a, 3) as f32, arg(a, 4).max(0) as f32 / 1000.0,
         arg(a, 5).max(0) as f32 / 1000.0, (arg(a, 6).clamp(0, 100) as f32) / 100.0, arg(a, 7).max(0) as f32 / 1000.0));
-    native!("synth_lfo", |a| Cmd::SynLfo(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 2) as u8,
+    native!("snd_lfo", |a| Cmd::SynLfo(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 2) as u8,
         arg(a, 2).clamp(0, 3) as u8, arg(a, 3).max(0) as f32 / 100.0, (arg(a, 4).clamp(0, 100) as f32) / 100.0));
-    native!("synth_pan", |a| Cmd::SynPan(arg(a, 0).max(0) as usize, (arg(a, 1).clamp(-100, 100) as f32) / 100.0));
-    native!("synth_unison", |a| Cmd::SynUnison(arg(a, 0).max(0) as usize, arg(a, 1).clamp(1, 7) as u8, arg(a, 2) as f32));
-    native!("synth_fx", |a| Cmd::SynFx(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 5) as u8,
+    native!("snd_pan", |a| Cmd::SynPan(arg(a, 0).max(0) as usize, (arg(a, 1).clamp(-100, 100) as f32) / 100.0));
+    native!("snd_unison", |a| Cmd::SynUnison(arg(a, 0).max(0) as usize, arg(a, 1).clamp(1, 7) as u8, arg(a, 2) as f32));
+    native!("snd_fx", |a| Cmd::SynFx(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 5) as u8,
         (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as f32));
-    native!("synth_voices", |a| Cmd::SynVoices(arg(a, 0).max(1) as usize));
-    native!("synth_on", |a| Cmd::SynOn(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 127) as u8,
+    native!("snd_voices", |a| Cmd::SynVoices(arg(a, 0).max(1) as usize));
+    native!("snd_on", |a| Cmd::SynOn(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 127) as u8,
         (arg(a, 2).clamp(0, 100) as f32) / 100.0, arg(a, 3).max(0) as u32));
-    native!("synth_off", |a| Cmd::SynOff(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 127) as u8));
-    native!("synth_stop", |a| Cmd::SynStop(arg(a, 0).max(0) as usize));
-    native!("synth_panic", |_a| Cmd::SynPanic);
+    native!("snd_off", |a| Cmd::SynOff(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 127) as u8));
+    native!("snd_stop", |a| Cmd::SynStop(arg(a, 0).max(0) as usize));
+    native!("snd_panic", |_a| Cmd::SynPanic);
+    names
 }
 
 #[cfg(feature = "compiler")]
 pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
     use abrase::ty::Type as T;
     vec![
-        ("synth_osc",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],         T::Unit),
-        ("synth_filter", vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
-        ("synth_env",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("synth_lfo",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],                 T::Unit),
-        ("synth_pan",    vec![T::Int, T::Int],                                         T::Unit),
-        ("synth_unison", vec![T::Int, T::Int, T::Int],                                 T::Unit),
-        ("synth_fx",     vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
-        ("synth_voices", vec![T::Int],                                                 T::Unit),
-        ("synth_on",     vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
-        ("synth_off",    vec![T::Int, T::Int],                                         T::Unit),
-        ("synth_stop",   vec![T::Int],                                                 T::Unit),
-        ("synth_panic",  vec![],                                                       T::Unit),
+        ("snd_osc",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],         T::Unit),
+        ("snd_filter", vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
+        ("snd_env",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("snd_lfo",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],                 T::Unit),
+        ("snd_pan",    vec![T::Int, T::Int],                                         T::Unit),
+        ("snd_unison", vec![T::Int, T::Int, T::Int],                                 T::Unit),
+        ("snd_fx",     vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
+        ("snd_voices", vec![T::Int],                                                 T::Unit),
+        ("snd_on",     vec![T::Int, T::Int, T::Int, T::Int],                         T::Unit),
+        ("snd_off",    vec![T::Int, T::Int],                                         T::Unit),
+        ("snd_stop",   vec![T::Int],                                                 T::Unit),
+        ("snd_panic",  vec![],                                                       T::Unit),
     ]
 }

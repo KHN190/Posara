@@ -15,9 +15,9 @@ pub mod router;
 use router::{self as midi_router, Dest, NodeKind, RoutePlan};
 
 pub const MIDI_ID: u8 = 0x90;
-pub const PORT_EVENT: u8 = 0x00;
-pub const PORT_COUNT: u8 = 0x01;
-pub const PORT_SEND: u8 = 0x02;
+pub(crate) const PORT_EVENT: u8 = 0x00;
+pub(crate) const PORT_COUNT: u8 = 0x01;
+pub(crate) const PORT_SEND: u8 = 0x02;
 
 pub type MidiQueue = Arc<Mutex<VecDeque<u32>>>;
 pub type MidiOut = Arc<Mutex<MidiOutputConnection>>;
@@ -331,10 +331,52 @@ impl Plugin for MidiPlugin {
             })),
             None => vm.install_device(MIDI_ID, Box::new(LazyMidiDevice { inner: None })),
         }
+        register_midi_natives(vm);
     }
 
     #[cfg(feature = "compiler")]
-    fn register_fns(&self, _compiler: &mut abrase::compiler::Compiler) -> Result<(), String> {
+    fn register_fns(&self, compiler: &mut abrase::compiler::Compiler) -> Result<(), String> {
+        use abrase::ast::EffectItem;
+        let io = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
+        for (name, params, ret) in midi_fn_decls() {
+            compiler.register_host_fn(name, params, ret, io())?;
+        }
         Ok(())
     }
+}
+
+fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
+
+pub fn register_midi_natives(vm: &mut VirtualMachine) {
+    use myriad::NativeCtx;
+    use std::rc::Rc;
+    vm.register_native("midi_poll", Rc::new(|ctx: &mut NativeCtx, _: &[Value]| {
+        match ctx.devices.get_mut(MIDI_ID) {
+            Some(d) => d.read(PORT_EVENT),
+            None => Ok((Value::ZERO, false)),
+        }
+    }));
+    vm.register_native("midi_count", Rc::new(|ctx: &mut NativeCtx, _: &[Value]| {
+        match ctx.devices.get_mut(MIDI_ID) {
+            Some(d) => d.read(PORT_COUNT),
+            None => Ok((Value::ZERO, false)),
+        }
+    }));
+    vm.register_native("midi_send", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
+        let w = a.first().copied().unwrap_or(Value::ZERO);
+        if let Some(d) = ctx.devices.get_mut(MIDI_ID) {
+            d.write(PORT_SEND, w, false, ctx.heap)?;
+        }
+        ret_unit()
+    }));
+}
+
+#[cfg(feature = "compiler")]
+pub fn midi_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
+    use abrase::ty::Type as T;
+    vec![
+        ("midi_poll",  vec![],        T::Int),
+        ("midi_count", vec![],        T::Int),
+        ("midi_send",  vec![T::Int],  T::Unit),
+    ]
 }

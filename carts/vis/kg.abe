@@ -20,15 +20,15 @@ fn load_sheet() -> <IO> Array<Int> {
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
-  screen(480, 320);
-  for i in 0..16 { pal(i, REAL[i]) };
+  gfx_screen(480, 320);
+  for i in 0..16 { gfx_pal(i, REAL[i]) };
   let sheet = load_sheet();
   loop {
     let t = now();
     let f = t / 83 % NF;
-    cls(0x0000);
-    sprite(&sheet, f * FW * FH, 208, 88, FW, FH, 100, 256);
-    commit();
+    gfx_cls(0x0000);
+    gfx_sprite(&sheet, f * FW * FH, 208, 88, FW, FH, 100, 256);
+    gfx_commit();
     frame.present()
   }
 }

@@ -24,3 +24,4 @@ pub use input::{Button, Controller};
 #[cfg(feature = "sfx")]
 pub use sfx::{Audio, Mixer};
 pub use host::Host;
+pub use myriad::VirtualMachine;

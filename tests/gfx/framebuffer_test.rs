@@ -69,7 +69,6 @@ fn blit_4bpp_places_nibbles_and_skips_index0() {
     let mut f = fb(4, 4);
     f.palette[1] = 0xABCD;
     f.palette[2] = 0x1234;
-    // 2x2 sprite, pixels (row-major): [1,0, 2,1] packed high-nibble-first.
     let data: [u8; 2] = [0x10, 0x21];
     f.blit_4bpp(|i| data.get(i).copied().unwrap_or(0), 0, 1, 1, 2, 2, 100, 256);
     assert_eq!(f.buf[1 * 4 + 1], 0xABCD); // idx 1
@@ -88,15 +87,13 @@ fn blit_4bpp_clips_out_of_bounds() {
     assert!(f.buf.iter().all(|&p| p == 0x7777));
 }
 
-// Perf probe: full-screen 480x320 4bpp opaque blit. Run:
-//   cargo test --release --features gfx blit_bench -- --ignored --nocapture
 #[test]
 #[ignore]
 fn blit_bench() {
     use std::time::Instant;
     let (w, h) = (480i64, 320i64);
     let px = (w * h) as usize;
-    let data: Vec<u8> = (0..px / 2).map(|i| (i as u8) | 0x11).collect(); // all nonzero nibbles
+    let data: Vec<u8> = (0..px / 2).map(|i| (i as u8) | 0x11).collect();
     let n = 400;
 
     let mut f = fb(w as usize, h as usize);
@@ -108,8 +105,7 @@ fn blit_bench() {
     }
     let cur = t.elapsed();
 
-    // Optimized fast path for the hot case (pct=100, opaque, fully on-screen):
-    // no per-pixel divide, no bounds branch, contiguous row writes.
+
     let pal = f.palette;
     let fw = f.w;
     let t = Instant::now();
@@ -129,8 +125,6 @@ fn blit_bench() {
     println!("blit_4bpp {:?}  fastpath {:?}  speedup {:.2}x", cur, fast, cur.as_secs_f64() / fast.as_secs_f64());
 }
 
-// Perf probe: dither reuse vs fresh Vec alloc each call. Run:
-//   cargo test --release --features gfx dither_bench -- --ignored --nocapture
 #[test]
 #[ignore]
 fn dither_bench() {
@@ -141,15 +135,14 @@ fn dither_bench() {
     for (i, p) in f.buf.iter_mut().enumerate() { *p = (i as u16).wrapping_mul(2654); }
 
     let t = Instant::now();
-    for _ in 0..n { f.dither(0x0000, 0xFFFF); } // reuses lum_scratch
+    for _ in 0..n { f.dither(0x0000, 0xFFFF); }
     let reuse = t.elapsed();
 
-    // baseline: allocate the lum vec fresh each call (old behavior)
     let src: Vec<u16> = (0..w * h).map(|i| (i as u16).wrapping_mul(2654)).collect();
     let mut sink = 0u64;
     let t = Instant::now();
     for _ in 0..n {
-        let lum: Vec<i32> = src.iter().map(|&c| c as i32).collect(); // fresh alloc
+        let lum: Vec<i32> = src.iter().map(|&c| c as i32).collect();
         sink = sink.wrapping_add(lum[0] as u64);
     }
     let alloc_only = t.elapsed();

@@ -72,17 +72,11 @@ impl Framebuffer {
         }
     }
 
-    // 4bpp palette blit shared by the `sprite` (u64-cell source) and
-    // `sprite_file` (raw byte source) natives. `get` returns the packed byte at
-    // a 4bpp *byte* index; two pixels per byte, high nibble first, index 0
-    // transparent. `pct` scales, `alpha` 256 = opaque fast path.
     pub fn blit_4bpp<F: Fn(usize) -> u8>(
         &mut self, get: F, off: usize, x0: i64, y0: i64, w: i64, h: i64, pct: i64, alpha: i64,
     ) {
         if w <= 0 || h <= 0 { return; }
         let opaque = alpha >= 256;
-        // Hot case (full-screen frame playback): unscaled, opaque, fully
-        // on-screen. Skip the per-pixel divide and pset bounds branch.
         if pct == 100 && opaque
             && x0 >= 0 && y0 >= 0
             && x0 + w <= self.w as i64 && y0 + h <= self.h as i64
@@ -161,7 +155,7 @@ impl Framebuffer {
     pub fn dither(&mut self, dark: u16, light: u16) {
         let (w, h) = (self.w, self.h);
         if w == 0 || h == 0 { return; }
-        let mut lum = std::mem::take(&mut self.lum_scratch); // reuse allocation across calls
+        let mut lum = std::mem::take(&mut self.lum_scratch);
         lum.clear();
         lum.extend(self.buf.iter().map(|&c| {
             let r = ((c >> 11) & 0x1F) as i32 * 255 / 31;
@@ -184,7 +178,7 @@ impl Framebuffer {
                 }
             }
         }
-        self.lum_scratch = lum; // return the buffer for reuse next call
+        self.lum_scratch = lum;
     }
 
     pub fn commit(&mut self) -> Result<(), String> {

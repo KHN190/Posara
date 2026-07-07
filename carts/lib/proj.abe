@@ -31,14 +31,14 @@ pub fn draw_poly(
         fx = sx;
         fy = sy
       } else {
-        line(px, py, sx, sy, col)
+        gfx_line(px, py, sx, sy, col)
       };
       px = sx;
       py = sy;
       i = i + 1
     };
     if closed == 1 {
-      line(px, py, fx, fy, col)
+      gfx_line(px, py, fx, fy, col)
     }
   }
 }

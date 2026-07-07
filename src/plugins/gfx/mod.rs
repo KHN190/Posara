@@ -14,7 +14,9 @@ use myriad::{read_string, NativeCtx, Value, VirtualMachine};
 
 pub mod input;
 
-use input::{Controller, ControllerDevice, CONTROLLER_ID};
+use input::{Controller, ControllerDevice, CONTROLLER_ID, register_input_natives};
+#[cfg(feature = "compiler")]
+use input::input_fn_decls;
 use crate::plugin::Plugin;
 
 pub struct GfxPlugin {
@@ -40,6 +42,7 @@ impl Plugin for GfxPlugin {
         vm.install_device(SCREEN_ID, Box::new(ScreenDevice::new(Rc::clone(&self.fb))));
         vm.install_device(CONTROLLER_ID, Box::new(ControllerDevice::new(Rc::clone(&self.controller), Rc::clone(&self.fb))));
         register_natives(vm, Rc::clone(&self.fb));
+        register_input_natives(vm, Rc::clone(&self.controller), Rc::clone(&self.fb));
         #[cfg(feature = "fs")]
         register_io_natives(vm, Rc::clone(&self.fb), self.root.clone());
     }
@@ -50,11 +53,14 @@ impl Plugin for GfxPlugin {
         let gfx_eff = || vec![EffectItem { name: vec!["Graphics".into()], arg: None }];
         let io_eff  = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
         for (name, params, ret) in host_fn_decls() {
-            compiler.register_host_fn(name, params, ret, gfx_eff())?;
+            compiler.register_host_fn(&format!("gfx_{name}"), params, ret, gfx_eff())?;
+        }
+        for (name, params, ret) in input_fn_decls() {
+            compiler.register_host_fn(name, params, ret, io_eff())?;
         }
         #[cfg(feature = "fs")]
         for (name, params, ret) in host_fn_io_decls() {
-            compiler.register_host_fn(name, params, ret, io_eff())?;
+            compiler.register_host_fn(&format!("gfx_{name}"), params, ret, io_eff())?;
         }
         Ok(())
     }
@@ -66,51 +72,56 @@ fn arg(args: &[Value], i: usize) -> i64 {
 
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 
-pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
+pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -> Vec<&'static str> {
+    let mut names = Vec::new();
+    macro_rules! reg {
+        ($name:literal, $body:expr) => {{
+            vm.register_native($name, Rc::new($body) as myriad::NativeFn);
+            names.push($name);
+        }};
+    }
     let f = Rc::clone(&fb);
-    vm.register_native("screen", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_screen", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().configure(arg(a, 0) as usize, arg(a, 1) as usize, 1)?;
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("screen_off", Rc::new(move |_: &mut NativeCtx, _a: &[Value]| {
+    reg!("gfx_screen_off", move |_: &mut NativeCtx, _a: &[Value]| {
         f.borrow_mut().set_headless();
         ret_unit()
-    }));
-    // Public cart-facing frame flush. Same effect as writing the screen device's
-    // commit port; that port stays as the internal transport (see gfx/device.rs).
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("commit", Rc::new(move |_: &mut NativeCtx, _a: &[Value]| {
+    reg!("gfx_commit", move |_: &mut NativeCtx, _a: &[Value]| {
         f.borrow_mut().commit()?;
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("cls", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_cls", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().cls(arg(a, 0) as u16);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("win_pos", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_win_pos", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().win_pos(arg(a, 0), arg(a, 1));
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("rectmix", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_rectmix", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().rect_mix(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16, arg(a, 5));
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("dither", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_dither", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().dither(arg(a, 0) as u16, arg(a, 1) as u16);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("pset", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_pset", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().pset(arg(a, 0), arg(a, 1), arg(a, 2) as u16);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("rect", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_rect", move |_: &mut NativeCtx, a: &[Value]| {
         let (x0, y0, w, h, c) = (arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16);
         let mut fbm = f.borrow_mut();
         for dy in 0..h {
@@ -119,29 +130,29 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
             }
         }
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("rectb", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_rectb", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().rect_outline(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("line", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_line", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().line(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("linew", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_linew", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().line_thick(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5) as u16);
         ret_unit()
-    }));
+    });
     // blitr(sprite, x, y, w, h, color, mode, deg): arbitrary-angle rotation.
     // Rotates about the sprite center (kept at the same place as the unrotated
     // x,y,w,h), reverse-sampling each dest pixel from the source (nearest). Slow
     // vs blitg's 90-deg shuffle; use for the occasional tilted element. Reads
     // from the sprite start (no atlas offset — native arg cap is 8).
     let f = Rc::clone(&fb);
-    vm.register_native("blitr", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_blitr", move |ctx: &mut NativeCtx, a: &[Value]| {
         let sprite = a.first().copied().unwrap_or(Value::NONE);
         let off = 0usize;
         let (x0, y0, w, h, color) = (arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5) as u16);
@@ -175,29 +186,29 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
             ddy += 1;
         }
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("circ", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_circ", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().circ(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3) as u16, true);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("circb", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_circb", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().circ(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3) as u16, false);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("tri", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_tri", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().tri(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5), arg(a, 6) as u16, true);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("trib", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_trib", move |_: &mut NativeCtx, a: &[Value]| {
         f.borrow_mut().tri(arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5), arg(a, 6) as u16, false);
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("pal", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_pal", move |_: &mut NativeCtx, a: &[Value]| {
         let i = arg(a, 0).clamp(0, 15) as usize;
         let rgb = arg(a, 1) as u32;
         let r = ((rgb >> 16) & 0xFF) as u8;
@@ -208,9 +219,9 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         let b5 = (b as u16 >> 3) & 0x1F;
         f.borrow_mut().palette[i] = (r5 << 11) | (g6 << 5) | b5;
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
-    vm.register_native("blit", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_blit", move |ctx: &mut NativeCtx, a: &[Value]| {
         let sprite = a.first().copied().unwrap_or(Value::NONE);
         let (x0, y0, w, h, color) = (arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5) as u16);
         if sprite.is_handle_none() { return ret_unit(); }
@@ -227,13 +238,13 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
             }
         }
         ret_unit()
-    }));
+    });
     // blitg(sprite, off_bits, x, y, w, h, color, mode): 1bpp blit reading from a
     // bit offset into the packed sprite (so one atlas array holds many glyphs),
     // with composite mode 0 REPLACE / 1 XOR / 2 AND / 3 OR. rot in high bits of
     // mode: bits 4..6 = 0/1/2/3 → 0/90/180/270 deg (sprite source rotation).
     let f = Rc::clone(&fb);
-    vm.register_native("blitg", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_blitg", move |ctx: &mut NativeCtx, a: &[Value]| {
         let sprite = a.first().copied().unwrap_or(Value::NONE);
         let off = arg(a, 1).max(0) as usize;
         let (x0, y0, w, h, color) = (arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5), arg(a, 6) as u16);
@@ -260,12 +271,12 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
             }
         }
         ret_unit()
-    }));
+    });
     let f = Rc::clone(&fb);
     // sprite(data, off, x, y, w, h, scale, alpha): 4bpp palette blit. alpha 256 =
     // opaque (fast pset path); alpha < 256 alpha-blends each pixel over the
     // framebuffer, for crossfading pre-rendered frames. index 0 transparent.
-    vm.register_native("sprite", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    reg!("gfx_sprite", move |ctx: &mut NativeCtx, a: &[Value]| {
         let data = a.first().copied().unwrap_or(Value::NONE);
         let off = arg(a, 1).max(0) as usize;
         let (x0, y0, w, h) = (arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5));
@@ -277,14 +288,15 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) {
         let mut fbm = f.borrow_mut();
         fbm.blit_4bpp(|i| cells.get(i).copied().unwrap_or(0) as u8, off, x0, y0, w, h, pct, alpha);
         ret_unit()
-    }));
+    });
+    names
 }
 
 #[cfg(feature = "fs")]
 pub fn register_io_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>, root: PathBuf) {
     let f = Rc::clone(&fb);
     let r = root.clone();
-    vm.register_native("save_png", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    let save_png = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let (x, y, w, h) = (arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3));
         let Some(rel) = a.get(4).copied().and_then(|v| read_string(ctx.heap, v)) else {
             return Ok((Value::from_int(-1), false));
@@ -296,7 +308,8 @@ pub fn register_io_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>
             Ok(()) => Ok((Value::from_int(0), false)),
             Err(e) => { eprintln!("save_png: {e}"); Ok((Value::from_int(-1), false)) }
         }
-    }));
+    });
+    vm.register_native("gfx_save_png", save_png);
 }
 
 #[cfg(all(feature = "compiler", feature = "fs"))]

@@ -2,61 +2,61 @@ fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
 
 @cart
 fn main() -> <frame, Graphics, IO, nondet> Unit {
-  screen_off();
-  screen(160, 120);
-  cls(0x0000);
+  gfx_screen_off();
+  gfx_screen(160, 120);
+  gfx_cls(0x0000);
 
-  synth_voices(28);
+  snd_voices(28);
 
   // 0 = felt piano: felt attack, three detuned strings, LPG decay.
-  synth_osc(0, 0, 2, 0, 0, 84);
-  synth_osc(0, 1, 1, 12, 6, 20);
-  synth_unison(0, 2, 2);
-  synth_filter(0, 3, 3000, 5);
-  synth_env(0, 0, 0, 100, 14, 420, 0, 360);
-  synth_lfo(0, 2, 1, 22, 2);
+  snd_osc(0, 0, 2, 0, 0, 84);
+  snd_osc(0, 1, 1, 12, 6, 20);
+  snd_unison(0, 2, 2);
+  snd_filter(0, 3, 3000, 5);
+  snd_env(0, 0, 0, 100, 14, 420, 0, 360);
+  snd_lfo(0, 2, 1, 22, 2);
   
   // 1 = sub: the F pedal, dark sine, slow breath.
-  synth_osc(1, 0, 1, 0, 0, 100);
-  synth_filter(1, 0, 420, 4);
-  synth_env(1, 0, 0, 100, 400, 1200, 72, 1800);
-  synth_lfo(1, 0, 1, 9, 10);
+  snd_osc(1, 0, 1, 0, 0, 100);
+  snd_filter(1, 0, 420, 4);
+  snd_env(1, 0, 0, 100, 400, 1200, 72, 1800);
+  snd_lfo(1, 0, 1, 9, 10);
   
   // 2 = warm pad: triangle breath + sine octave, slow swell, no edge.
-  synth_osc(2, 0, 2, 0, 0, 70);
-  synth_osc(2, 1, 1, 12, 6, 26);
-  synth_unison(2, 3, 5);
-  synth_filter(2, 0, 1000, 4);
-  synth_env(2, 0, 0, 100, 1100, 1600, 55, 2000);
-  synth_lfo(2, 0, 1, 11, 12);
+  snd_osc(2, 0, 2, 0, 0, 70);
+  snd_osc(2, 1, 1, 12, 6, 26);
+  snd_unison(2, 3, 5);
+  snd_filter(2, 0, 1000, 4);
+  snd_env(2, 0, 0, 100, 1100, 1600, 55, 2000);
+  snd_lfo(2, 0, 1, 11, 12);
   
   // 3 = answer line: same felt wood, octave up, even softer.
-  synth_osc(3, 0, 2, 0, 0, 80);
-  synth_osc(3, 1, 1, 12, 5, 16);
-  synth_unison(3, 3, 2);
-  synth_filter(3, 3, 1500, 5);
-  synth_env(3, 0, 0, 100, 18, 800, 8, 1100);
+  snd_osc(3, 0, 2, 0, 0, 80);
+  snd_osc(3, 1, 1, 12, 5, 16);
+  snd_unison(3, 3, 2);
+  snd_filter(3, 3, 1500, 5);
+  snd_env(3, 0, 0, 100, 18, 800, 8, 1100);
   
   // 4 = hiss bed: filtered noise just above silence — tape air.
-  synth_osc(4, 0, 4, 0, 0, 60);
-  synth_filter(4, 0, 3200, 2);
-  synth_env(4, 0, 0, 100, 900, 2000, 60, 2200);
-  synth_lfo(4, 0, 1, 7, 16);
+  snd_osc(4, 0, 4, 0, 0, 60);
+  snd_filter(4, 0, 3200, 2);
+  snd_env(4, 0, 0, 100, 900, 2000, 60, 2200);
+  snd_lfo(4, 0, 1, 7, 16);
   
   // 5 = screech: feedback whine, noise-edged sine, long swell in.
-  synth_osc(5, 0, 1, 0, 0, 70);
-  synth_osc(5, 1, 4, 0, 0, 14);
-  synth_filter(5, 2, 2800, 42);
-  synth_env(5, 0, 0, 100, 1400, 900, 55, 2600);
-  synth_lfo(5, 2, 1, 14, 5);
+  snd_osc(5, 0, 1, 0, 0, 70);
+  snd_osc(5, 1, 4, 0, 0, 14);
+  snd_filter(5, 2, 2800, 42);
+  snd_env(5, 0, 0, 100, 1400, 900, 55, 2600);
+  snd_lfo(5, 2, 1, 14, 5);
   
   // 6 = dust crackle: tiny pops, retuned each time.
-  synth_osc(6, 0, 4, 0, 0, 60);
-  synth_filter(6, 2, 4000, 14);
-  synth_env(6, 0, 0, 100, 0, 14, 0, 16);
+  snd_osc(6, 0, 4, 0, 0, 60);
+  snd_filter(6, 2, 4000, 14);
+  snd_env(6, 0, 0, 100, 0, 14, 0, 16);
 
-  mx_reverb(50, 46, 16);
-  mx_delay(500, 22, 6);
+  snd_bus_reverb(50, 46, 16);
+  snd_bus_delay(500, 22, 6);
 
   // Piano = 144 BPM, felt piano patch
   // EV = [onset_ms, note, vol, dur_ms] * 2736, loop
@@ -88,7 +88,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     if idx < n_ev {
       if EV[idx * 4] <= pt {
         let bn = EV[idx * 4 + 1];
-        synth_on(0, bn, EV[idx * 4 + 2], EV[idx * 4 + 3]);
+        snd_on(0, bn, EV[idx * 4 + 2], EV[idx * 4 + 3]);
         if bn < 50 { bass_note = bn };
         idx = idx + 1
       } else { idx = idx }
@@ -97,37 +97,37 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     };
 
     if t >= sub_t {
-      synth_on(1, bass_note - 12, 26 + ri(6), 7000);
+      snd_on(1, bass_note - 12, 26 + ri(6), 7000);
       sub_t = t + 5000 + ri(3000)
     };
 
     if sec >= 2 && sec <= 3 {
       if t >= pad_t {
-        synth_on(2, bass_note + 12, 24, 5000);
-        synth_on(2, bass_note + 24, 18, 5000);
+        snd_on(2, bass_note + 12, 24, 5000);
+        snd_on(2, bass_note + 24, 18, 5000);
         pad_t = t + 5000 + ri(2000)
       }
     } else { pad_t = t + 1000 };
 
     if t >= hiss_t {
-      synth_on(4, 60, 4 + ri(3) + (if sec == 3 { 3 } else { 0 }), 4200);
+      snd_on(4, 60, 4 + ri(3) + (if sec == 3 { 3 } else { 0 }), 4200);
       hiss_t = t + 3000 + ri(2000)
     };
 
     if t >= scree_t {
-      synth_filter(5, 2, 2400 + ri(1600), 42);
-      synth_on(5, 75 + ri(7), 10 + ri(8) + (if sec == 3 { 4 } else { 0 }), 3800 + ri(2400));
+      snd_filter(5, 2, 2400 + ri(1600), 42);
+      snd_on(5, 75 + ri(7), 10 + ri(8) + (if sec == 3 { 4 } else { 0 }), 3800 + ri(2400));
       scree_t = t + (if sec == 3 { 16000 } else { 30000 }) + ri(20000);
     };
 
     if t >= crack_t {
-      synth_filter(6, 2, 2600 + ri(3400), 14);
-      synth_on(6, 60, 6 + ri(6), 18);
+      snd_filter(6, 2, 2600 + ri(3400), 14);
+      snd_on(6, 60, 6 + ri(6), 18);
       crack_t = t + 1600 + ri(3600)
     };
 
-    cls(0x0000);
-    commit();
+    gfx_cls(0x0000);
+    gfx_commit();
     frame.present()
   }
 }

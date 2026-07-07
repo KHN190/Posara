@@ -25,7 +25,7 @@ fn glyph_big(font: &Array<Int>, cp: Int, x: Int, y: Int, sc: Int, color: Int) ->
       let byte = font[base + row];
       for col in 0..8 {
         if byte / SHIFT[col] % 2 == 1 {
-          rect(x + col * sc, y + row * sc, sc, sc, color)
+          gfx_rect(x + col * sc, y + row * sc, sc, sc, color)
         }
       }
     }
@@ -34,7 +34,7 @@ fn glyph_big(font: &Array<Int>, cp: Int, x: Int, y: Int, sc: Int, color: Int) ->
 
 @cart
 fn main() -> <frame, Graphics, IO, nondet> Unit {
-  screen(800, 800);
+  gfx_screen(800, 800);
   let font = load_font();
 
   let mut curl = cn_new();
@@ -49,7 +49,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     cb_grow(&mut cube);
     cb_map(&mut cube);
 
-    cls(0x0000);
+    gfx_cls(0x0000);
     ay = ay + 0.02;
 
     // cube lattice, centred large.
@@ -66,13 +66,13 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
     };
 
     // vermilion band + POSARA wordmark.
-    rect(0, 672, 800, 128, 59789);   // banner pink #e8336d
+    gfx_rect(0, 672, 800, 128, 59789);   // banner pink #e8336d
     let codes = [80, 79, 83, 65, 82, 65];   // POSARA, scale 6 → 48px tall
     for i in 0..6 {
       glyph_big(&font, codes[i], 196 + i * 72, 700, 6, 0x0000)
     };
 
-    commit();
+    gfx_commit();
     frame.present()
   }
 }
