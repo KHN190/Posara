@@ -101,3 +101,7 @@ path = "tests/lang/fs_test.rs"
 [[test]]
 name = "midi_dispatch_test"
 path = "tests/midi/dispatch_test.rs"
+
+[[test]]
+name = "lang_runner_test"
+path = "tests/lang/runner_test.rs"

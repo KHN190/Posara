@@ -72,6 +72,12 @@ fn arg(args: &[Value], i: usize) -> i64 {
 
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 
+// Is the `bit`-th pixel of a 1bpp sprite set? MSB-first within each byte.
+fn bit1(cells: &[u64], bit: usize) -> bool {
+    let byte = cells.get(bit / 8).copied().unwrap_or(0) as u8;
+    (byte >> (7 - (bit & 7))) & 1 == 1
+}
+
 pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -> Vec<&'static str> {
     let mut names = Vec::new();
     macro_rules! reg {
@@ -176,8 +182,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
                 let sy = (-s * ddx as f64 + c * ddy as f64 + cy).round() as i64;
                 if sx >= 0 && sx < w && sy >= 0 && sy < h {
                     let bit = off + (sy * w + sx) as usize;
-                    let byte = cells.get(bit / 8).copied().unwrap_or(0) as u8;
-                    if (byte >> (7 - (bit & 7))) & 1 == 1 {
+                    if bit1(cells, bit) {
                         fbm.pset_op(cxd + ddx, cyd + ddy, color, mode);
                     }
                 }
@@ -231,8 +236,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         for py in 0..h {
             for px in 0..w {
                 let bit = (py * w + px) as usize;
-                let byte = cells.get(bit / 8).copied().unwrap_or(0) as u8;
-                if (byte >> (7 - (bit & 7))) & 1 == 1 {
+                if bit1(cells, bit) {
                     fbm.pset(x0 + px, y0 + py, color);
                 }
             }
@@ -258,8 +262,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         for py in 0..h {
             for px in 0..w {
                 let bit = off + (py * w + px) as usize;
-                let byte = cells.get(bit / 8).copied().unwrap_or(0) as u8;
-                if (byte >> (7 - (bit & 7))) & 1 == 1 {
+                if bit1(cells, bit) {
                     let (dx, dy) = match rot {
                         1 => (h - 1 - py, px),       // 90 cw
                         2 => (w - 1 - px, h - 1 - py),

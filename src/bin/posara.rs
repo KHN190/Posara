@@ -57,6 +57,25 @@ fn resolve_root(common: &Common) -> Option<(PathBuf, PathBuf)> {
     Some((root, path))
 }
 
+// Shared cmd preamble: resolve root, build the cart-routed Host, load+compile the
+// module, print warnings, then hand (host, loaded, path) to the command body.
+fn with_loaded_cart(
+    common: &Common,
+    body: impl FnOnce(&Host, runner::LoadResult, &std::path::Path) -> ExitCode,
+) -> ExitCode {
+    let Some((root, path)) = resolve_root(common) else { return usage(); };
+    let host = match Host::new_cart(root, common.headless, common.muted, &path) {
+        Ok(h) => h,
+        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
+    };
+    let r = match runner::load_module(&path, &host) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
+    };
+    for w in &r.warnings { eprintln!("{}", w.pretty_print()); }
+    body(&host, r, &path)
+}
+
 fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     let mut common = Common { root: None, path: None, headless: false, muted: false };
     let mut profile = false;
@@ -74,27 +93,19 @@ fn cmd_run(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
             _ => common.path = Some(a),
         }
     }
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    let r = match runner::load_module(&path, &host) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
-    };
-    for w in &r.warnings { eprintln!("{}", w.pretty_print()); }
-    let (module, static_names, fn_names) = (r.module, r.static_names, r.fn_names);
-    let reload = if path.extension().and_then(|s| s.to_str()) == Some("abe") {
-        Some(path.clone())
-    } else {
-        None
-    };
-    match runner::run_module(module, static_names, fn_names, &host, reload, profile, dbg) {
-        Ok(code) if code == 0 => ExitCode::SUCCESS,
-        Ok(code) => ExitCode::from((code as i32).clamp(0, 255) as u8),
-        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
-    }
+    with_loaded_cart(&common, |host, r, path| {
+        let (module, static_names, fn_names) = (r.module, r.static_names, r.fn_names);
+        let reload = if path.extension().and_then(|s| s.to_str()) == Some("abe") {
+            Some(path.to_path_buf())
+        } else {
+            None
+        };
+        match runner::run_module(module, static_names, fn_names, host, reload, profile, dbg) {
+            Ok(code) if code == 0 => ExitCode::SUCCESS,
+            Ok(code) => ExitCode::from((code as i32).clamp(0, 255) as u8),
+            Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
+        }
+    })
 }
 
 fn cmd_build(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
@@ -128,21 +139,10 @@ fn cmd_check(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
             _ => common.path = Some(a),
         }
     }
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    match runner::load_module(&path, &host) {
-        Ok(r) => {
-            for w in &r.warnings {
-                eprintln!("{}", w.pretty_print());
-            }
-            eprintln!("ok");
-            ExitCode::SUCCESS
-        }
-        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
-    }
+    with_loaded_cart(&common, |_host, _r, _path| {
+        eprintln!("ok");
+        ExitCode::SUCCESS
+    })
 }
 
 #[cfg(feature = "test")]
@@ -154,21 +154,13 @@ fn cmd_test(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
             _ => common.path = Some(a),
         }
     }
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), true, common.muted, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    let r = match runner::load_module(&path, &host) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
-    };
-    for w in &r.warnings { eprintln!("{}", w.pretty_print()); }
-    match runner::run_tests(r.module, r.static_names, r.fn_names, &host) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) => ExitCode::from(1),
-        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
-    }
+    with_loaded_cart(&common, |host, r, _path| {
+        match runner::run_tests(r.module, r.static_names, r.fn_names, host) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::from(1),
+            Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
+        }
+    })
 }
 
 fn cmd_dump(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
@@ -189,32 +181,25 @@ fn cmd_dump(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let Some(out) = out else { return usage(); };
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), common.headless, common.muted, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    let r = match runner::load_module(&path, &host) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
-    };
-    let run_result = if let Some(n) = at_frame {
-        runner::run_until_frame(r.module, r.static_names, r.fn_names, &host, n)
-    } else {
-        runner::run_until_ms(r.module, r.static_names, r.fn_names, &host, at_ms.unwrap_or(0))
-    };
-    if let Err(e) = run_result {
-        eprintln!("{e}");
-        return ExitCode::from(1);
-    }
-    let fb = host.gfx.fb.borrow();
-    let (x, y, w, h) = region.unwrap_or((0, 0, fb.w as i64, fb.h as i64));
-    if let Err(e) = fb.save_region_png(x, y, w, h, &out) {
-        eprintln!("dump: {e}");
-        return ExitCode::from(1);
-    }
-    eprintln!("• wrote {}", out.display());
-    ExitCode::SUCCESS
+    with_loaded_cart(&common, |host, r, _path| {
+        let run_result = if let Some(n) = at_frame {
+            runner::run_until_frame(r.module, r.static_names, r.fn_names, host, n)
+        } else {
+            runner::run_until_ms(r.module, r.static_names, r.fn_names, host, at_ms.unwrap_or(0))
+        };
+        if let Err(e) = run_result {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+        let fb = host.gfx.fb.borrow();
+        let (x, y, w, h) = region.unwrap_or((0, 0, fb.w as i64, fb.h as i64));
+        if let Err(e) = fb.save_region_png(x, y, w, h, &out) {
+            eprintln!("dump: {e}");
+            return ExitCode::from(1);
+        }
+        eprintln!("• wrote {}", out.display());
+        ExitCode::SUCCESS
+    })
 }
 
 fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
@@ -237,25 +222,17 @@ fn cmd_record(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         }
     }
     let (Some(out), Some(duration_ms)) = (out, duration_ms) else { return usage(); };
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    // Offline render: silent (no audio device), deterministic, faster than real.
-    let host = match Host::new_cart(root.clone(), common.headless, true, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    let r = match runner::load_module(&path, &host) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
-    };
-    let (module, static_names, fn_names) = (r.module, r.static_names, r.fn_names);
-    match runner::run_render(module, static_names, fn_names, &host, duration_ms, &out, frames.clone(), fps, from_ms) {
-        Ok(()) => {
-            if let Some(dir) = &frames { eprintln!("• wrote frames to {}", dir.display()); }
-            eprintln!("• wrote {}", out.display());
-            ExitCode::SUCCESS
+    common.muted = true; // offline render is silent (no audio device)
+    with_loaded_cart(&common, |host, r, _path| {
+        match runner::run_render(r.module, r.static_names, r.fn_names, host, duration_ms, &out, frames.clone(), fps, from_ms) {
+            Ok(()) => {
+                if let Some(dir) = &frames { eprintln!("• wrote frames to {}", dir.display()); }
+                eprintln!("• wrote {}", out.display());
+                ExitCode::SUCCESS
+            }
+            Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
         }
-        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
-    }
+    })
 }
 
 fn cmd_disasm(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
@@ -287,19 +264,12 @@ fn cmd_bench(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
             _ => common.path = Some(a),
         }
     }
-    let Some((root, path)) = resolve_root(&common) else { return usage(); };
-    let host = match Host::new_cart(root.clone(), true, common.muted, &path) {
-        Ok(h) => h,
-        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
-    };
-    let r = match runner::load_module(&path, &host) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
-    };
-    match runner::run_until_frame(r.module, r.static_names, r.fn_names, &host, frames) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
-    }
+    with_loaded_cart(&common, |host, r, _path| {
+        match runner::run_until_frame(r.module, r.static_names, r.fn_names, host, frames) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
+        }
+    })
 }
 
 fn main() -> ExitCode {

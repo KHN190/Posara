@@ -260,6 +260,27 @@ impl<'a> Stepper<'a> {
     }
 }
 
+// Real-time frame loop: step one frame, run `hook(step, frame_idx)`, then sleep
+// to hold 60Hz. Stops when the cart finishes, the window closes, or the hook
+// returns false. Shared by run_aot and run_capture.
+pub fn drive_realtime(
+    step: &mut Stepper,
+    host: &Host,
+    mut hook: impl FnMut(&mut Stepper, u64) -> Result<bool, String>,
+) -> Result<(), String> {
+    let mut frame: u64 = 0;
+    loop {
+        if !alive(host) { break; }
+        let t0 = Instant::now();
+        if !step.frame()? { break; }
+        if !hook(step, frame)? { break; }
+        frame += 1;
+        let elapsed = t0.elapsed();
+        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+    }
+    Ok(())
+}
+
 pub fn run_until_frame(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, n: u64) -> Result<(), String> {
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
     for _ in 0..n {
@@ -369,12 +390,9 @@ pub fn run_capture(module: Module, static_names: Vec<String>, fn_names: Vec<Stri
     }
     let interval_ms = 1000.0 / cap.fps as f64;
     let mut shot: u64 = 0;
-    loop {
-        if !alive(host) { break; }
+    drive_realtime(&mut step, host, |_, _| {
         let elapsed = host.start.elapsed().as_millis() as u64;
-        if elapsed >= deadline_ms { break; }
-        let t0 = Instant::now();
-        if !step.frame()? { break; }
+        if elapsed >= deadline_ms { return Ok(false); }
         let due = cap.from_ms as f64 + shot as f64 * interval_ms;
         if (elapsed as f64) >= due {
             let fb = host.gfx.fb.borrow();
@@ -382,9 +400,8 @@ pub fn run_capture(module: Module, static_names: Vec<String>, fn_names: Vec<Stri
             fb.save_region_png(0, 0, fb.w as i64, fb.h as i64, &path)?;
             shot += 1;
         }
-        let elapsed = t0.elapsed();
-        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
-    }
+        Ok(true)
+    })?;
     Ok(shot)
 }
 
@@ -413,13 +430,7 @@ pub fn run_tests(module: Module, static_names: Vec<String>, fn_names: Vec<String
 pub fn run_aot<F: FnOnce(&mut VirtualMachine)>(pk: &[u8], register_aot: F, host: &Host) -> Result<i64, String> {
     let module = polka::cartridge::read_pk(pk).map_err(|e| format!("read_pk: {e:?}"))?;
     let mut step = Stepper::start_aot(module, host, register_aot)?;
-    loop {
-        if !alive(host) { break; }
-        let t0 = Instant::now();
-        if !step.frame()? { break; }
-        let elapsed = t0.elapsed();
-        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
-    }
+    drive_realtime(&mut step, host, |_, _| Ok(true))?;
     step.print_profile();
     Ok(step.exit_code())
 }
