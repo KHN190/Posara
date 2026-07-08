@@ -13,7 +13,7 @@ static REAL: Array<Int> = [
 
 fn load_sheet() -> <IO> Bytes {
   let fd = fs_open("assets/slash.spr", 1);
-  let data = fs_readb(fd, BYTES);
+  let data = fs_read(fd, BYTES);
   let _ = fs_close(fd);
   data
 }

@@ -35,16 +35,16 @@ fn c_teal()  -> Int { rgb(0, 58, 28) }        // play accent
 
 fn idx(p: Int, r: Int, c: Int) -> Int { (p * NR + r) * NC + c }
 
-fn load_font() -> <IO> Array<Int> {
+fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
   let data = fs_read(fd, 1520);
   let _ = fs_close(fd);
   data
 }
 
-fn glyph(font: &Array<Int>, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn glyph(font: &Bytes, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   if cp >= 32 && cp < 127 {
-    gfx_blitg(font.clone(), (cp - 32) * 128, x, y, 8, 16, color, mode)
+    gfx_blitg(font, (cp - 32) * 128, x, y, 8, 16, color, mode)
   }
 }
 
@@ -64,7 +64,7 @@ fn nsharp(k: Int) -> Int {
 }
 
 // "C#3" / "---" at (x, y).
-fn note_text(font: &Array<Int>, note: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn note_text(font: &Bytes, note: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   if note == 0 {
     glyph(font, 45, x, y, color, mode);
     glyph(font, 45, x + 8, y, color, mode);
@@ -82,7 +82,7 @@ fn trigger(w: &mut World, tm: Int) -> <IO> Unit {
     let n = w.ph[idx(w.play_ph, w.row, c)];
     if n > 0 {
       let dur = match c { 0 => 140, 1 => 110, 2 => 240, _ => 60 };
-      sfx_playm(c, n, 70, dur);
+      snd_on(c, n, 70, dur);
       midi_send(144 + c + n * 256 + 100 * 65536);
       w.pulse[c] = tm
     }
@@ -106,7 +106,7 @@ fn midi_in(w: &mut World, tm: Int) -> <IO> Unit {
       } else {
         let c = (st - 144) % NC;
         let dur = match c { 0 => 140, 1 => 110, 2 => 240, _ => 60 };
-        sfx_playm(c, d1, d2 * 70 / 127, dur);
+        snd_on(c, d1, d2 * 70 / 127, dur);
         w.pulse[c] = tm
       }
     };
@@ -146,7 +146,7 @@ fn input(w: &mut World) -> <IO> Unit {
   w.prevb = b
 }
 
-fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
+fn draw(w: &World, font: &Bytes, tm: Int) -> <Graphics> Unit {
   gfx_cls(0x0000);
   // header: phrase number, chain dots, transport.
   glyph(font, 80, XHEX, 12, c_white(), 0);                  // P
@@ -229,14 +229,14 @@ fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
   gfx_screen(480, 320);
-  sfx_inst(0, 0, 4, 110, 50, 90);    // PU1 square
-  sfx_inst(1, 0, 2, 70, 40, 60);     // PU2 square, tighter
-  sfx_inst(2, 2, 6, 200, 60, 240);   // WAV triangle
-  sfx_inst(3, 4, 1, 50, 0, 40);      // NOI noise
-  sfx_pan(0, 100, 70);
-  sfx_pan(1, 70, 100);
-  sfx_pan(2, 90, 90);
-  sfx_pan(3, 80, 80);
+  snd_osc(0, 0, 0, 0, 0, 100); snd_env(0, 0, 0, 100, 4, 110, 50, 90);    // PU1 square
+  snd_osc(1, 0, 0, 0, 0, 100); snd_env(1, 0, 0, 100, 2, 70, 40, 60);     // PU2 square, tighter
+  snd_osc(2, 0, 2, 0, 0, 100); snd_env(2, 0, 0, 100, 6, 200, 60, 240);   // WAV triangle
+  snd_osc(3, 0, 4, 0, 0, 100); snd_env(3, 0, 0, 100, 1, 50, 0, 40);      // NOI noise
+  snd_pan(0, -30);
+  snd_pan(1, 30);
+  snd_pan(2, 0);
+  snd_pan(3, 0);
   let font = load_font();
 
   let mut w = World {

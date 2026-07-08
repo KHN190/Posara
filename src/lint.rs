@@ -39,7 +39,7 @@ const SCREEN_COMMIT_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x0
 
 const DRAW_NATIVES: &[&str] = &[
     "cls", "pset", "rect", "rectb", "rectmix", "dither", "line", "linew",
-    "circ", "circb", "tri", "trib", "pal", "blit", "blitg", "blitr", "sprite", "save_png",
+    "circ", "circb", "tri", "trib", "pal", "blitg", "blitr", "sprite", "save_png",
 ];
 
 // System, Console, Screen, Controller, MIDI + abrase effect-dispatch ABI

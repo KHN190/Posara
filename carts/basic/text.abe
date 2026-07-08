@@ -1,22 +1,22 @@
 // 8x16 bitmap font atlas (otf2font): 95 glyphs from cp 32, 16 bytes each.
 // Loaded once into a main-local before the frame loop.
 
-fn load_font() -> <IO> Array<Int> {
+fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
   let data = fs_read(fd, 1520);
   let _ = fs_close(fd);
   data
 }
 
-fn glyph(font: &Array<Int>, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn glyph(font: &Bytes, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   if cp >= 32 {
     if cp < 127 {
-      gfx_blitg(font.clone(), (cp - 32) * 128, x, y, 8, 16, color, mode)
+      gfx_blitg(font, (cp - 32) * 128, x, y, 8, 16, color, mode)
     }
   }
 }
 
-fn draw_text(font: &Array<Int>, codes: Array<Int>, n: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn draw_text(font: &Bytes, codes: Array<Int>, n: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   let mut i = 0;
   let mut cx = x;
   while i < n {

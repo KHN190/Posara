@@ -162,7 +162,7 @@ fn spawn_pb(w: &mut World, lng: Int) -> Unit {
 // 单发直射。focus=1 标记拉长（激光感），配 player_step 的更快 cd。
 fn fire(w: &mut World, focus: Int) -> <IO> Unit {
   spawn_pb(w, focus);
-  sfx_play(2, 900, 20, 40)
+  snd_on(2, 81, 20, 40)
 }
 
 // --- enemy bullets (spawn) ---
@@ -436,7 +436,7 @@ fn enemy_down(w: &mut World, j: Int) -> <IO> Unit {
   fx_spawn(w, w.en[j].x.to_i(), w.en[j].y.to_i(), 8);
   w.en[j].on = 0;
   gain_graze(w, 1);
-  sfx_play(3, 300, 60, 90)
+  snd_on(3, 62, 60, 90)
 }
 
 fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, IO, nondet> Unit {
@@ -468,7 +468,7 @@ fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, 
                   w.pb[i].on = 0;
                   w.en[j].hp = w.en[j].hp - 1;
                   w.en[j].hf = 2;
-                  sfx_play(2, 1300, 35, 40);
+                  snd_on(2, 88, 35, 40);
                   if w.en[j].hp <= 0 { enemy_down(w, j) }
                 }
               }
@@ -515,8 +515,8 @@ fn player_hit(w: &mut World, t: Int) -> <IO, nondet> Unit {
   w.rank = clamp(w.rank - 25, 90, 170);
   fx_spawn(w, w.p.x, w.p.y, 22);
   w.tm.freeze = 6;
-  sfx_play(3, 240, 80, 220);
-  sfx_play(3, 90, 80, 320);
+  snd_on(3, 59, 80, 220);
+  snd_on(3, 42, 80, 320);
   if w.p.lives < 0 { reset_game(w, t) } else { restart_segment(w, t) }
 }
 
@@ -596,7 +596,8 @@ fn draw_boss(w: &mut World, bx: Int, by: Int) -> <Graphics> Unit {
 fn draw_player(w: &mut World, t: Int, focus: Int) -> <Graphics> Unit {
   let vis = if t >= w.p.invt { 1 } else { t / 80 % 2 };
   if vis == 1 {
-    gfx_blit([24, 24, 60, 60, 126, 255, 231, 195], w.p.x - 4, w.p.y - 4, 8, 8, c_white())
+    let icon = b"\x18\x18\x3c\x3c\x7e\xff\xe7\xc3";
+    gfx_blitg(&icon, 0, w.p.x - 4, w.p.y - 4, 8, 8, c_white(), 0)
   };
   if focus == 1 {
     gfx_circb(w.p.x, w.p.y, 5, c_amber());
@@ -707,8 +708,8 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
   while f < 16 { w.fx[f] = Fx { on: 0, x: 0, y: 0, age: 0, life: 0 }; f = f + 1 };
 
   flow_reseed(&mut w);
-  sfx_inst(2, 0, 1, 30, 0, 20);
-  sfx_inst(3, 4, 1, 80, 0, 60);
+  snd_osc(2, 0, 0, 0, 0, 100); snd_env(2, 0, 0, 100, 1, 30, 0, 20);
+  snd_osc(3, 0, 4, 0, 0, 100); snd_env(3, 0, 0, 100, 1, 80, 0, 60);
   synthkit_setup();
   seq_reset(&mut w.sq, 0);
 

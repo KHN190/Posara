@@ -139,26 +139,10 @@ pub fn register_natives(vm: &mut VirtualMachine, root: PathBuf, fds: Rc<RefCell<
         match f.seek(from) { Ok(p) => ret_int(p as i64), Err(_) => ret_int(-1) }
     }));
 
-    // Read up to `n` bytes; returns Array<Int> of exactly `n` (zero-padded on
-    // short read) so the cart can index 0..n safely (arrays have no len op).
+    // Read up to `n` bytes into a packed Bytes value (8 bytes per heap word),
+    // zero-padded past EOF. Index with `[i]` / `.byte_at(i)`, length via `.len()`.
     let fdt = Rc::clone(&fds);
     vm.register_native("fs_read", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
-        let mut buf = vec![0u8; n];
-        let got = {
-            let mut t = fdt.borrow_mut();
-            match t.get(fd) { Some(f) => f.read(&mut buf).unwrap_or(0), None => return ret_int(-1) }
-        };
-        let (slot, gen_) = ctx.heap.try_alloc(n.max(1))?;
-        let cells = ctx.heap.cell_data_mut(slot, gen_)?;
-        for i in 0..n { cells[i] = buf.get(i).copied().unwrap_or(0) as u64; }
-        let _ = got;
-        Ok((Value::from_handle(slot, gen_), true))
-    }));
-    // Like fs_read but returns Bytes (8 bytes packed per heap word, vs one byte
-    // per u64 word). For large sprite/sample buffers the 8x heap saving matters.
-    let fdt = Rc::clone(&fds);
-    vm.register_native("fs_readb", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
         let mut buf = vec![0u8; n];
         {
@@ -213,8 +197,7 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
         ("fs_open",       vec![str_ty(), T::Int],         T::Int),
         ("fs_close",      vec![T::Int],                   T::Int),
         ("fs_seek",       vec![T::Int, T::Int, T::Int],   T::Int),
-        ("fs_read",       vec![T::Int, T::Int],           arr_int()),
-        ("fs_readb",      vec![T::Int, T::Int],           T::Named("Bytes".into())),
+        ("fs_read",       vec![T::Int, T::Int],           T::Named("Bytes".into())),
         ("fs_reads",  vec![T::Int, T::Int],           T::String),
         ("fs_write",      vec![T::Int, arr_int()],        T::Int),
         ("fs_writes", vec![T::Int, T::String],        T::Int),

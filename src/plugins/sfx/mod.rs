@@ -121,33 +121,6 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static 
         }};
     }
 
-    // legacy fire-and-forget sugar
-    native!("sfx_tone", |a| Cmd::Tone(arg(a, 0) as f32, arg(a, 1).max(0) as u32,
-        pct(a, 2), arg(a, 3).max(0) as u32));
-    native!("sfx_noise", |a| Cmd::Noise(arg(a, 0).max(0) as u32,
-        pct(a, 1), arg(a, 2).max(0) as u32));
-    native!("sfx_wave", |a| Cmd::Wave(arg(a, 0).clamp(0, 4) as u8, arg(a, 1) as f32,
-        arg(a, 2).max(0) as u32, pct(a, 3), arg(a, 4).max(0) as u32));
-
-    // synth patch
-    native!("sfx_inst", |a| Cmd::Inst(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 4) as u8,
-        arg(a, 2).max(0) as u32, arg(a, 3).max(0) as u32,
-        pct(a, 4), arg(a, 5).max(0) as u32));
-    native!("sfx_pan", |a| Cmd::Pan(arg(a, 0).max(0) as usize,
-        pct(a, 1), pct(a, 2)));
-    native!("sfx_fx", |a| Cmd::Fx(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 5) as u8,
-        pct(a, 2), arg(a, 3).max(0) as f32));
-    native!("sfx_lfo", |a| Cmd::Lfo(arg(a, 0).max(0) as usize, arg(a, 1).clamp(0, 2) as u8,
-        arg(a, 2).clamp(0, 3) as u8, arg(a, 3).max(0) as f32 / 100.0,
-        pct(a, 4)));
-
-    // trigger
-    native!("sfx_play", |a| Cmd::Play(arg(a, 0).max(0) as usize, arg(a, 1) as f32,
-        pct(a, 2), arg(a, 3).max(0) as u32));
-    native!("sfx_playm", |a| Cmd::PlayMidi(arg(a, 0).max(0) as usize, arg(a, 1),
-        pct(a, 2), arg(a, 3).max(0) as u32));
-    native!("sfx_off", |a| Cmd::Off(arg(a, 0).max(0) as usize));
-
     // master-bus time effects (affect synth + sfx)
     native!("snd_bus_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
         pct(a, 1), pct(a, 2)));
@@ -173,16 +146,14 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static 
     // from a .trk asset. All-zero words (padding) skipped.
     let p = Arc::clone(&cmds);
     let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let bytes = a.first().copied().unwrap_or(Value::NONE);
+        let data = a.first().copied().unwrap_or(Value::NONE);
         let ms_per_tick = arg(a, 1).max(1) as u32;
-        if bytes.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = bytes.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
-        let mut events: Vec<seq::Event> = Vec::with_capacity(cells.len() / 8);
-        for chunk in cells.chunks(8) {
+        let Some(bytes) = myriad::read_bytes(ctx.heap, data) else { return ret_unit(); };
+        let mut events: Vec<seq::Event> = Vec::with_capacity(bytes.len() / 8);
+        for chunk in bytes.chunks(8) {
             let mut word: u64 = 0;
             for (b, &c) in chunk.iter().enumerate() {
-                word |= (c & 0xFF) << (8 * b);
+                word |= (c as u64) << (8 * b);
             }
             if word != 0 { events.push(seq::unpack(word as i64)); }
         }
@@ -200,10 +171,7 @@ pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static 
         let buf = a.first().copied().unwrap_or(Value::NONE);
         let rate = arg(a, 1).max(1) as f32;
         let vol = pct(a, 2);
-        if buf.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = buf.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
-        let bytes: Vec<u8> = cells.iter().map(|&c| (c & 0xFF) as u8).collect();
+        let Some(bytes) = myriad::read_bytes(ctx.heap, buf) else { return ret_unit(); };
         push(&p, Cmd::Sample(bytes, rate, vol));
         ret_unit()
     }) as myriad::NativeFn;
@@ -266,21 +234,11 @@ pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::
     let arr_int = || T::Generic { name: "Array".into(), args: vec![T::Int] };
     #[allow(unused_mut)]
     let mut decls = vec![
-        ("sfx_tone",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("sfx_noise",   vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("sfx_wave",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("sfx_inst",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],  T::Unit),
-        ("sfx_pan",     vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("sfx_fx",      vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("sfx_lfo",     vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
         ("snd_bus_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
         ("snd_bus_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("sfx_play",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("sfx_playm",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("sfx_off",     vec![T::Int],                                          T::Unit),
         ("snd_seq",     vec![arr_int(), T::Int],                               T::Unit),
-        ("snd_track",   vec![arr_int(), T::Int],                               T::Unit),
-        ("snd_sample",  vec![arr_int(), T::Int, T::Int],                       T::Unit),
+        ("snd_track",   vec![T::Named("Bytes".into()), T::Int],               T::Unit),
+        ("snd_sample",  vec![T::Named("Bytes".into()), T::Int, T::Int],       T::Unit),
         ("snd_samplestop", vec![],                                             T::Unit),
         ("snd_seqstop", vec![],                                                T::Unit),
     ];

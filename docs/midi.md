@@ -5,8 +5,8 @@ Posara connects to the first available MIDI input and output port the first time
 ## Receiving
 
 ```rust
-let n  = device_out(0x9001);   // number of queued incoming events
-let ev = device_out(0x9000);   // pop the oldest event (0 if the queue is empty)
+let n  = midi_count();   // number of queued incoming events
+let ev = midi_poll();   // pop the oldest event (0 if the queue is empty)
 ```
 
 Each event is a raw MIDI message packed into one integer:
@@ -29,9 +29,9 @@ A note-on with velocity `0` means note-off — treat `status` in `0x90..0x9F` wi
 Drain the queue once per frame:
 
 ```rust
-let mut n = device_out(0x9001);
+let mut n = midi_count();
 while n > 0 {
-  let ev = device_out(0x9000);
+  let ev = midi_poll();
   // ... handle ...
   n = n - 1
 }
@@ -40,14 +40,14 @@ while n > 0 {
 ## Sending
 
 ```rust
-device_in(0x9002, status + d1*256 + d2*65536)
+midi_send(status + d1*256 + d2*65536)
 ```
 
 Same packing as above. Examples:
 
 ```rust
-device_in(0x9002, 0x90 + 60*256 + 100*65536)   // note-on  C4, velocity 100, channel 0
-device_in(0x9002, 0x80 + 60*256)               // note-off C4, channel 0
+midi_send(0x90 + 60*256 + 100*65536)   // note-on  C4, velocity 100, channel 0
+midi_send(0x80 + 60*256)               // note-off C4, channel 0
 ```
 
 Two-byte messages (program change `0xC0`, channel pressure `0xD0`) take `d1` only; the runtime sends the right length automatically.
@@ -76,10 +76,10 @@ Start order free (missing ends retry every 2s). Undeclared carts fall back to fi
 
 ## API
 
-MIDI is device `0x90` (port = `0x90 << 8 | sub`). `device_out` reads, `device_in` writes. `<IO>`. Touching it first time opens the ports.
+Ports open the first time a cart calls any `midi_*` native. `<IO>`.
 
-- `device_out(0x9000) -> Int` — pop oldest incoming event, `0` if queue empty.
-- `device_out(0x9001) -> Int` — queued event count (drain once per frame).
-- `device_in(0x9002, msg)` — send a message: `msg = status | d1<<8 | d2<<16` (dest chosen by routing).
+- `midi_poll() -> Int` — pop oldest incoming event, `0` if queue empty.
+- `midi_count() -> Int` — queued event count (drain once per frame).
+- `midi_send(msg)` — send a message: `msg = status | d1<<8 | d2<<16` (dest chosen by routing).
 
 Event/message packing: `status | d1<<8 | d2<<16 | src<<24` (incoming carries `src`). Unpack with `/` and `%`.

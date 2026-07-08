@@ -33,14 +33,14 @@ fn c_pink()  -> Int { rgb(29, 12, 13) }       // #e8336d — edit accent
 fn c_teal()  -> Int { rgb(0, 58, 28) }        // selection accent
 fn c_gray()  -> Int { rgb(13, 26, 13) }
 
-fn load_font() -> <IO> Array<Int> {
+fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
   let data = fs_read(fd, 1520);
   let _ = fs_close(fd);
   data
 }
-fn glyph(font: &Array<Int>, cp: Int, x: Int, y: Int, color: Int) -> <Graphics> Unit {
-  if cp >= 32 && cp < 127 { gfx_blitg(font.clone(), (cp - 32) * 128, x, y, 8, 16, color, 0) }
+fn glyph(font: &Bytes, cp: Int, x: Int, y: Int, color: Int) -> <Graphics> Unit {
+  if cp >= 32 && cp < 127 { gfx_blitg(font, (cp - 32) * 128, x, y, 8, 16, color, 0) }
 }
 fn hexd(d: Int) -> Int { if d < 10 { 48 + d } else { 55 + d } }
 // channel initials: BAS TRI LED HAT.
@@ -62,7 +62,7 @@ fn trigger(w: &mut World, tm: Int) -> <IO> Unit {
     if on == 1 {
       let n = note_of(t, p);
       let dur = match t { 0 => 220, 1 => 200, 2 => 260, _ => 80 };
-      sfx_playm(t, n, 70, dur);
+      snd_on(t, n, 70, dur);
       midi_send(144 + t + n * 256 + 100 * 65536);
       w.pulse[t] = tm
     }
@@ -109,7 +109,7 @@ fn input(w: &mut World) -> <IO> Unit {
   w.prevb = b
 }
 
-fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
+fn draw(w: &World, font: &Bytes, tm: Int) -> <Graphics> Unit {
   gfx_cls(0x0000);
   // coordinate frame: channel letters left, step numbers (0 4 8 C) on the beats.
   for t in 0..NTRK {
@@ -125,7 +125,7 @@ fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
   if w.playing == 1 {
     let hx = X0 + w.step * CW + CW / 2 - 4;
     gfx_rect(hx - 1, Y0 - 27, 10, 18, c_pink());
-    gfx_blitg(font.clone(), (hexd(w.step) - 32) * 128, hx, Y0 - 26, 8, 16, c_pink(), 1)
+    gfx_blitg(font, (hexd(w.step) - 32) * 128, hx, Y0 - 26, 8, 16, c_pink(), 1)
   };
   // dot matrix (Tenori-on): off = faint dot, on = white disc sized by pitch.
   for s in 0..NSTEP {
@@ -173,14 +173,14 @@ fn draw(w: &World, font: &Array<Int>, tm: Int) -> <Graphics> Unit {
 fn main() -> <frame, Graphics, IO> Unit {
   gfx_screen(480, 320);
   let font = load_font();
-  sfx_inst(0, 0, 5, 150, 55, 120);
-  sfx_inst(1, 2, 8, 180, 50, 200);
-  sfx_inst(2, 1, 5, 120, 45, 260);
-  sfx_inst(3, 4, 2, 70, 0, 50);
-  sfx_pan(0, 90, 90);
-  sfx_pan(1, 70, 100);
-  sfx_pan(2, 100, 70);
-  sfx_pan(3, 80, 80);
+  snd_osc(0, 0, 0, 0, 0, 100); snd_env(0, 0, 0, 100, 5, 150, 55, 120);
+  snd_osc(1, 0, 2, 0, 0, 100); snd_env(1, 0, 0, 100, 8, 180, 50, 200);
+  snd_osc(2, 0, 1, 0, 0, 100); snd_env(2, 0, 0, 100, 5, 120, 45, 260);
+  snd_osc(3, 0, 4, 0, 0, 100); snd_env(3, 0, 0, 100, 2, 70, 0, 50);
+  snd_pan(0, 0);
+  snd_pan(1, 30);
+  snd_pan(2, -30);
+  snd_pan(3, 0);
 
   let mut w = World {
     grid: [Cell { on: 0, p: 0 }; 64],

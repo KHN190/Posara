@@ -16,7 +16,7 @@ fn gfx_registered_names_match_decls() {
         .collect();
     let declared: BTreeSet<String> = posara::gfx::host_fn_decls()
         .into_iter()
-        .map(|(n, _, _)| format!("gfx_{n}"))
+        .map(|(n, _, _)| n.to_string())
         .collect();
     assert_eq!(registered, declared, "gfx native registrations drifted from host_fn_decls");
 }

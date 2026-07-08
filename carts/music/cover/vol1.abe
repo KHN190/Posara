@@ -7,7 +7,7 @@ use lib::proj::{ draw_poly }
 use lib::curl_noise::{ Curl, cn_new, cn_init, cn_step }
 use lib::cube_slice::{ Cube, cb_new, cb_init, cb_step, cb_grow, cb_map }
 
-fn load_font() -> <IO> Array<Int> {
+fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
   let data = fs_read(fd, 1520);
   let _ = fs_close(fd);
@@ -18,11 +18,11 @@ fn load_font() -> <IO> Array<Int> {
 static SHIFT: Array<Int> = [128, 64, 32, 16, 8, 4, 2, 1];
 
 // scaled glyph: each font bit becomes an sc×sc block.
-fn glyph_big(font: &Array<Int>, cp: Int, x: Int, y: Int, sc: Int, color: Int) -> <Graphics> Unit {
+fn glyph_big(font: &Bytes, cp: Int, x: Int, y: Int, sc: Int, color: Int) -> <Graphics> Unit {
   if cp >= 32 && cp < 127 {
     let base = (cp - 32) * 16;          // 16 bytes per glyph
     for row in 0..16 {
-      let byte = font[base + row];
+      let byte = font.byte_at(base + row);
       for col in 0..8 {
         if byte / SHIFT[col] % 2 == 1 {
           gfx_rect(x + col * sc, y + row * sc, sc, sc, color)

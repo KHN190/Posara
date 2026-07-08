@@ -281,6 +281,27 @@ pub fn drive_realtime(
     Ok(())
 }
 
+// Virtual-clock frame loop: advance a fake clock at 60Hz to `deadline_ms`, no
+// sleep — offline renders run as fast as the machine allows. The caller owns the
+// clock's Some(0)/None bookends. `hook(step, vms)` runs after each frame; false
+// stops early. Shared by run_until_ms and run_render.
+pub fn drive_virtual(
+    step: &mut Stepper,
+    host: &Host,
+    deadline_ms: u64,
+    mut hook: impl FnMut(&mut Stepper, f64) -> Result<bool, String>,
+) -> Result<(), String> {
+    let mut vms = 0.0f64;
+    while (vms as u64) < deadline_ms {
+        if !alive(host) { break; }
+        host.clock.set(Some(vms as u64));
+        if !step.frame()? { break; }
+        if !hook(step, vms)? { break; }
+        vms += 1000.0 / 60.0;
+    }
+    Ok(())
+}
+
 pub fn run_until_frame(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, n: u64) -> Result<(), String> {
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
     for _ in 0..n {
@@ -303,13 +324,7 @@ pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<Str
     host.clock.set(Some(0));
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
     if step.is_frame_loop() {
-        let mut vms = 0.0f64;
-        while (vms as u64) < deadline_ms {
-            if !alive(host) { break; }
-            host.clock.set(Some(vms as u64));
-            if !step.frame()? { break; }
-            vms += 1000.0 / 60.0;
-        }
+        drive_virtual(&mut step, host, deadline_ms, |_, _| Ok(true))?;
     } else {
         step.frame()?;
     }
@@ -349,11 +364,8 @@ pub fn run_render(
         std::fs::create_dir_all(dir).map_err(|e| format!("frames dir: {e}"))?;
     }
     let interval = 1000.0 / fps as f64;
-    let mut vms = 0.0f64;
     let mut shot: u64 = 0;
-    while (vms as u64) < dur_ms {
-        host.clock.set(Some(vms as u64));
-        if !step.frame()? { break; }
+    drive_virtual(&mut step, host, dur_ms, |_, vms| {
         while let Some(cmd) = host.sfx.audio.cmds.try_pop() { mixer.apply(cmd); }
         mixer.mix(&mut frame_buf);
         samples.extend_from_slice(&frame_buf);
@@ -365,8 +377,8 @@ pub fn run_render(
                 shot += 1;
             }
         }
-        vms += 1000.0 / 60.0;
-    }
+        Ok(true)
+    })?;
     host.clock.set(None);
     let _ = (from_ms, interval, &mut shot, fps);
     crate::sfx::write_wav_f32(out, sr, ch as u16, &samples)

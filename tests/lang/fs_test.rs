@@ -58,10 +58,9 @@ fn fs_write_read_roundtrip() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-// fs_readb returns a Bytes value (8 bytes/word packed); byte_at must recover the
-// original bytes, proving the packed representation round-trips.
+// fs_read returns a packed Bytes value; byte_at must recover the original bytes.
 #[test]
-fn fs_readb_bytes_roundtrip() {
+fn fs_read_bytes_roundtrip() {
     use std::io::Write;
     use posara::Host;
     use posara::runner::{compile_abe, Stepper};
@@ -73,7 +72,7 @@ fn fs_readb_bytes_roundtrip() {
     // read 3 bytes as Bytes, paint the 3rd (0x33) across the screen.
     let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  \
         let fd = fs_open(\"blob.bin\", 1);\n  \
-        let b = fs_readb(fd, 3);\n  \
+        let b = fs_read(fd, 3);\n  \
         let _ = fs_close(fd);\n  \
         gfx_screen(4, 4);\n  \
         loop { gfx_cls(b.byte_at(2)); gfx_commit(); frame.present() }\n}\n";
@@ -85,5 +84,33 @@ fn fs_readb_bytes_roundtrip() {
     step.frame().unwrap();
 
     assert!(host.gfx.fb.borrow().buf.iter().all(|&c| c == 0x33), "fs_readb byte mismatch");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// End-to-end for the converged Bytes API: a `b"\xNN"` byte-string literal as a
+// static 1bpp sprite, blit via &Bytes. Confirms the literal parses, statics of
+// type Bytes work, and gfx_blitg renders from packed bytes at runtime.
+#[test]
+fn byte_literal_sprite_renders() {
+    use std::io::Write;
+    use posara::Host;
+    use posara::runner::{compile_abe, Stepper};
+
+    let root = std::env::temp_dir().join("posara_byte_lit");
+    std::fs::create_dir_all(&root).unwrap();
+    let cart = root.join("bl.abe");
+    // b"\xff" = 8 set bits → an 8×1 solid 1bpp row.
+    let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  \
+        let spr = b\"\\xff\";\n  \
+        gfx_screen(8, 1);\n  \
+        loop { gfx_cls(0x0000); gfx_blitg(&spr, 0, 0, 0, 8, 1, 0x1234, 0); gfx_commit(); frame.present() }\n}\n";
+    std::fs::File::create(&cart).unwrap().write_all(src.as_bytes()).unwrap();
+
+    let host = Host::new_with(root.clone(), true, true).unwrap();
+    let r = compile_abe(&cart, &host).unwrap_or_else(|e| panic!("compile:\n{e}"));
+    let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
+    step.frame().unwrap();
+
+    assert!(host.gfx.fb.borrow().buf.iter().all(|&c| c == 0x1234), "byte-literal sprite did not render");
     std::fs::remove_dir_all(&root).ok();
 }

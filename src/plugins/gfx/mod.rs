@@ -53,14 +53,14 @@ impl Plugin for GfxPlugin {
         let gfx_eff = || vec![EffectItem { name: vec!["Graphics".into()], arg: None }];
         let io_eff  = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
         for (name, params, ret) in host_fn_decls() {
-            compiler.register_host_fn(&format!("gfx_{name}"), params, ret, gfx_eff())?;
+            compiler.register_host_fn(name, params, ret, gfx_eff())?;
         }
         for (name, params, ret) in input_fn_decls() {
             compiler.register_host_fn(name, params, ret, io_eff())?;
         }
         #[cfg(feature = "fs")]
         for (name, params, ret) in host_fn_io_decls() {
-            compiler.register_host_fn(&format!("gfx_{name}"), params, ret, io_eff())?;
+            compiler.register_host_fn(name, params, ret, io_eff())?;
         }
         Ok(())
     }
@@ -73,8 +73,8 @@ fn arg(args: &[Value], i: usize) -> i64 {
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 
 // Is the `bit`-th pixel of a 1bpp sprite set? MSB-first within each byte.
-fn bit1(cells: &[u64], bit: usize) -> bool {
-    let byte = cells.get(bit / 8).copied().unwrap_or(0) as u8;
+fn bit1(bytes: &[u8], bit: usize) -> bool {
+    let byte = bytes.get(bit / 8).copied().unwrap_or(0);
     (byte >> (7 - (bit & 7))) & 1 == 1
 }
 
@@ -165,8 +165,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         let mode = arg(a, 6) & 0xF;
         let deg = arg(a, 7);
         if sprite.is_handle_none() || w <= 0 || h <= 0 { return ret_unit(); }
-        let (slot, gen_) = sprite.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
+        let Some(bytes) = myriad::read_bytes(ctx.heap, sprite) else { return ret_unit(); };
         let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
         let (cxd, cyd) = (x0 + w / 2, y0 + h / 2);
         let theta = deg as f64 * std::f64::consts::PI / 180.0;
@@ -182,7 +181,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
                 let sy = (-s * ddx as f64 + c * ddy as f64 + cy).round() as i64;
                 if sx >= 0 && sx < w && sy >= 0 && sy < h {
                     let bit = off + (sy * w + sx) as usize;
-                    if bit1(cells, bit) {
+                    if bit1(&bytes, bit) {
                         fbm.pset_op(cxd + ddx, cyd + ddy, color, mode);
                     }
                 }
@@ -225,24 +224,6 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         f.borrow_mut().palette[i] = (r5 << 11) | (g6 << 5) | b5;
         ret_unit()
     });
-    let f = Rc::clone(&fb);
-    reg!("gfx_blit", move |ctx: &mut NativeCtx, a: &[Value]| {
-        let sprite = a.first().copied().unwrap_or(Value::NONE);
-        let (x0, y0, w, h, color) = (arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4), arg(a, 5) as u16);
-        if sprite.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = sprite.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
-        let mut fbm = f.borrow_mut();
-        for py in 0..h {
-            for px in 0..w {
-                let bit = (py * w + px) as usize;
-                if bit1(cells, bit) {
-                    fbm.pset(x0 + px, y0 + py, color);
-                }
-            }
-        }
-        ret_unit()
-    });
     // blitg(sprite, off_bits, x, y, w, h, color, mode): 1bpp blit reading from a
     // bit offset into the packed sprite (so one atlas array holds many glyphs),
     // with composite mode 0 REPLACE / 1 XOR / 2 AND / 3 OR. rot in high bits of
@@ -256,13 +237,12 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         let mode = modeword & 0xF;
         let rot = (modeword >> 4) & 0x3;
         if sprite.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = sprite.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
+        let Some(bytes) = myriad::read_bytes(ctx.heap, sprite) else { return ret_unit(); };
         let mut fbm = f.borrow_mut();
         for py in 0..h {
             for px in 0..w {
                 let bit = off + (py * w + px) as usize;
-                if bit1(cells, bit) {
+                if bit1(&bytes, bit) {
                     let (dx, dy) = match rot {
                         1 => (h - 1 - py, px),       // 90 cw
                         2 => (w - 1 - px, h - 1 - py),
@@ -318,36 +298,34 @@ pub fn register_io_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>
 pub fn host_fn_io_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
     use abrase::ty::Type as T;
     vec![
-        ("save_png", vec![T::Int, T::Int, T::Int, T::Int, T::String], T::Int),
+        ("gfx_save_png", vec![T::Int, T::Int, T::Int, T::Int, T::String], T::Int),
     ]
 }
 
 #[cfg(feature = "compiler")]
 pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
     use abrase::ty::Type as T;
-    let arr_int = || T::Generic { name: "Array".into(), args: vec![T::Int] };
     let ref_bytes = || T::Reference { is_mut: false, inner: Box::new(T::Named("Bytes".into())) };
     vec![
-        ("screen",      vec![T::Int, T::Int],                              T::Unit),
-        ("screen_off",  vec![],                                            T::Unit),
-        ("commit",      vec![],                                            T::Unit),
-        ("cls",     vec![T::Int],                                          T::Unit),
-        ("win_pos", vec![T::Int, T::Int],                                  T::Unit),
-        ("pset",    vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("rect",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("rectb",   vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("rectmix", vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],  T::Unit),
-        ("dither",  vec![T::Int, T::Int],                                  T::Unit),
-        ("line",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
-        ("linew",   vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],  T::Unit),
-        ("circ",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("circb",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
-        ("tri",     vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("trib",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("pal",     vec![T::Int, T::Int],                                  T::Unit),
-        ("blit",    vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("blitg",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("blitr",   vec![arr_int(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
-        ("sprite",  vec![ref_bytes(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("gfx_screen",      vec![T::Int, T::Int],                              T::Unit),
+        ("gfx_screen_off",  vec![],                                            T::Unit),
+        ("gfx_commit",      vec![],                                            T::Unit),
+        ("gfx_cls",     vec![T::Int],                                          T::Unit),
+        ("gfx_win_pos", vec![T::Int, T::Int],                                  T::Unit),
+        ("gfx_pset",    vec![T::Int, T::Int, T::Int],                          T::Unit),
+        ("gfx_rect",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
+        ("gfx_rectb",   vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
+        ("gfx_rectmix", vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],  T::Unit),
+        ("gfx_dither",  vec![T::Int, T::Int],                                  T::Unit),
+        ("gfx_line",    vec![T::Int, T::Int, T::Int, T::Int, T::Int],          T::Unit),
+        ("gfx_linew",   vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int],  T::Unit),
+        ("gfx_circ",    vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
+        ("gfx_circb",   vec![T::Int, T::Int, T::Int, T::Int],                  T::Unit),
+        ("gfx_tri",     vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("gfx_trib",    vec![T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("gfx_pal",     vec![T::Int, T::Int],                                  T::Unit),
+        ("gfx_blitg",   vec![ref_bytes(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("gfx_blitr",   vec![ref_bytes(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
+        ("gfx_sprite",  vec![ref_bytes(), T::Int, T::Int, T::Int, T::Int, T::Int, T::Int, T::Int], T::Unit),
     ]
 }

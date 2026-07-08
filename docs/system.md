@@ -36,7 +36,7 @@ let data = fs_read(fd, 1520);                    // read N bytes
 let _    = fs_close(fd);
 ```
 
-Full set: `fs_open` / `fs_read` / `fs_reads` / `fs_write` / `fs_writes` / `fs_seek` / `fs_close`, plus `fs_exists` / `fs_list` / `fs_mkdir` / `fs_remove`.
+Three read forms: `fs_read` → `Array<Int>` (one int per byte), `fs_readb` → `Bytes` (packed, 8× smaller — use for large sprite sheets), `fs_reads` → `String` (UTF-8 text). Rest: `fs_open` / `fs_write` / `fs_writes` / `fs_seek` / `fs_close`, plus `fs_exists` / `fs_list` / `fs_mkdir` / `fs_remove`.
 
 Idiom: load once in `main` before the frame loop, keep the data in a local. See `carts/basic/text.abe` / `carts/basic/sprite.abe`.
 
@@ -46,7 +46,7 @@ The `<…>` on a function signature is its effect set, annotated by the capabili
 
 | Effect | Meaning |
 |---|---|
-| `<Graphics>` | drawing (cls / line / blitg …) |
+| `<Graphics>` | drawing (gfx_cls / gfx_line / gfx_blitg …) |
 | `<IO>` | audio, console, devices |
 | `<nondet>` | uses `rand()` |
 
@@ -65,7 +65,8 @@ Control & console
 
 Files (all `<IO>`; `fd` from `fs_open`, `-1` on error)
 - `fs_open(path: String, mode: Int) -> Int` — open, return fd. mode = OR of `1` read `2` write `4` create `8` append `16` truncate.
-- `fs_read(fd, n: Int) -> Array<Int>` — read n bytes, zero-padded past EOF (arrays have no len).
+- `fs_read(fd, n: Int) -> Array<Int>` — read n bytes, zero-padded past EOF (one int per byte).
+- `fs_readb(fd, n: Int) -> Bytes` — read n bytes packed (8× smaller heap); for `gfx_sprite` sheets.
 - `fs_reads(fd, n: Int) -> String` — read n bytes as UTF-8 text.
 - `fs_write(fd, data: Array<Int>) -> Int` — write bytes, return count.
 - `fs_writes(fd, s: String) -> Int` — write text, return byte count.
