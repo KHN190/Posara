@@ -14,14 +14,10 @@ use myriad::{read_string, NativeCtx, Value, VirtualMachine};
 
 pub mod input;
 
-use input::{Controller, ControllerDevice, CONTROLLER_ID, register_input_natives};
-#[cfg(feature = "compiler")]
-use input::input_fn_decls;
 use crate::plugin::Plugin;
 
 pub struct GfxPlugin {
     pub fb: Rc<RefCell<Framebuffer>>,
-    pub controller: Rc<RefCell<Controller>>,
     root: PathBuf,
 }
 
@@ -29,20 +25,14 @@ impl GfxPlugin {
     pub fn new(headless: bool, root: PathBuf) -> Self {
         let mut fb = Framebuffer::new();
         if headless { fb.set_headless(); }
-        Self {
-            fb: Rc::new(RefCell::new(fb)),
-            controller: Rc::new(RefCell::new(Controller::new())),
-            root,
-        }
+        Self { fb: Rc::new(RefCell::new(fb)), root }
     }
 }
 
 impl Plugin for GfxPlugin {
     fn install(&self, vm: &mut VirtualMachine) {
         vm.install_device(SCREEN_ID, Box::new(ScreenDevice::new(Rc::clone(&self.fb))));
-        vm.install_device(CONTROLLER_ID, Box::new(ControllerDevice::new(Rc::clone(&self.controller), Rc::clone(&self.fb))));
         register_natives(vm, Rc::clone(&self.fb));
-        register_input_natives(vm, Rc::clone(&self.controller), Rc::clone(&self.fb));
         #[cfg(feature = "fs")]
         register_io_natives(vm, Rc::clone(&self.fb), self.root.clone());
     }
@@ -51,16 +41,15 @@ impl Plugin for GfxPlugin {
     fn register_fns(&self, compiler: &mut abrase::compiler::Compiler) -> Result<(), String> {
         use abrase::ast::EffectItem;
         let gfx_eff = || vec![EffectItem { name: vec!["Graphics".into()], arg: None }];
-        let io_eff  = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
         for (name, params, ret) in host_fn_decls() {
             compiler.register_host_fn(name, params, ret, gfx_eff())?;
         }
-        for (name, params, ret) in input_fn_decls() {
-            compiler.register_host_fn(name, params, ret, io_eff())?;
-        }
         #[cfg(feature = "fs")]
-        for (name, params, ret) in host_fn_io_decls() {
-            compiler.register_host_fn(name, params, ret, io_eff())?;
+        {
+            let io_eff = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
+            for (name, params, ret) in host_fn_io_decls() {
+                compiler.register_host_fn(name, params, ret, io_eff())?;
+            }
         }
         Ok(())
     }

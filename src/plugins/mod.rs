@@ -11,6 +11,7 @@ pub mod midi;
 
 #[cfg(feature = "gfx")]
 pub use gfx::GfxPlugin;
+pub use gfx::input::InputPlugin;
 #[cfg(feature = "sfx")]
 pub use sfx::SfxPlugin;
 #[cfg(feature = "synth")]

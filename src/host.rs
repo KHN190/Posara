@@ -6,7 +6,7 @@ use std::time::Instant;
 use myriad::{NativeCtx, Value, VirtualMachine};
 
 #[cfg(feature = "gfx")]
-use crate::plugins::GfxPlugin;
+use crate::plugins::{GfxPlugin, InputPlugin};
 #[cfg(feature = "sfx")]
 use crate::plugins::SfxPlugin;
 #[cfg(feature = "synth")]
@@ -29,6 +29,8 @@ pub struct Host {
     pub root: PathBuf,
     #[cfg(feature = "gfx")]
     pub gfx: GfxPlugin,
+    #[cfg(feature = "gfx")]
+    pub input: InputPlugin,
     #[cfg(feature = "sfx")]
     pub sfx: SfxPlugin,
     #[cfg(feature = "synth")]
@@ -79,12 +81,16 @@ impl Host {
         let _ = muted;
         #[cfg(feature = "sfx")]
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
+        #[cfg(feature = "gfx")]
+        let gfx = GfxPlugin::new(headless, root.clone());
         Ok(Self {
             start: Instant::now(),
             clock: Rc::new(std::cell::Cell::new(None)),
             rng: Rc::new(RefCell::new(0x9e3779b9)),
             #[cfg(feature = "gfx")]
-            gfx: GfxPlugin::new(headless, root.clone()),
+            input: InputPlugin::new(Rc::clone(&gfx.fb)),
+            #[cfg(feature = "gfx")]
+            gfx,
             #[cfg(feature = "synth")]
             synth: SynthPlugin::new(std::sync::Arc::clone(&sfx.audio.cmds)),
             #[cfg(feature = "sfx")]
@@ -101,6 +107,8 @@ impl Host {
         let mut v: Vec<&dyn Plugin> = Vec::new();
         #[cfg(feature = "gfx")]
         v.push(&self.gfx);
+        #[cfg(feature = "gfx")]
+        v.push(&self.input);
         #[cfg(feature = "sfx")]
         v.push(&self.sfx);
         #[cfg(feature = "synth")]
@@ -128,7 +136,7 @@ impl Host {
 
     #[cfg(feature = "gfx")]
     pub fn set_input(&self, buttons: u8, key: u8) {
-        let mut c = self.gfx.controller.borrow_mut();
+        let mut c = self.input.controller.borrow_mut();
         c.buttons = buttons;
         c.key = key;
     }

@@ -55,7 +55,7 @@ fn run_one_frame(tag: &str, src: &str, setup: impl FnOnce(&posara::Host)) -> Vec
 #[test]
 fn in_buttons_reads_injected_state() {
     let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  gfx_screen(8, 8);\n  loop { gfx_cls(in_buttons()); gfx_commit(); frame.present() }\n}\n";
-    let buf = run_one_frame("in_buttons", src, |h| h.gfx.controller.borrow_mut().buttons = 0x42);
+    let buf = run_one_frame("in_buttons", src, |h| h.input.controller.borrow_mut().buttons = 0x42);
     assert!(buf.iter().all(|&c| c == 0x42));
 }
 
