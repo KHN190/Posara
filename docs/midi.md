@@ -72,7 +72,7 @@ Start order free (missing ends retry every 2s). Undeclared carts fall back to fi
 
 ## Tools
 
-`midi2track` converts a standard MIDI file into an `.abe` track cart (see `carts/music/song.abe`). Live examples: `carts/music/sequencer.abe`, `carts/music/tracker.abe`.
+`posara-sfx track <in.mid> <out.trk>` converts a standard MIDI file into a packed `.trk`; a cart loads it with `fs_read` + `snd_track`. Live examples: `carts/music/sequencer.abe`, `carts/music/tracker.abe`.
 
 ## API
 

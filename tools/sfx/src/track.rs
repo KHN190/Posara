@@ -1,22 +1,18 @@
-// midi2track — .mid → sfx_seq / sfx_track
-//
-// output:
-//   *.abe  → use sfx_inst + sfx_seq in cart
-//   *      → raw .trk, a cart loads with fs_read + sfx_track
+// `posara-sfx track` — .mid -> .trk packed events.
+//   cart: let t = fs_read(fd, N); snd_track(&t, ms_per_tick)
+// each event = one i64: tick(16) | ch(3) | note(8) | vol(7) | dur(16).
 
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
 fn usage() -> ExitCode {
-    eprintln!("usage: midi2track <in.mid> <out.abe|.trk> [opts]");
-    eprintln!("  --voices N      max sfx channels 1..4 (default 4)");
+    eprintln!("usage: posara-sfx track <in.mid> <out.trk> [opts]");
+    eprintln!("  --voices N      max channels 1..4 (default 4)");
     eprintln!("  --project MODE  voice|pitch (default voice)");
     eprintln!("                    voice = temporal allocator, steals when polyphony > voices");
-    eprintln!("                    pitch = route by pitch percentile to ch 0..N-1 (low..high), no stealing");
-    eprintln!("  --wave K        cart waveform 0..4 for .abe output (default 0=square)");
+    eprintln!("                    pitch = route by pitch percentile to ch 0..N-1, no stealing");
     eprintln!("  --transpose N   semitone shift (default 0)");
     eprintln!("  --res N         our ticks-per-quarter (default 4 = 16th-note grid)");
     eprintln!("  --tempo BPM     override MIDI initial tempo");
@@ -26,22 +22,19 @@ fn usage() -> ExitCode {
 #[derive(Clone, Copy, PartialEq)]
 enum Project { Voice, Pitch }
 
-fn main() -> ExitCode {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+pub fn run(args: Vec<String>) -> ExitCode {
     let mut pos: Vec<String> = Vec::new();
     let mut voices = 4usize;
-    let mut wave = 0i64;
     let mut transpose: i32 = 0;
     let mut res: u32 = 4;
     let mut tempo_override: Option<u32> = None;
     let mut project = Project::Voice;
-    let mut it = raw.into_iter();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut next = || it.next().ok_or_else(usage);
         match a.as_str() {
             "-h" | "--help" => return usage(),
             "--voices"    => match next() { Ok(v) => match v.parse::<usize>() { Ok(n) => voices = n.clamp(1, 4), _ => return usage() }, Err(c) => return c },
-            "--wave"      => match next() { Ok(v) => match v.parse::<i64>() { Ok(n) => wave = n.clamp(0, 4), _ => return usage() }, Err(c) => return c },
             "--transpose" => match next() { Ok(v) => match v.parse::<i32>() { Ok(n) => transpose = n, _ => return usage() }, Err(c) => return c },
             "--res"       => match next() { Ok(v) => match v.parse::<u32>() { Ok(n) if n > 0 => res = n, _ => return usage() }, Err(c) => return c },
             "--tempo"     => match next() { Ok(v) => match v.parse::<f32>() { Ok(b) if b > 0.0 => tempo_override = Some((60_000_000.0 / b) as u32), _ => return usage() }, Err(c) => return c },
@@ -130,13 +123,12 @@ fn main() -> ExitCode {
     notes.sort_by_key(|n| n.start);
     for v in cc7.iter_mut().chain(cc11.iter_mut()) { v.sort_by_key(|p| p.0); }
 
-    let (alloc, stolen): (Vec<usize>, u32) = match project {
+    let alloc: Vec<usize> = match project {
         Project::Voice => {
             #[derive(Clone, Copy)]
             struct Slot { end: u64, midi_ch: Option<u8> }
             let mut slots = vec![Slot { end: 0, midi_ch: None }; voices];
             let mut alloc: Vec<usize> = Vec::with_capacity(notes.len());
-            let mut stolen = 0u32;
             for n in &notes {
                 let mut pick: Option<usize> = None;
                 for (i, s) in slots.iter().enumerate() {
@@ -148,13 +140,12 @@ fn main() -> ExitCode {
                     }
                 }
                 let p = pick.unwrap_or_else(|| {
-                    stolen += 1;
                     slots.iter().enumerate().min_by_key(|(_, s)| s.end).map(|(i, _)| i).unwrap()
                 });
                 slots[p] = Slot { end: n.start + n.dur, midi_ch: Some(n.ch) };
                 alloc.push(p);
             }
-            (alloc, stolen)
+            alloc
         }
         Project::Pitch => {
             let mut sorted: Vec<u8> = notes.iter().map(|n| n.key).collect();
@@ -163,7 +154,7 @@ fn main() -> ExitCode {
             let band = |k: u8| -> usize {
                 cuts.iter().position(|&c| k < c).unwrap_or(voices - 1)
             };
-            (notes.iter().map(|n| band(n.key)).collect(), 0)
+            notes.iter().map(|n| band(n.key)).collect()
         }
     };
 
@@ -199,28 +190,16 @@ fn main() -> ExitCode {
     if events.is_empty() { eprintln!("all notes overflowed 16-bit ticks; try larger --res"); return ExitCode::from(1); }
 
     let used = alloc.iter().copied().max().map(|m| m + 1).unwrap_or(1);
-    let raw_out = out.extension().and_then(|s| s.to_str()) != Some("abe");
-    let res_io = if raw_out {
-        write_raw(&out, &events)
-    } else {
-        write_cart(&out, &events, our_ms_per_tick, wave, used)
-    };
-    if let Err(e) = res_io {
+    let mut raw = Vec::with_capacity(events.len() * 8);
+    for &e in &events { raw.extend_from_slice(&e.to_le_bytes()); }
+    if let Err(e) = std::fs::write(&out, &raw) {
         eprintln!("write {}: {e}", out.display());
         return ExitCode::from(1);
     }
-    if raw_out {
-        eprintln!(
-            "wrote {} ({} events, {} bytes; cart: let t = fs_read(fd, {}); sfx_track(t, {}))",
-            out.display(), events.len(), events.len() * 8, events.len() * 8, our_ms_per_tick
-        );
-    } else {
-        eprintln!(
-            "wrote {} ({} events, {} voices, {} ms/tick; tempo {} BPM, PPQ {}, res {}) → posara run {}",
-            out.display(), events.len(), used, our_ms_per_tick,
-            60_000_000 / tempo_us, ppq, res, out.display()
-        );
-    }
+    eprintln!(
+        "wrote {} ({} events, {} voices, {} bytes; cart: let t = fs_read(fd, {}); snd_track(&t, {}))",
+        out.display(), events.len(), used, events.len() * 8, events.len() * 8, our_ms_per_tick
+    );
     if preempted > 0 {
         let pct = preempted as f64 * 100.0 / events.len().max(1) as f64;
         let cause = match project {
@@ -229,7 +208,6 @@ fn main() -> ExitCode {
         };
         eprintln!("warn: {preempted}/{} notes preempted ({:.0}%) — {}", events.len(), pct, cause);
     }
-    let _ = stolen;
     if overflow > 0 { eprintln!("warn: {overflow} note(s) past 16-bit tick/dur — try larger --res"); }
     ExitCode::SUCCESS
 }
@@ -246,44 +224,17 @@ fn pack(tick: i64, ch: i64, note: i64, vol: i64, dur: i64) -> i64 {
     (tick & 0xFFFF) | ((ch & 0x7) << 16) | ((note & 0xFF) << 19) | ((vol & 0x7F) << 27) | ((dur & 0xFFFF) << 34)
 }
 
-fn write_raw(out: &PathBuf, events: &[i64]) -> std::io::Result<()> {
-    let mut bytes = Vec::with_capacity(events.len() * 8);
-    for &e in events { bytes.extend_from_slice(&e.to_le_bytes()); }
-    std::fs::write(out, &bytes)
-}
+#[cfg(test)]
+mod tests {
+    use super::pack;
 
-fn write_cart(out: &PathBuf, events: &[i64], ms_per_tick: i64, wave: i64, voices: usize) -> std::io::Result<()> {
-    let max_end_ticks: i64 = events.iter().map(|&w| {
-        let tick = w & 0xFFFF;
-        let dur = (w >> 34) & 0xFFFF;
-        tick + dur
-    }).max().unwrap_or(0);
-    let total_ms = max_end_ticks * ms_per_tick.max(1) + 1000;
-
-    let mut f = std::fs::File::create(out)?;
-    writeln!(f, "// generated by midi2track")?;
-    writeln!(f, "// {} events, {} voices, {} ms/tick, ~{} ms total", events.len(), voices, ms_per_tick, total_ms)?;
-    writeln!(f)?;
-    writeln!(f, "fn main() -> Unit {{ () }}")?;
-    writeln!(f)?;
-    writeln!(f, "pub fn start() -> <Graphics, IO> Unit {{")?;
-    writeln!(f, "  screen_off();")?;
-    writeln!(f, "  screen(160, 120);")?;
-    writeln!(f, "  cls(0x0000);")?;
-    for c in 0..voices {
-        writeln!(f, "  sfx_inst({}, {}, 2, 0, 100, 80);", c, wave)?;
+    #[test]
+    fn fields_land_in_their_bits() {
+        let w = pack(0x1234, 3, 60, 100, 0x0abc);
+        assert_eq!(w & 0xFFFF, 0x1234);          // tick
+        assert_eq!((w >> 16) & 0x7, 3);          // ch
+        assert_eq!((w >> 19) & 0xFF, 60);        // note
+        assert_eq!((w >> 27) & 0x7F, 100);       // vol
+        assert_eq!((w >> 34) & 0xFFFF, 0x0abc);  // dur
     }
-    write!(f, "  sfx_seq([")?;
-    for (i, &e) in events.iter().enumerate() {
-        if i > 0 { write!(f, ",")?; }
-        if i % 8 == 0 { write!(f, "\n    ")?; }
-        write!(f, "{}", e)?;
-    }
-    writeln!(f, "\n  ], {})", ms_per_tick.max(1))?;
-    writeln!(f, "}}")?;
-    writeln!(f)?;
-    writeln!(f, "pub fn update() -> <IO> Unit {{")?;
-    writeln!(f, "  if now() >= {} {{ halt(0) }}", total_ms)?;
-    writeln!(f, "}}")?;
-    Ok(())
 }

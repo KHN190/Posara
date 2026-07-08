@@ -1,9 +1,6 @@
-// mp32sample — mp3 → 1-bit delta-sigma stream
-//
-//   decode mp3 → mono → linear resample → delta-sigma → packed bits
-//
-// output raw bit stream (MSB-first) cart:
-//   let s = fs_read(fd, BYTES); sfx_sample(s, 8000, vol)
+// `posara-sfx sample` — mp3 -> 1-bit delta-sigma stream.
+//   decode mp3 -> mono -> linear resample -> delta-sigma -> packed bits
+//   cart: let s = fs_read(fd, BYTES); snd_sample(&s, 8000, vol)
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -16,17 +13,15 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: mp32sample <in.mp3> <out.1bit> [--rate N]");
-    eprintln!("  --rate N   delta-sigma sample rate (default 8000; = sfx_sample's rate arg)");
-    eprintln!("  output: raw bit stream, MSB-first, ceil(samples/8) bytes");
+    eprintln!("usage: posara-sfx sample <in.mp3> <out.sample> [--rate N]");
+    eprintln!("  --rate N   delta-sigma sample rate (default 8000; = snd_sample's rate arg)");
     ExitCode::from(2)
 }
 
-fn main() -> ExitCode {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+pub fn run(args: Vec<String>) -> ExitCode {
     let mut pos: Vec<String> = Vec::new();
     let mut rate = 8000u32;
-    let mut it = raw.into_iter();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut next = || it.next().ok_or_else(usage);
         match a.as_str() {
@@ -46,31 +41,35 @@ fn main() -> ExitCode {
     if mono.is_empty() { eprintln!("no audio decoded"); return ExitCode::from(1); }
 
     let resampled = if sr == rate { mono } else { resample(&mono, sr, rate) };
-
-    // 1st-order delta-sigma: error-feedback quantize to ±1.
-    let mut err = 0.0f32;
     let n = resampled.len();
-    let mut bytes = vec![0u8; (n + 7) / 8];
-    for (i, &x) in resampled.iter().enumerate() {
-        let v = x.clamp(-0.95, 0.95) + err;
-        let bit = v >= 0.0;
-        err = v - if bit { 1.0 } else { -1.0 };
-        if bit { bytes[i / 8] |= 1 << (7 - (i & 7)); }
-    }
+    let bytes = delta_sigma(&resampled);
 
     if let Err(e) = std::fs::write(&out, &bytes) {
         eprintln!("write {}: {e}", out.display());
         return ExitCode::from(1);
     }
     eprintln!(
-        "wrote {} ({} samples @ {}Hz, {} bytes; cart: let s = fs_read(fd, {}); sfx_sample(s, {}, 80))",
+        "wrote {} ({} samples @ {}Hz, {} bytes; cart: let s = fs_read(fd, {}); snd_sample(&s, {}, 80))",
         out.display(), n, rate, bytes.len(), bytes.len(), rate
     );
     ExitCode::SUCCESS
 }
 
+// 1st-order delta-sigma: error-feedback quantize to ±1, packed MSB-first.
+fn delta_sigma(samples: &[f32]) -> Vec<u8> {
+    let mut err = 0.0f32;
+    let mut bytes = vec![0u8; (samples.len() + 7) / 8];
+    for (i, &x) in samples.iter().enumerate() {
+        let v = x.clamp(-0.95, 0.95) + err;
+        let bit = v >= 0.0;
+        err = v - if bit { 1.0 } else { -1.0 };
+        if bit { bytes[i / 8] |= 1 << (7 - (i & 7)); }
+    }
+    bytes
+}
+
 // Linear interpolation resample. Output is 1-bit delta-sigma'd anyway, so
-// rubato's sinc filtering buys nothing here — saves rustfft + transitive deps.
+// sinc filtering buys nothing — saves rustfft + transitive deps.
 fn resample(input: &[f32], src: u32, dst: u32) -> Vec<f32> {
     if input.is_empty() { return Vec::new(); }
     let n_out = ((input.len() as u64) * (dst as u64) / (src as u64).max(1)) as usize;
@@ -125,4 +124,23 @@ fn decode_mono(path: &PathBuf) -> Result<(Vec<f32>, u32), String> {
     }
     if sr == 0 { return Err("no samples".into()); }
     Ok((mono, sr))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delta_sigma;
+
+    #[test]
+    fn packs_ceil_bytes_and_tracks_sign() {
+        // 10 samples -> ceil(10/8) = 2 bytes.
+        let b = delta_sigma(&[0.9; 10]);
+        assert_eq!(b.len(), 2);
+        // steady positive input -> first bit set most of the time.
+        assert!(b[0] & 0b1000_0000 != 0);
+    }
+
+    #[test]
+    fn empty_input() {
+        assert_eq!(delta_sigma(&[]).len(), 0);
+    }
 }

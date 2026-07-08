@@ -76,7 +76,7 @@ Field layout — `offset · width`: `tick` 0·16 · `ch` 16·3 · `note` 19·8 �
 
 - `snd_seq(events: Array<Int>, ms_per_tick)` — queue packed events on the grid.
 - `snd_seqstop()` — stop the sequencer.
-- `snd_track(data: Array<Int>, ms_per_tick)` — play a `midi2track` output (see
+- `snd_track(data: Array<Int>, ms_per_tick)` — play a `posara-sfx track` output (see
   [midi.md](midi.md)).
 
 ### Samples

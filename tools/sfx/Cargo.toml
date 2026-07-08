@@ -1,0 +1,16 @@
+[package]
+name = "posara-sfx"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "posara audio asset converter: mp3/midi -> .sample / .trk."
+
+[[bin]]
+name = "posara-sfx"
+path = "src/main.rs"
+
+[dependencies]
+symphonia = { version = "0.5", default-features = false, features = ["mp3"] }
+midly = "0.5"

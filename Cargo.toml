@@ -1,3 +1,8 @@
+[workspace]
+members = [".", "tools/gfx", "tools/sfx"]
+# Plain `cargo build` builds only the runtime — tools are opt-in via -p.
+default-members = ["."]
+
 [package]
 name = "posara"
 version = "0.1.0"
@@ -5,13 +10,13 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 authors = ["knh190"]
-description = "General OS Myriad runtime."
+description = "General platform Myriad runtime visual-audio engine."
 
 [features]
 default = ["compiler", "fs", "gfx", "sfx", "synth", "midi", "test"]
 compiler = ["dep:abrase", "dep:polka-rustc"]
 fs = []
-gfx = ["dep:minifb"]
+gfx = ["dep:minifb", "dep:image"]
 sfx = ["dep:cpal"]
 synth = ["sfx"]
 midi = ["dep:midir", "dep:toml"]
@@ -34,74 +39,10 @@ debug = true
 [dependencies]
 minifb = { version = "0.27", optional = true }
 cpal = { version = "0.15", optional = true }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-color_quant = "1.1"
-fontdue = "0.9"
-symphonia = { version = "0.5", default-features = false, features = ["mp3"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 midir = { version = "0.10", optional = true }
 toml  = { version = "0.8", optional = true, default-features = false, features = ["parse"] }
-midly = "0.5"
 myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
 polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
-
-[[test]]
-name = "gfx_framebuffer_test"
-path = "tests/gfx/framebuffer_test.rs"
-
-[[test]]
-name = "gfx_raster_test"
-path = "tests/gfx/raster_test.rs"
-
-[[test]]
-name = "gfx_controller_test"
-path = "tests/gfx/controller_test.rs"
-
-[[test]]
-name = "sfx_spsc_test"
-path = "tests/sfx/spsc_test.rs"
-
-[[test]]
-name = "sfx_synth_output_test"
-path = "tests/sfx/synth_output_test.rs"
-
-[[test]]
-name = "sfx_env_test"
-path = "tests/sfx/env_test.rs"
-
-[[test]]
-name = "lang_compile_carts_test"
-path = "tests/lang/compile_carts_test.rs"
-
-[[test]]
-name = "lang_lint_test"
-path = "tests/lang/lint_test.rs"
-
-[[test]]
-name = "lang_break_at_test"
-path = "tests/lang/break_at_test.rs"
-
-[[test]]
-name = "midi_router_test"
-path = "tests/midi/midi_router_test.rs"
-
-[[test]]
-name = "gfx_registration_test"
-path = "tests/gfx/registration_test.rs"
-
-[[test]]
-name = "sfx_registration_test"
-path = "tests/sfx/registration_test.rs"
-
-[[test]]
-name = "lang_fs_test"
-path = "tests/lang/fs_test.rs"
-
-[[test]]
-name = "midi_dispatch_test"
-path = "tests/midi/dispatch_test.rs"
-
-[[test]]
-name = "lang_runner_test"
-path = "tests/lang/runner_test.rs"

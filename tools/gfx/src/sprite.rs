@@ -1,39 +1,37 @@
-// img2sprite — convert PNG/JPEG/... into a 1bpp sprite for posara.
+// `posara-gfx sprite` — image -> posara sprite.
 //
-// Output is a raw 1bpp bitmap: W*H bits, row-major, MSB-first, ceil(W*H/8)
-// bytes — the exact layout `blit`/`blitg` consume. A cart loads and draws it
-// just like a font glyph (rotation / XOR come from blitg at draw time):
-//
-//   let s = fs_read(fd, sprite_bytes);
-//   blitg(s, 0, x, y, W, H, color, mode)        // mode high bits = rotation
-//
-// bit=1 = "ink" (drawn pixel). By default dark pixels are ink (black art on a
-// white field); --invert flips. fs_read stores one byte per Array<Int> element.
+// 1bpp (default): W*H bits, row-major, MSB-first — the blit/blitg layout.
+//   bit=1 = ink (drawn). Dark pixels ink by default; --invert flips.
+// 4bpp --colors16: input must have <=15 colors (quantize upstream, e.g. ffmpeg
+//   palettegen); --key -> index 0 (transparent). Appends to <out> (sheet build)
+//   and writes/checks <out>.pal (16 RGB888 lines, pal()-ready).
+// 4bpp --quant: auto-quantize (NeuQuant) to 16 colors, single frame, overwrite
+//   <out> + <out>.pal. Index 0 is transparent to the `sprite` native.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use color_quant::NeuQuant;
 use image::{imageops::FilterType, GenericImageView};
 
+use crate::bitpack::pack_1bpp;
+
 fn usage() -> ExitCode {
-    eprintln!("usage: img2sprite <input.png|jpg|...> <out.spr> [opts]");
+    eprintln!("usage: posara-gfx sprite <input.png|jpg|...> <out.spr> [opts]");
     eprintln!("  --size WxH     resize to exactly WxH (no aspect preserve)");
     eprintln!("  --max N        fit within NxN, preserve aspect");
     eprintln!("  --threshold T  luma cutoff 0..255, default 128 (ink = luma < T)");
     eprintln!("  --dither       Floyd-Steinberg to 1bit instead of hard threshold");
     eprintln!("  --invert       ink = bright instead of dark");
-    eprintln!("  --colors16     4bpp palette mode: input must have <=15 colors (quantize");
-    eprintln!("                 upstream, e.g. ffmpeg palettegen); --key color -> index 0");
-    eprintln!("                 (transparent). Appends to existing .spr (sheet build) and");
-    eprintln!("                 writes/checks <out>.pal (16 RGB888 lines, pal()-ready).");
+    eprintln!("  --colors16     4bpp palette mode, input <=15 colors, appends frames");
+    eprintln!("  --quant        4bpp NeuQuant auto (16 colors, overwrites out + out.pal)");
     eprintln!("  --key RRGGBB   colors16: hex color treated as transparent (default 000000)");
-    eprintln!("  --tol N        colors16: merge distance, lower keeps more colors (default 24)");
-    eprintln!("  output: raw 1bpp, row-major MSB-first, ceil(W*H/8) bytes");
+    eprintln!("  --tol N        colors16: merge distance (default 24)");
     ExitCode::from(2)
 }
 
-fn main() -> ExitCode {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+pub fn run(args: Vec<String>) -> ExitCode {
     let mut pos: Vec<String> = Vec::new();
     let mut size: Option<(u32, u32)> = None;
     let mut max: Option<u32> = None;
@@ -41,9 +39,10 @@ fn main() -> ExitCode {
     let mut dither = false;
     let mut invert = false;
     let mut colors16 = false;
+    let mut quant = false;
     let mut key: u32 = 0;
     let mut tol: u32 = 24;
-    let mut it = raw.into_iter();
+    let mut it = args.into_iter();
     while let Some(a) = it.next() {
         let mut next = || it.next().ok_or_else(usage);
         match a.as_str() {
@@ -67,6 +66,7 @@ fn main() -> ExitCode {
             "--dither" => dither = true,
             "--invert" => invert = true,
             "--colors16" => colors16 = true,
+            "--quant" => quant = true,
             "--key" => {
                 let v = match next() { Ok(v) => v, Err(c) => return c };
                 match u32::from_str_radix(&v, 16) { Ok(n) => key = n, Err(_) => return usage() }
@@ -104,12 +104,14 @@ fn main() -> ExitCode {
         _ => img,
     };
     let (w, h) = img.dimensions();
+    if quant {
+        return run_quant(&img, &out);
+    }
     if colors16 {
         return run_colors16(&img, &out, key, tol);
     }
     let luma = img.to_luma8();
 
-    // build ink grid
     let (wu, hu) = (w as usize, h as usize);
     let mut ink = vec![false; wu * hu];
     if dither {
@@ -140,23 +142,15 @@ fn main() -> ExitCode {
         for v in ink.iter_mut() { *v = !*v; }
     }
 
-    let sprite_bytes = (wu * hu + 7) / 8;
-    let mut bytes = vec![0u8; sprite_bytes];
-    for bit in 0..wu * hu {
-        if ink[bit] {
-            bytes[bit / 8] |= 1 << (7 - (bit & 7));
-        }
-    }
-
+    let bytes = pack_1bpp(&ink);
     if let Err(e) = std::fs::write(&out, &bytes) {
         eprintln!("write {}: {e}", out.display());
         return ExitCode::from(1);
     }
     eprintln!(
-        "wrote {} ({}x{}, {} bytes; cart: blitg(spr, 0, x, y, {}, {}, color, mode))",
-        out.display(), w, h, sprite_bytes, w, h
+        "wrote {} ({}x{}, {} bytes; cart: gfx_blitg(&spr, 0, x, y, {}, {}, color, mode))",
+        out.display(), w, h, bytes.len(), w, h
     );
-    // small preview (downsample to <=48 wide)
     let pw = wu.min(48);
     let ph = (hu * pw / wu).max(1).min(24);
     for py in 0..ph {
@@ -179,7 +173,6 @@ fn run_colors16(img: &image::DynamicImage, out: &PathBuf, key: u32, tol: u32) ->
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     let pal_path = out.with_extension("pal");
-    // entry 0 is the transparent key and value 0 is padding; only real colors load.
     let mut pal: Vec<u32> = if pal_path.exists() {
         std::fs::read_to_string(&pal_path).unwrap_or_default()
             .lines().filter_map(|l| l.trim().parse().ok())
@@ -187,7 +180,7 @@ fn run_colors16(img: &image::DynamicImage, out: &PathBuf, key: u32, tol: u32) ->
     } else {
         Vec::new()
     };
-    let mut rgb_of: Vec<u32> = vec![key];   // reconstructed source colors per index
+    let mut rgb_of: Vec<u32> = vec![key];
     for &v in &pal {
         rgb_of.push(v);
     }
@@ -200,7 +193,6 @@ fn run_colors16(img: &image::DynamicImage, out: &PathBuf, key: u32, tol: u32) ->
             nibbles.push(0);
             continue;
         }
-        // nearest existing entry within tolerance, else allocate
         let mut best = 0usize;
         let mut bd = u32::MAX;
         for (i, &c) in rgb_of.iter().enumerate().skip(1) {
@@ -225,7 +217,6 @@ fn run_colors16(img: &image::DynamicImage, out: &PathBuf, key: u32, tol: u32) ->
     }
     if nibbles.len() % 2 == 1 { nibbles.push(0); }
     let bytes: Vec<u8> = nibbles.chunks(2).map(|c| (c[0] << 4) | c[1]).collect();
-    use std::io::Write;
     let mut f = match std::fs::OpenOptions::new().create(true).append(true).open(out) {
         Ok(f) => f,
         Err(e) => { eprintln!("open {}: {e}", out.display()); return ExitCode::from(1); }
@@ -238,5 +229,47 @@ fn run_colors16(img: &image::DynamicImage, out: &PathBuf, key: u32, tol: u32) ->
     while lines.len() < 15 { lines.push("0".into()); }
     let _ = std::fs::write(&pal_path, format!("0\n{}\n", lines.join("\n")));
     eprintln!("{}x{} frame appended to {} ({} colors)", w, h, out.display(), rgb_of.len());
+    ExitCode::SUCCESS
+}
+
+// 4bpp auto-quantize (NeuQuant). Single frame, overwrites <out> + <out>.pal.
+// index 0 = transparent to the `sprite` native, so the palette's first slot is
+// reserved and real colors occupy 1..15.
+fn run_quant(img: &image::DynamicImage, out: &PathBuf) -> ExitCode {
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let n_px = (w * h) as usize;
+    // quantize to 15 colors, shifted into indices 1..15 (0 stays transparent).
+    let nq = NeuQuant::new(10, 15, rgba.as_raw());
+    let pal_rgba = nq.color_map_rgba();
+    let mut pal_888 = [0u32; 16];
+    for i in 0..15 {
+        let r = pal_rgba[i * 4] as u32;
+        let g = pal_rgba[i * 4 + 1] as u32;
+        let b = pal_rgba[i * 4 + 2] as u32;
+        pal_888[i + 1] = (r << 16) | (g << 8) | b;
+    }
+    let mut nibbles: Vec<u8> = Vec::with_capacity(n_px);
+    for i in 0..n_px {
+        let p = &rgba.as_raw()[i * 4..i * 4 + 4];
+        if p[3] < 128 {
+            nibbles.push(0);
+        } else {
+            nibbles.push((nq.index_of(p) as u8 & 0xF) + 1);
+        }
+    }
+    if nibbles.len() % 2 == 1 { nibbles.push(0); }
+    let bytes: Vec<u8> = nibbles.chunks(2).map(|c| (c[0] << 4) | c[1]).collect();
+    if let Err(e) = std::fs::write(out, &bytes) {
+        eprintln!("write {}: {e}", out.display());
+        return ExitCode::from(1);
+    }
+    let pal_path = out.with_extension("pal");
+    let lines: Vec<String> = pal_888[1..].iter().map(|v| v.to_string()).collect();
+    let _ = std::fs::write(&pal_path, format!("0\n{}\n", lines.join("\n")));
+    eprintln!(
+        "wrote {} ({}x{}, {} bytes, 15 colors +transparent; cart: gfx_sprite(&spr, 0, x, y, {}, {}, 100, 256))",
+        out.display(), w, h, bytes.len(), w, h
+    );
     ExitCode::SUCCESS
 }
