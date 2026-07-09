@@ -13,7 +13,7 @@ const INK: u32 = 0x005C_D6BE;
 const HI: u32 = 0x00DC_E8E6;
 
 // assets/mono8x16.fnt: cp 32..126, 16 bytes/glyph, 1 byte/row, MSB = leftmost.
-static FONT: &[u8] = include_bytes!("../carts/assets/mono8x16.fnt");
+static FONT: &[u8] = include_bytes!("../../../carts/assets/mono8x16.fnt");
 
 pub struct Profiler {
     win: Window,

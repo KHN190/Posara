@@ -40,6 +40,18 @@ impl Framebuffer {
         self.presenter.as_mut().and_then(|p| p.poll())
     }
 
+    // Clear the surface so a new cart can configure a different size (web reloads
+    // the same host across carts; desktop opens one window and never calls this).
+    pub fn reset(&mut self) {
+        self.w = 0;
+        self.h = 0;
+        self.format = 0;
+        self.buf.clear();
+        self.out.clear();
+        self.commits = 0;
+        self.alive = true;
+    }
+
     pub fn configure(&mut self, w: usize, h: usize, format: u8) -> Result<(), String> {
         if format != 1 { return Err(format!("Screen: format {} unsupported (only 1=RGB565)", format)); }
         if w == 0 || h == 0 { return Err(format!("Screen: invalid size {}x{}", w, h)); }

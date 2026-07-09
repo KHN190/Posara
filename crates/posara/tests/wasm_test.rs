@@ -6,8 +6,34 @@
 
 use posara::backend::storage::{MAX_FILES, MAX_FILE_BYTES};
 use posara::backend::{MemStorage, Storage};
-use posara::runner::{compile_source, read_pk_bytes, Stepper};
+use posara::runner::{compile_abe, compile_source, compile_source_multi, read_pk_bytes, Stepper};
 use posara::Host;
+
+// Oracle: the web module resolver (compile_source_multi over MemStorage) must
+// agree with the desktop loader (compile_abe) for the same multi-module cart.
+// vis/acid.abe imports lib::proj / curl_noise / diff_growth / cube_slice.
+#[test]
+fn multi_module_resolver_matches_loader() {
+    let base = concat!(env!("CARGO_MANIFEST_DIR"), "/../../carts");
+    let host = Host::new_with(std::path::PathBuf::from("."), true, true).unwrap();
+
+    let loader = compile_abe(&std::path::PathBuf::from(format!("{base}/vis/acid.abe")), &host);
+
+    let store = MemStorage::new();
+    store.add_file("acid.abe", std::fs::read(format!("{base}/vis/acid.abe")).unwrap()).unwrap();
+    let lib = std::fs::read_dir(format!("{base}/lib")).unwrap();
+    for e in lib.flatten() {
+        let name = e.file_name().into_string().unwrap();
+        if name.ends_with(".abe") {
+            store.add_file(&format!("lib/{name}"), std::fs::read(e.path()).unwrap()).unwrap();
+        }
+    }
+    let mine = compile_source_multi("acid.abe", &store, &host);
+
+    assert_eq!(loader.is_ok(), mine.is_ok(),
+        "resolver disagrees with loader.\nloader: {:?}\nmine: {:?}",
+        loader.err(), mine.err());
+}
 
 const CART: &str = "@cart
 fn main() -> <frame, Graphics, IO> Unit {
@@ -111,7 +137,7 @@ fn sandbox_hides_unadded() {
 
 #[test]
 fn invader_pk_loads_and_runs() {
-    let pk = concat!(env!("CARGO_MANIFEST_DIR"), "/carts/games/invader.pk");
+    let pk = concat!(env!("CARGO_MANIFEST_DIR"), "/../../carts/games/invader.pk");
     let bytes = std::fs::read(pk).expect("invader.pk missing — run: posara pack carts/games/invader.abe");
     let module = read_pk_bytes(&bytes).unwrap();
 

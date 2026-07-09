@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>posara</title>
+<style>
+  :root { --bg:#000; --fg:#fff; --accent:#e8336d; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:var(--bg); color:var(--fg);
+    font:14px/1.5 ui-monospace,"SF Mono",Menlo,monospace; height:100%; }
+  body { display:flex; flex-direction:column; gap:12px; padding:16px; }
+  header { display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:16px; letter-spacing:2px; text-transform:uppercase; margin-right:6px; }
+  header .dot { color:var(--accent); }
+  header #stat { color:var(--accent); font-size:12px; }
+  header #fps { color:#666; font-size:12px; margin-right:auto; }
+  header button { background:none; color:var(--fg); cursor:pointer; font:inherit; }
+  header .act { background:var(--accent); color:#000; border:none; padding:5px 16px;
+    text-transform:uppercase; letter-spacing:1px; font-size:12px; }
+  #togglefiles { border:none; font-size:20px; line-height:1; padding:0 6px; }
+  #togglefiles.on { color:var(--accent); }
+  /* square outer, diagonal-cut colour blocks inside */
+  .langtog { border:1px solid var(--fg); padding:0; font-size:12px; line-height:1;
+    display:inline-flex; align-items:stretch; overflow:hidden; }
+  .langtog .seg { display:flex; align-items:center; padding:3px 12px; color:#666;
+    transform:skewX(-12deg); }
+  .langtog .seg:first-child { padding-left:14px; }
+  .langtog .seg:last-child { padding-right:14px; }
+  .langtog .seg > b { font-weight:normal; display:inline-block; transform:skewX(12deg); }
+  .langtog .seg.on { background:var(--accent); color:#000; }
+  .row { display:flex; gap:12px; flex:1; min-height:0; }
+  .files { width:180px; display:flex; flex-direction:column; min-width:0;
+    border:1px solid var(--fg); }
+  .files[hidden] { display:none; }
+  .list { flex:1; overflow:auto; min-height:80px; }
+  .list div { padding:4px 8px; cursor:pointer; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; font-size:12px; display:flex; align-items:center; }
+  .list div.on { background:var(--accent); color:#000; }
+  .list div .nm { flex:1; overflow:hidden; text-overflow:ellipsis; }
+  .list div .x { color:#888; padding-left:6px; }
+  .list div.on .x { color:#000; }
+  .list .add { justify-content:center; color:var(--fg); font-weight:bold; }
+  .list .edit { flex:1; width:100%; box-sizing:border-box; background:#000; color:var(--fg);
+    border:none; outline:1px solid var(--accent); font:inherit; font-size:12px; padding:1px 4px; }
+  .drop { border-top:1px dashed var(--fg); padding:8px; cursor:pointer; text-align:center;
+    font-size:11px; color:#aaa; }
+  .drop.over { color:var(--accent); }
+  .mid { flex:1; display:flex; min-width:0; min-height:0; position:relative; }
+  .editor { flex:1; display:flex; min-width:0; min-height:0; overflow:hidden;
+    border:1px solid var(--fg); }
+  .editor:focus-within { border-color:var(--accent); }
+  .gutter { flex-shrink:0; padding:10px 8px 10px 6px; text-align:right; color:#555;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:20px;
+    white-space:pre; overflow:hidden; user-select:none;
+    border-right:1px solid #222; box-sizing:border-box; }
+  .code { flex:1; position:relative; min-width:0; }
+  .code pre, .code textarea {
+    position:absolute; inset:0; margin:0; padding:10px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; line-height:20px;
+    font-weight:400; letter-spacing:0; -webkit-text-size-adjust:100%; text-rendering:auto;
+    white-space:pre; overflow:auto; tab-size:2; border:none; box-sizing:border-box; }
+  .code pre { pointer-events:none; color:var(--fg); }
+  .code pre code, .code pre code * { font:inherit; line-height:20px; vertical-align:baseline; }
+  .code textarea { resize:none; background:transparent; color:transparent;
+    caret-color:var(--fg); outline:none; }
+  /* uxn-ish syntax tokens */
+  .tok-kw { color:#e8336d; }
+  .tok-ty { color:#72dec2; }
+  .tok-str { color:#ddca7e; }
+  .tok-num { color:#ddca7e; }
+  .tok-cmt { color:#666; font-style:italic; }
+  .tok-fx { color:#72dec2; font-weight:bold; }
+
+  .right { width:496px; display:flex; flex-direction:column; gap:8px; }
+  .stage { flex:1; display:flex; align-items:center; justify-content:center;
+    border:1px solid var(--fg); overflow:hidden; }
+  canvas { image-rendering:pixelated; background:#000; display:block; }
+  .console { border:1px solid var(--fg); height:150px; display:flex; flex-direction:column; }
+  .clog { flex:1; overflow:auto; padding:6px 8px; font-size:12px; }
+  .clog:empty::before { content:"ready"; color:#444; }
+  .ln { white-space:pre-wrap; word-break:break-word; }
+  .ln.cart { color:#fff; }
+  .ln.sys { color:#888; display:flex; gap:8px; }
+  .ln.sys.lv-warn { color:#ddca7e; }
+  .ln.sys.lv-error { color:#e8336d; cursor:pointer; }
+  .ln .chip { flex:0 0 auto; color:#666; font-size:10px; text-transform:uppercase; padding-top:1px; }
+  .ln .detail { margin:2px 0 4px 34px; color:#999; font-size:11px; white-space:pre-wrap; }
+  footer { font-size:11px; color:#555; text-align:center; padding-top:2px; }
+  footer a { color:#888; text-decoration:none; }
+  footer a:hover { color:var(--accent); }
+  input[type=file] { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <button id="togglefiles">☰</button>
+  <h1>posara<span class="dot">.</span></h1>
+  <button class="act" id="run" data-t="run" title="⌘/Ctrl+Enter">Run</button>
+  <button class="act" id="stop" data-t="stop" title="Esc">Stop</button>
+  <span id="stat"></span>
+  <span id="fps"></span>
+  <button id="lang" class="langtog"><span class="seg" data-l="en"><b>EN</b></span><span class="seg" data-l="zh"><b>中</b></span></button>
+</header>
+<div class="row">
+  <div class="files" id="sidebar" hidden>
+    <div class="list" id="list"></div>
+    <div class="drop" id="drop"><span data-t="drop">Drop files</span></div>
+    <input type="file" id="file" multiple hidden>
+  </div>
+  <div class="mid">
+    <div class="editor">
+      <div class="gutter" id="gutter">1</div>
+      <div class="code">
+        <pre aria-hidden="true"><code id="hl"></code></pre>
+        <textarea id="src" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="right">
+    <div class="stage"><canvas id="cv" width="128" height="128"></canvas></div>
+    <div class="console"><div class="clog" id="clog"></div></div>
+  </div>
+</div>
+<footer>
+  posara <span id="ver">v0.1.0</span> ·
+  <a href="https://github.com/knh190/posara" target="_blank">GitHub</a> ·
+  <a href="https://github.com/knh190/posara/tree/main/docs" target="_blank">Docs</a> ·
+  built on <a href="/abrase/">abrase ↗</a>
+</footer>
+
+<script type="module">
+import init, { Posara } from "./pkg/posara_web.js";
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+// ---- local persistence (files survive reload) ----
+const b64 = b => { let s=""; for (let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]); return btoa(s); };
+const unb64 = str => { const s=atob(str); const b=new Uint8Array(s.length); for (let i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return b; };
+function persist() {
+  const files = {};
+  for (const n of posara.list_files()) files[n] = b64(posara.read_file(n) || new Uint8Array());
+  try { localStorage.setItem("posara.files", JSON.stringify({ order, files })); }
+  catch (e) { onSys("warn", "local save failed (storage full?)"); }
+}
+function restore() {
+  try {
+    const raw = localStorage.getItem("posara.files");
+    if (!raw) return false;
+    const { order: ord, files } = JSON.parse(raw);
+    let any = false;
+    for (const n of (ord || Object.keys(files))) {
+      if (files[n] == null) continue;
+      try { posara.add_file(n, unb64(files[n])); any = true; } catch (e) {}
+    }
+    order = (ord || Object.keys(files)).filter(n => files[n] != null && posara.list_files().includes(n));
+    return any;
+  } catch (e) { return false; }
+}
+
+// ---- console: cart output plain white, system lines chip + level color ----
+function line(kind, level, text, detail) {
+  const el = document.createElement("div");
+  el.className = "ln " + kind + " lv-" + level;
+  if (kind === "cart") {
+    el.textContent = "› " + text;
+  } else {
+    const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = "sys";
+    el.appendChild(chip);
+    const m = document.createElement("span"); m.textContent = text; el.appendChild(m);
+    if (detail) { const d = document.createElement("pre"); d.className = "detail"; d.textContent = detail; el.appendChild(d); }
+  }
+  const c = $("clog"); c.appendChild(el); c.scrollTop = c.scrollHeight;
+}
+function onCart(text) { for (const t of text.split("\n")) if (t) line("cart", "info", t); }
+function onSys(level, msg, detail) { line("sys", level, msg, detail); }
+const log = m => onSys("info", m);
+
+// ---- syntax highlight (from abrase playground) ----
+const KEYWORDS = new Set([
+  "fn","let","mut","if","else","while","loop","for","in","match","handle","resume",
+  "return","throw","effect","op","trait","impl","where","type","static","const","pub",
+  "import","use","break","continue","region","halt","true","false",
+]);
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function highlight(src) {
+  const re = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*"?)|('(?:[^'\\]|\\.)'?)|(@\w+)|(\b\d[\d_]*(?:\.\d+)?\b)|(\b[A-Za-z_]\w*\b)/g;
+  let html = "", last = 0;
+  for (let m; (m = re.exec(src)); ) {
+    html += esc(src.slice(last, m.index)); last = re.lastIndex;
+    const t = m[0];
+    if (m[1]) html += `<span class="tok-cmt">${esc(t)}</span>`;
+    else if (m[2] || m[3]) html += `<span class="tok-str">${esc(t)}</span>`;
+    else if (m[4]) html += `<span class="tok-fx">${esc(t)}</span>`;
+    else if (m[5]) html += `<span class="tok-num">${esc(t)}</span>`;
+    else if (KEYWORDS.has(t)) html += `<span class="tok-kw">${esc(t)}</span>`;
+    else if (/^[A-Z]/.test(t)) html += `<span class="tok-ty">${esc(t)}</span>`;
+    else html += esc(t);
+  }
+  return html + esc(src.slice(last)) + "\n";
+}
+function gutterLines() {
+  const n = $("src").value.split("\n").length;
+  let s = "1";
+  for (let i = 2; i <= n; i++) s += "\n" + i;
+  $("gutter").textContent = s;
+}
+function render() { $("hl").innerHTML = highlight($("src").value); gutterLines(); }
+let saveTimer;
+$("src").addEventListener("input", () => {
+  render();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { saveActive(); persist(); }, 300);   // autosave edits to local cache
+});
+$("src").addEventListener("scroll", () => {
+  const pre = $("hl").parentElement;
+  pre.scrollTop = $("src").scrollTop; pre.scrollLeft = $("src").scrollLeft;
+  $("gutter").scrollTop = $("src").scrollTop;
+});
+const isText = n => /\.(abe|txt|toml|json)$/i.test(n);
+const isPk = n => /\.pk$/i.test(n);
+let MAX_FILES = 16;   // set from wasm after init (single source of truth)
+
+const STR = {
+  en: { run:"Run", stop:"Stop", drop:"Drop files", files:"Files", filesHd:"Files",
+    linksHd:"Learn", lnLang:"abrase language", lnPlay:"abrase playground", download:"Download",
+    toZh:"中文", wasmok:"wasm ok", runCode:"running", stopped:"stopped", ended:"cart ended",
+    runErr:"error: ", loadFail:"load failed:", added:"added ", created:"created ",
+    removed:"removed ", renamed:"renamed ", noEntry:"no .abe or .pk to run", overLimit:"rejected: " },
+  zh: { run:"运行", stop:"停止", drop:"拖入文件", files:"文件", filesHd:"文件",
+    linksHd:"学习", lnLang:"abrase 语言", lnPlay:"abrase 演练场", download:"下载",
+    toZh:"EN", wasmok:"wasm 就绪", runCode:"运行中", stopped:"已停止", ended:"cart 结束",
+    runErr:"错误: ", loadFail:"加载失败:", added:"已加 ", created:"新建 ",
+    removed:"删除 ", renamed:"改名 ", noEntry:"无 .abe 或 .pk 可运行", overLimit:"拒绝: " },
+};
+let lang = "en";
+const T = k => STR[lang][k];
+function applyLang() {
+  document.querySelectorAll("[data-t]").forEach(el => el.textContent = T(el.dataset.t));
+  $("lang").querySelectorAll(".seg").forEach(s => s.classList.toggle("on", s.dataset.l === lang));
+}
+$("lang").onclick = () => { lang = lang==="en"?"zh":"en"; applyLang(); };
+applyLang();
+
+const DEMO_NAME = "main.abe";
+const DEMO = `@cart
+fn main() -> <frame, Graphics, IO, nondet> Unit {
+  gfx_screen(128, 128);
+  let mut t = 0;
+  loop {
+    gfx_cls(0x0000);
+    gfx_rect(t % 112, 56, 16, 16, 0xF81F);
+    gfx_commit();
+    t = t + 2;
+    frame.present()
+  }
+}
+`;
+
+let posara, running = false, active = null, order = [];
+let audioCtx = null, audioNode = null, pump = null;
+
+await init("./pkg/posara_web_bg.wasm?v=10");
+posara = new Posara();
+MAX_FILES = posara.max_files();
+$("ver").textContent = "v" + posara.version();
+async function seedExamples() {
+  const files = ["acid.abe", "proj.abe", "curl_noise.abe", "diff_growth.abe", "cube_slice.abe"];
+  for (const f of files) {
+    try {
+      const t = await (await fetch("examples/" + f)).text();
+      posara.add_file(f, enc.encode(t)); order.push(f);
+    } catch (e) { onSys("warn", "seed " + f + " failed"); }
+  }
+  active = posara.list_files().includes("acid.abe") ? "acid.abe" : null;
+}
+if (restore()) {
+  active = order.find(n => /\.abe$/i.test(n)) || order[0] || null;
+} else {
+  await seedExamples();
+  if (!active) { posara.add_file(DEMO_NAME, enc.encode(DEMO)); order = [DEMO_NAME]; active = DEMO_NAME; }
+}
+if (active && isText(active)) $("src").value = dec.decode(posara.read_file(active) || new Uint8Array());
+render();
+refreshList();
+
+// ---- file sidebar ----
+// display order = insertion order (newest at bottom); reconcile with wasm truth.
+function ordered() {
+  const names = posara.list_files();
+  order = order.filter(n => names.includes(n)).concat(names.filter(n => !order.includes(n)));
+  return order;
+}
+function refreshList() {
+  const list = $("list");
+  list.innerHTML = "";
+  const names = ordered();
+  for (const n of names) {
+    const d = document.createElement("div");
+    d.dataset.name = n;
+    if (n === active) d.className = "on";
+    if (!isText(n)) d.style.opacity = ".6";       // binary asset: dim
+    const nm = document.createElement("span");
+    nm.className = "nm"; nm.textContent = n;
+    d.appendChild(nm);
+    const x = document.createElement("span");
+    x.className = "x"; x.textContent = "×";
+    x.onclick = e => { e.stopPropagation(); posara.remove_file(n); log(T("removed")+n); if (active===n) active=null; refreshList(); persist(); };
+    d.appendChild(x);
+    d.onclick = () => select(n);
+    d.ondblclick = e => { e.stopPropagation(); inlineEdit(nm, n, v => rename(n, v)); };
+    list.appendChild(d);
+  }
+  if (names.length < MAX_FILES) {
+    const add = document.createElement("div");
+    add.className = "add"; add.textContent = "+";
+    add.onclick = () => inlineEdit(add, "untitled.abe", v => create(v));
+    list.appendChild(add);
+  }
+  const full = names.length >= MAX_FILES;
+  $("drop").style.opacity = full ? .4 : 1;
+  $("drop").style.pointerEvents = full ? "none" : "auto";
+}
+// Single click selects — updates highlight in place so the row survives for dblclick.
+function select(n) {
+  active = n;
+  if (isText(n)) { $("src").value = dec.decode(posara.read_file(n) || new Uint8Array()); render(); }
+  [...$("list").children].forEach(d => d.classList.toggle("on", d.dataset.name === n));
+}
+// In-place name editing — no dialogs. Enter commits, Escape/blur-empty cancels.
+function inlineEdit(container, value, commit) {
+  const inp = document.createElement("input");
+  inp.className = "edit"; inp.value = value;
+  container.textContent = ""; container.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const fin = ok => { if (done) return; done = true; if (ok) commit(inp.value.trim()); refreshList(); };
+  inp.onkeydown = e => { if (e.key==="Enter") fin(true); else if (e.key==="Escape") fin(false); };
+  inp.onblur = () => fin(true);
+  inp.onclick = e => e.stopPropagation();
+}
+function create(name) {
+  if (!name) return;
+  try { posara.add_file(name, enc.encode("")); order.push(name); log(T("created")+name); refreshList(); select(name); persist(); }
+  catch (e) { onSys("warn", T("overLimit") + e); }
+}
+function rename(old, name) {
+  if (!name || name === old) return;
+  const data = posara.read_file(old) || new Uint8Array();
+  try {
+    posara.add_file(name, data); posara.remove_file(old);
+    order = order.map(n => n === old ? name : n);   // keep position
+    log(T("renamed") + old + " → " + name);
+    refreshList(); select(name); persist();
+  } catch (e) { onSys("warn", T("overLimit") + e); }
+}
+$("togglefiles").onclick = () => {
+  const sb = $("sidebar");
+  sb.hidden = !sb.hidden;
+  $("togglefiles").classList.toggle("on", !sb.hidden);
+};
+function saveActive() {
+  if (active && isText(active) && !$("src").hidden) {
+    posara.add_file(active, enc.encode($("src").value));
+  }
+}
+
+// ---- upload: whole window is a drop target (sidebar zone may be collapsed) ----
+const drop = $("drop"), file = $("file");
+drop.onclick = () => file.click();
+file.onchange = e => { const fs = [...e.target.files]; file.value = ""; addFiles(fs); };
+addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+addEventListener("dragleave", e => { if (e.relatedTarget === null) drop.classList.remove("over"); });
+addEventListener("drop", e => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length) {
+    if ($("sidebar").hidden) $("togglefiles").onclick();   // reveal sidebar so uploads are visible
+    addFiles([...files]);
+  }
+});
+async function addFiles(fs) {
+  onSys("info", "picked " + fs.length + " file(s)");
+  if (!posara || typeof posara.add_file !== "function") { onSys("error", "add_file missing — wasm stale, hard-refresh"); return; }
+  let last;
+  for (const f of fs) {
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      posara.add_file(f.name, bytes);
+      order.push(f.name);
+      log(T("added") + f.name + " (" + bytes.length + "B)");
+      last = f.name;
+    } catch (err) { onSys("error", T("overLimit") + f.name, String(err)); }
+  }
+  refreshList();
+  if (last) select(last);   // auto-select newest so RUN targets it (.pk runs as cart)
+  persist();
+}
+
+// ---- editor shortcuts (no lib) ----
+addEventListener("keydown", e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && (e.key === "Enter" || e.key === "r")) { e.preventDefault(); run(); }
+  else if (mod && e.key === "s") { e.preventDefault(); saveActive(); persist(); onSys("info", "saved"); }
+  else if (e.key === "Escape" && running) { e.preventDefault(); stop(); }
+});
+// Tab = indent, Shift+Tab = outdent (in the editor only)
+$("src").addEventListener("keydown", e => {
+  if (e.key !== "Tab") return;
+  e.preventDefault();
+  const ta = e.target, s = ta.selectionStart, en = ta.selectionEnd;
+  if (e.shiftKey) {
+    const ls = ta.value.lastIndexOf("\n", s - 1) + 1;
+    if (ta.value.slice(ls, ls + 2) === "  ") { ta.setRangeText("", ls, ls + 2, "end"); ta.selectionStart = Math.max(ls, s - 2); ta.selectionEnd = en - 2; }
+  } else {
+    ta.setRangeText("  ", s, en, "end");
+  }
+  render();
+});
+
+// ---- game input (ignored while editing) ----
+const KEYS = { KeyZ:0x01, KeyX:0x02, Tab:0x04, Enter:0x08,
+  ArrowUp:0x10, ArrowDown:0x20, ArrowLeft:0x40, ArrowRight:0x80 };
+let buttons = 0, lastKey = 0;
+addEventListener("keydown", e => {
+  if (document.activeElement === $("src")) return;
+  if (e.code in KEYS) { buttons |= KEYS[e.code]; e.preventDefault(); }
+  if (e.key.length === 1) lastKey = e.key.charCodeAt(0);
+});
+addEventListener("keyup", e => { if (e.code in KEYS) buttons &= ~KEYS[e.code]; });
+
+// ---- audio: single AudioWorklet, main thread pulls the mixer ----
+const WORKLET = `
+class Sink extends AudioWorkletProcessor {
+  constructor() { super(); this.q=[]; this.off=0; this.port.onmessage = e => this.q.push(e.data); }
+  process(_, out) {
+    const L=out[0][0], R=out[0][1], n=L.length;
+    for (let i=0;i<n;i++){
+      const c=this.q[0];
+      if(!c){L[i]=0;R[i]=0;continue;}
+      L[i]=c[this.off]; R[i]=c[this.off+1]; this.off+=2;
+      if(this.off>=c.length){this.q.shift();this.off=0;}
+    }
+    return true;
+  }
+}
+registerProcessor('posara-sink', Sink);
+`;
+async function startAudio() {
+  if (audioCtx) return;
+  audioCtx = new AudioContext({ sampleRate: posara.sample_rate() });
+  const url = URL.createObjectURL(new Blob([WORKLET], { type:"text/javascript" }));
+  await audioCtx.audioWorklet.addModule(url);
+  audioNode = new AudioWorkletNode(audioCtx, "posara-sink", { outputChannelCount:[2] });
+  audioNode.connect(audioCtx.destination);
+  const sr = audioCtx.sampleRate;
+  const pull = frames => {
+    if (frames <= 0) return;
+    const buf = new Float32Array(frames*2);
+    if (running) posara.audio_pull(buf);
+    audioNode.port.postMessage(buf, [buf.buffer]);
+  };
+  pull(Math.ceil(sr*0.08));
+  let last = performance.now();
+  pump = setInterval(() => { const now=performance.now(); pull(Math.round(sr*(now-last)/1000)); last=now; }, 20);
+}
+
+// ---- render ----
+const cv = $("cv"), ctx = cv.getContext("2d");
+let img = null, frames = 0, t0 = 0;
+function draw() {
+  if (!running) return;
+  try {
+    const cont = posara.frame();
+    const out = posara.drain_stdout(); if (out) onCart(out);   // cart println → console
+    posara.set_input(buttons, lastKey); lastKey = 0;
+    const w = posara.width(), h = posara.height();
+    if (w>0 && h>0) {
+      if (!img || cv.width!==w || cv.height!==h) {
+        cv.width=w; cv.height=h; img=ctx.createImageData(w,h);
+        const stage = cv.parentElement;
+        const box = Math.min(stage.clientWidth, stage.clientHeight);
+        const s = box / 480;                  // 480 fills the stage; smaller carts stay proportional
+        cv.style.width=(w*s)+"px"; cv.style.height=(h*s)+"px";
+      }
+      img.data.set(posara.framebuffer());
+      ctx.putImageData(img,0,0);
+    }
+    frames++;
+    const now = performance.now();
+    if (now-t0>500) { $("fps").textContent=(frames*1000/(now-t0)|0)+" fps"; frames=0; t0=now; }
+    if (cont === false) { log(T("ended")); stop(); return; }
+  } catch (e) { onSys("error", T("runErr")+e, e && e.stack); stop(); return; }
+  requestAnimationFrame(draw);
+}
+
+async function run() {
+  saveActive();
+  try {
+    if (active && isPk(active)) posara.load_pk(posara.read_file(active));
+    else {
+      const entry = isText(active) ? active : posara.list_files().find(n => /\.abe$/i.test(n));
+      if (!entry) { onSys("warn", T("noEntry")); return; }
+      posara.load_entry(entry);   // multi-module: resolves `use a::b` from uploaded files
+    }
+  } catch (e) { onSys("error", T("loadFail"), String(e)); return; }
+  await startAudio();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  running = true; t0 = performance.now(); frames = 0; img = null;
+  $("stat").textContent = T("runCode");
+  requestAnimationFrame(draw);
+}
+function stop() { running = false; $("stat").textContent = T("stopped"); }
+$("run").onclick = run;
+$("stop").onclick = stop;
+</script>
+</body>
+</html>

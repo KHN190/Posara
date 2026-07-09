@@ -1,7 +1,7 @@
-/target
-/designs
-/priv_carts
-/workspace
+target/
+designs/
+workspace/
+scripts/deploy-web.sh
 
 .claude/
 

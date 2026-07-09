@@ -9,6 +9,6 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-posara = { path = "../..", default-features = false, features = ["web"] }
+posara = { path = "../posara", default-features = false, features = ["web"] }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"

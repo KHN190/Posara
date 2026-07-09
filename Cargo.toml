@@ -1,43 +1,9 @@
+# Virtual workspace. crates/ = publishable runtime members; tools/ = dev-only
+# asset converters (opt-in via -p). The main crate lives in crates/posara.
 [workspace]
-members = [".", "tools/gfx", "tools/sfx", "crates/posara-web"]
-# Plain `cargo build` builds only the runtime — tools are opt-in via -p.
-default-members = ["."]
-
-[package]
-name = "posara"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-license = "MIT"
-authors = ["knh190"]
-description = "General platform Myriad runtime visual-audio engine."
-
-[features]
-default = ["desktop", "test"]
-desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "compiler", "fs"]
-web = ["gfx-web", "sfx-web", "synth", "compiler", "fs"]
-
-gfx = []
-gfx-desktop = ["gfx", "dep:minifb", "dep:image"]
-gfx-web = ["gfx"]
-sfx = []
-sfx-desktop = ["sfx", "dep:cpal"]
-sfx-web = ["sfx"]
-
-compiler = ["dep:abrase", "dep:polka-rustc"]
-fs = []
-# storage backend: real disk (desktop) vs in-memory upload sandbox (web default).
-storage-disk = []
-synth = ["sfx"]
-midi = ["dep:midir", "dep:toml"]
-test = []
-
-[[bin]]
-name = "posara"
-required-features = ["gfx-desktop", "sfx-desktop"]
-
-[lib]
-doctest = false
+resolver = "2"
+members = ["crates/posara", "crates/posara-web", "tools/gfx", "tools/sfx"]
+default-members = ["crates/posara"]
 
 [profile.dev]
 opt-level = 2
@@ -45,15 +11,3 @@ opt-level = 2
 # optimized + symbolized: clean flamegraphs via `samply record target/release/posara bench cart`
 [profile.release]
 debug = true
-
-[dependencies]
-minifb = { version = "0.27", optional = true }
-cpal = { version = "0.15", optional = true }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
-midir = { version = "0.10", optional = true }
-toml  = { version = "0.8", optional = true, default-features = false, features = ["parse"] }
-web-time = "1"
-myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
-polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
-abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
-polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }

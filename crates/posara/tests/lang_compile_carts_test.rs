@@ -3,9 +3,11 @@
 use posara::Host;
 use std::path::PathBuf;
 
+// carts/ lives at the workspace root, two levels above this crate.
 fn check(path: &str) {
+    let full = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), path);
     let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
-    let r = posara::runner::compile_abe(&PathBuf::from(path), &host);
+    let r = posara::runner::compile_abe(&PathBuf::from(&full), &host);
     assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
 }
 

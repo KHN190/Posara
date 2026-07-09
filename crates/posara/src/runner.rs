@@ -159,6 +159,81 @@ pub fn compile_abe(path: &Path, host: &Host) -> Result<LoadResult, String> {
     })
 }
 
+// Multi-module compile resolving `a::b` → `a/b.abe` from a Storage (the web
+// upload sandbox). Missing modules error — the parity for desktop compile_abe.
+#[cfg(all(feature = "compiler", feature = "fs"))]
+pub fn compile_source_multi(entry: &str, storage: &dyn crate::backend::Storage, host: &Host) -> Result<LoadResult, String> {
+    use abrase::ast::Decl;
+    use abrase::compiler::Compiler;
+    use abrase::lexer::Lexer;
+    use abrase::parser::Parser;
+    use crate::lint::{from_abrase_lint, lint_module};
+    use std::collections::{HashMap, HashSet};
+
+    // module path → (filename, source), for rendering errors against the right file.
+    type Mods = HashMap<Vec<String>, (String, String)>;
+
+    fn load_rec(
+        name: &str, storage: &dyn crate::backend::Storage, module_path: &[String],
+        out: &mut Vec<Decl>, visited: &mut HashSet<String>, is_entry: bool, mods: &mut Mods,
+    ) -> Result<(), String> {
+        if !visited.insert(name.to_string()) { return Ok(()); }
+        let bytes = storage.read_file(name).ok_or_else(|| format!("missing module: {name}"))?;
+        let src = String::from_utf8_lossy(&bytes).into_owned();
+        let mut parser = Parser::new(Lexer::new(&src)).with_source(src.clone());
+        let mut decls = parser.parse_program();
+        if !parser.errors.is_empty() {
+            return Err(format!("  --> {}\n{}", name, parser.pretty_print_errors()));
+        }
+        for decl in &mut decls {
+            if let Decl::Use { path, .. } = decl {
+                let dep = format!("{}.abe", path.join("/"));
+                let canonical = path.clone();
+                *path = canonical.clone();
+                load_rec(&dep, storage, &canonical, out, visited, false, mods)?;
+            }
+        }
+        mods.insert(module_path.to_vec(), (name.to_string(), src));
+        if is_entry {
+            out.extend(decls);
+        } else {
+            out.push(Decl::ModEnter(module_path.to_vec()));
+            out.extend(decls);
+            out.push(Decl::ModExit);
+        }
+        Ok(())
+    }
+
+    let mut decls = Vec::new();
+    let mut visited = HashSet::new();
+    let mut mods: Mods = HashMap::new();
+    load_rec(entry, storage, &[], &mut decls, &mut visited, true, &mut mods)?;
+    // Re-number ExprIds globally across all modules (per-file parse ids collide);
+    // the typeck type table is keyed by (module, ExprId). Matches loader.rs.
+    abrase::ast::stamp_expr_ids(&mut decls);
+
+    let entry_src = mods.get(&Vec::new()).map(|(_, s)| s.clone()).unwrap_or_default();
+    let render = |errs: &[abrase::error::Error]| -> String {
+        errs.iter().map(|e| match mods.get(&e.module) {
+            Some((file, src)) if !e.module.is_empty() => format!("  --> {}\n{}", file, e.pretty_print(src)),
+            Some((_, src)) => e.pretty_print(src),
+            None => e.pretty_print(&entry_src),
+        }).collect::<Vec<_>>().join("\n")
+    };
+
+    let mut compiler = Compiler::new().with_source(entry_src.clone());
+    host.register_host_fns(&mut compiler)?;
+    let module = compiler.compile_module(&decls).map_err(|errs| render(&errs))?;
+    let mut warnings: Vec<crate::lint::PosaraLint> = compiler.warnings.iter().map(from_abrase_lint).collect();
+    warnings.extend(lint_module(&module));
+    Ok(LoadResult {
+        static_names: compiler.static_names_by_offset(),
+        fn_names: compiler.fn_names(),
+        module,
+        warnings,
+    })
+}
+
 #[cfg(not(feature = "compiler"))]
 pub fn compile_abe(_path: &Path, _host: &Host) -> Result<LoadResult, String> {
     Err("posara built without `compiler` feature; only .pk supported".into())
@@ -176,6 +251,10 @@ pub fn compile_source(src: &str, host: &Host) -> Result<LoadResult, String> {
     let ast = parser.parse_program();
     if !parser.errors.is_empty() {
         return Err(parser.pretty_print_errors());
+    }
+    // Single-file compile cannot resolve modules; a `use` here is unresolvable.
+    if ast.iter().any(|d| matches!(d, abrase::ast::Decl::Use { .. })) {
+        return Err("`use` needs modules — single-file compile can't resolve imports (upload the module and run the entry file)".into());
     }
     let mut compiler = Compiler::new().with_source(src.to_string());
     host.register_host_fns(&mut compiler)?;

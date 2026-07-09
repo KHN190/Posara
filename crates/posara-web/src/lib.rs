@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use posara::backend::Storage;
-use posara::runner::{compile_source, read_pk_bytes, Stepper};
+use posara::runner::{compile_source, compile_source_multi, read_pk_bytes, Stepper};
 use posara::Host;
 use wasm_bindgen::prelude::*;
 
@@ -30,6 +30,13 @@ impl Posara {
         self.start(r.module, r.static_names, r.fn_names)
     }
 
+    // multi-module: compiles the named .abe, resolving `use a::b` → a/b.abe from
+    // the upload sandbox; missing modules error.
+    pub fn load_entry(&mut self, name: &str) -> Result<(), JsValue> {
+        let r = compile_source_multi(name, &*self.host.fs.storage, &self.host).map_err(js)?;
+        self.start(r.module, r.static_names, r.fn_names)
+    }
+
     pub fn load_pk(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
         let module = read_pk_bytes(bytes).map_err(js)?;
         self.start(module, Vec::new(), Vec::new())
@@ -42,6 +49,7 @@ impl Posara {
         fn_names: Vec<String>,
     ) -> Result<(), JsValue> {
         self.stepper = None;
+        self.host.gfx.fb.borrow_mut().reset();   // allow a new cart to set a different screen size
         let host: &'static Host = unsafe { &*(&*self.host as *const Host) };
         self.stepper = Some(Stepper::start_named(module, static_names, fn_names, host).map_err(js)?);
         Ok(())
@@ -92,6 +100,8 @@ impl Posara {
     pub fn list_files(&self) -> Vec<String> {
         self.host.fs.storage.file_names()
     }
+    pub fn max_files(&self) -> usize { posara::backend::storage::MAX_FILES }
+    pub fn version(&self) -> String { posara::VERSION.to_string() }
     pub fn read_file(&self, name: &str) -> Option<Vec<u8>> {
         self.host.fs.storage.read_file(name)
     }

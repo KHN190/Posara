@@ -6,7 +6,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 PAT='std::time::Instant|std::time::SystemTime|std::thread|std::fs::'
 
-hits=$(grep -rnE "$PAT" src/host.rs src/plugins src/backend/clock.rs --include=*.rs 2>/dev/null \
+hits=$(grep -rnE "$PAT" crates/posara/src/host.rs crates/posara/src/plugins crates/posara/src/backend/clock.rs --include=*.rs 2>/dev/null \
   | grep -vE 'plugins/gfx/png.rs|plugins/sfx/record.rs|plugins/midi/')
 
 if [ -n "$hits" ]; then

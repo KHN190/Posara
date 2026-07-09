@@ -1,0 +1,44 @@
+fn main() -> Unit { () }
+
+// rotate a 3D point (Y by ay, then X by ax), orthographic-project to screen.
+// 1-bit: every segment drawn solid (no Bayer — the host is already 1-bit).
+pub fn draw_poly(
+  xs: Array<Float>, ys: Array<Float>, zs: Array<Float>,
+  off: Int, n: Int,
+  cx: Int, cy: Int, scale: Float, ay: Float, ax: Float,
+  closed: Int, col: Int
+) -> <Graphics> Unit {
+  if n >= 2 {
+    let cay = cos(ay);
+    let say = sin(ay);
+    let cax = cos(ax);
+    let sax = sin(ax);
+    let mut px = 0;
+    let mut py = 0;
+    let mut fx = 0;
+    let mut fy = 0;
+    let mut i = 0;
+    while i < n {
+      let x = xs[off + i];
+      let y = ys[off + i];
+      let z = zs[off + i];
+      let x1 = x * cay + z * say;
+      let z1 = (0.0 - x) * say + z * cay;
+      let y2 = y * cax - z1 * sax;
+      let sx = cx + (x1 * scale).to_i();
+      let sy = cy + (y2 * scale).to_i();
+      if i == 0 {
+        fx = sx;
+        fy = sy
+      } else {
+        gfx_line(px, py, sx, sy, col)
+      };
+      px = sx;
+      py = sy;
+      i = i + 1
+    };
+    if closed == 1 {
+      gfx_line(px, py, fx, fy, col)
+    }
+  }
+}
