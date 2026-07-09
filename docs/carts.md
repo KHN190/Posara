@@ -9,12 +9,12 @@ type World = { x: Int, prevb: Int }
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
-  screen(480, 320);
+  gfx_screen(480, 320);
   let mut w = World { x: 0, prevb: 0 };
   loop {
-    cls(0x0000);
+    gfx_cls(0x0000);
     // ... update + draw ...
-    device_in(0x2001, 1);    // commit the frame — forget this and the window stays blank
+    gfx_commit();    // commit the frame — forget this and the window stays blank
     frame.present()
   }
 }
@@ -56,5 +56,5 @@ use lib::state::{ st_new, SNOW }     // → <root>/lib/state.abe
 
 ## Screen config
 
-- `screen(w, h)` — set the canvas size, or
-- `device_in(0x2000, cfg)` — same with scale: `cfg = w + h*65536 + scale*4294967296`.
+- `gfx_screen(w, h)` — set the canvas size.
+- `gfx_commit()` — push the frame to the window (end every `update()` with it).

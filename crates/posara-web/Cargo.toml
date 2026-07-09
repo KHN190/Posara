@@ -1,0 +1,14 @@
+[package]
+name = "posara-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+posara = { path = "../posara", default-features = false, features = ["web"] }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"

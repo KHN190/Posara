@@ -1,0 +1,140 @@
+use proj::{ draw_poly }
+use curl_noise::{ Curl, cn_new, cn_init, cn_step }
+use diff_growth::{ Diff, dg_new, dg_init, dg_step, dg_grow }
+use cube_slice::{ Cube, cb_new, cb_init, cb_step, cb_grow, cb_map }
+
+// A-minor acid techno + the three generative forms (differential growth, cube
+// lattice growth, curl-noise field). Generative state lives in Curl/Diff/Cube.
+
+static KICK: Array<Int> = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+static CLAP: Array<Int> = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+static HAT:  Array<Int> = [0,0,1,0, 0,0,1,0, 0,0,1,0, 0,0,1,0];
+static BASS: Array<Int> = [33,0,33,45, 0,48,0,33, 33,0,52,0, 45,0,48,33];
+static ACC:  Array<Int> = [1,0,0,0, 0,0,1,0, 0,1,0,0, 0,0,1,0];
+
+fn itof(v: Int) -> Float { v.to_f() }
+fn ri(n: Int) -> <nondet> Int { (rand() * itof(n)).to_i() }
+
+fn setup_synth() -> <IO> Unit {
+  snd_voices(16);
+  snd_osc(0, 0, 1, 0, 0, 100);
+  snd_filter(0, 0, 1400, 8);
+  snd_env(0, 0, 0, 100, 0, 110, 0, 25);
+  snd_env(0, 1, 2, 30, 0, 55, 0, 0);
+
+  snd_osc(1, 0, 3, 0, 0, 100);
+  snd_filter(1, 0, 520, 88);
+  snd_env(1, 0, 0, 100, 2, 260, 35, 80);
+  snd_env(1, 1, 1, 65, 2, 150, 0, 70);
+
+  snd_osc(2, 0, 4, 0, 0, 100);
+  snd_filter(2, 2, 1600, 40);
+  snd_env(2, 0, 0, 100, 0, 120, 0, 60);
+
+  snd_osc(3, 0, 4, 0, 0, 90);
+  snd_filter(3, 1, 7000, 10);
+  snd_env(3, 0, 0, 100, 0, 38, 0, 18)
+}
+
+fn draw_eye(sx: Int, sy: Int, r: Int, pupil: Int, px: Int, py: Int) -> <Graphics> Unit {
+  gfx_circ(sx, sy, r, 0xffff);
+  gfx_circb(sx, sy, r, 0x0000);
+  if pupil == 1 { gfx_circ(px, py, r * 4 / 10, 0x0000) }
+}
+
+fn play_step(pos: Int, tpose: Int, bar: Int) -> <IO, nondet> Unit {
+  let quiet = bar % 32 >= 28;
+  if !quiet {
+    if KICK[pos] == 1 { snd_on(0, 36, 90, 140) };
+    if CLAP[pos] == 1 { snd_on(2, 60, 70, 120) }
+  };
+  if HAT[pos] == 1 { snd_on(3, 72, 40 + ri(15), 40) };
+  let shift = if (bar / 8) % 2 == 1 { 4 } else { 0 };
+  let bn = BASS[(pos + shift) % 16];
+  if bn != 0 {
+    let acc = ACC[pos];
+    // 16-bar triangle cutoff sweep, 300..2340 Hz.
+    let ph = (bar % 16) * 16 + pos;
+    let p = if ph < 128 { ph } else { 256 - ph };
+    snd_filter(1, 0, 300 + p * 16, if acc == 1 { 96 } else { 84 });
+    snd_on(1, bn + tpose, 58 + acc * 24 + ri(8), 130)
+  }
+}
+
+@cart
+fn main() -> <frame, Graphics, IO, nondet> Unit {
+  gfx_screen(480, 320);
+  srand(now());
+  setup_synth();
+
+  let mut curl = cn_new();
+  let mut diff = dg_new();
+  let mut cube = cb_new();
+  cn_init(&mut curl);
+  dg_init(&mut diff, 0);
+  cb_init(&mut cube);
+
+  let mut grid_t = now() + 200;
+  let mut pos = 0;
+  let mut bar = 0;
+  let mut tpose = 0;
+  let mut ay = 0.0;
+
+  loop {
+    let t = now();
+    if t >= grid_t {
+      play_step(pos, tpose, bar);
+      let np = if pos >= 15 { 0 } else { pos + 1 };
+      if np == 0 {
+        bar = bar + 1;
+        if bar % 8 == 0 { tpose = if tpose == 0 { 5 } else { 0 } };
+        let b32 = bar % 32;
+        if b32 == 16 { snd_fx(1, 2, 35, 0) };
+        if b32 == 24 { snd_fx(1, 0, 0, 0) };
+        if b32 >= 28 { snd_fx(1, 4, 100, 150 * (1 + b32 - 28) * (1 + b32 - 28)) };
+        if b32 == 0 { snd_fx(1, 0, 0, 0) }
+      };
+      pos = np;
+      grid_t = grid_t + 115
+    };
+
+    cn_step(&mut curl);
+    dg_step(&mut diff, 0);
+    dg_grow(&mut diff, 0);
+    cb_step(&mut cube);
+    cb_grow(&mut cube);
+    cb_map(&mut cube);
+
+    gfx_cls(0xffff);
+    ay = ay + 0.02;
+    draw_poly(diff.dgx.clone(), diff.dgy.clone(), diff.dgz.clone(), 0, diff.dgn[0], 80, 168, 0.6, ay, 0.42, 1, 0x0000);
+    let cay = cos(ay);
+    let say = sin(ay);
+    let cax = cos(0.42);
+    let sax = sin(0.42);
+    let x1 = 19.0 * say;
+    let z1 = 19.0 * cay;
+    let y2 = (0.0 - 6.0) * cax - z1 * sax;
+    let z2 = (0.0 - 6.0) * sax + z1 * cax;
+    let sx = 240 + (x1 * 1.2).to_i();
+    let sy = 168 + (y2 * 1.2).to_i();
+    let r = 12 + (z2 * 0.18).to_i();
+    let pupil = if cay * cax > 0.0 { 1 } else { 0 };
+    let px = sx + (say * itof(r) * 0.55).to_i();
+    let py = sy - (cay * sax * itof(r) * 0.55).to_i();
+    if z2 < 0.0 { draw_eye(sx, sy, r, pupil, px, py) };
+    let mut sl = 0;
+    while sl < 9 {
+      draw_poly(cube.cb3x.clone(), cube.cb3y.clone(), cube.cb3z.clone(), sl * 48, cube.cbn[sl], 240, 168, 1.2, ay, 0.42, 1, 0x0000);
+      sl = sl + 1
+    };
+    if z2 >= 0.0 { draw_eye(sx, sy, r, pupil, px, py) };
+    let mut s = 0;
+    while s < 10 {
+      draw_poly(curl.csx.clone(), curl.csy.clone(), curl.csz.clone(), s * 48, curl.clen[s], 400, 168, 1.2, ay, 0.42, 0, 0x0000);
+      s = s + 1
+    };
+    gfx_commit();
+    frame.present()
+  }
+}

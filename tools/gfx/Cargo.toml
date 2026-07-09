@@ -1,0 +1,17 @@
+[package]
+name = "posara-gfx"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "posara image asset converter: png/ttf -> .spr / .fnt sprites."
+
+[[bin]]
+name = "posara-gfx"
+path = "src/main.rs"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+color_quant = "1.1"
+fontdue = "0.9"

@@ -30,51 +30,51 @@ fn stab_timbre(mode: Int) -> <IO> Unit {
     // bright + light: thinner saw body, a clean sine octave for sparkle, and a
     // high open cutoff with low resonance — brightness from air, not honk.
     // Attack stays short (env in setup) so the stab keeps its edge.
-    synth_osc(2, 0, 3, 0, 0, 74);
-    synth_osc(2, 1, 1, 12, 0, 44);
-    synth_filter(2, 0, 6500, 14)
+    snd_osc(2, 0, 3, 0, 0, 74);
+    snd_osc(2, 1, 1, 12, 0, 44);
+    snd_filter(2, 0, 6500, 14)
   } else {
-    synth_osc(2, 0, 2, 0, 0, 95);
-    synth_osc(2, 1, 0, 12, 0, 45);
-    synth_filter(2, 0, 3200, 30)
+    snd_osc(2, 0, 2, 0, 0, 95);
+    snd_osc(2, 1, 0, 12, 0, 45);
+    snd_filter(2, 0, 3200, 30)
   }
 }
 
 fn setup_synth() -> <IO> Unit {
-  synth_voices(16);
-  synth_osc(0, 0, 1, 0, 0, 100);
-  synth_filter(0, 0, 1400, 8);
-  synth_env(0, 0, 0, 100, 0, 110, 0, 25);
-  synth_env(0, 1, 2, 30, 0, 55, 0, 0);
+  snd_voices(16);
+  snd_osc(0, 0, 1, 0, 0, 100);
+  snd_filter(0, 0, 1400, 8);
+  snd_env(0, 0, 0, 100, 0, 110, 0, 25);
+  snd_env(0, 1, 2, 30, 0, 55, 0, 0);
 
   // 1 = plain short saw bass, low resonance — a stab, no sweep.
-  synth_osc(1, 0, 3, 0, 0, 100);
-  synth_filter(1, 0, 900, 30);
-  synth_env(1, 0, 0, 100, 1, 90, 20, 60);
+  snd_osc(1, 0, 3, 0, 0, 100);
+  snd_filter(1, 0, 900, 30);
+  snd_env(1, 0, 0, 100, 1, 90, 20, 60);
 
   // 2 = chord stab; timbre set by stab_timbre() and swapped every 16 bars.
-  synth_env(2, 0, 0, 100, 3, 180, 20, 150);
+  snd_env(2, 0, 0, 100, 3, 180, 20, 150);
 
-  synth_osc(3, 0, 4, 0, 0, 90);
-  synth_filter(3, 1, 7000, 10);
-  synth_env(3, 0, 0, 100, 0, 38, 0, 18);
+  snd_osc(3, 0, 4, 0, 0, 90);
+  snd_filter(3, 1, 7000, 10);
+  snd_env(3, 0, 0, 100, 0, 38, 0, 18);
 
   // 4 = sparse high decoration: triangle, soft attack, ringing release.
-  synth_osc(4, 0, 2, 0, 0, 80);
-  synth_filter(4, 0, 5000, 20);
-  synth_env(4, 0, 0, 100, 4, 160, 25, 380);
+  snd_osc(4, 0, 2, 0, 0, 80);
+  snd_filter(4, 0, 5000, 20);
+  snd_env(4, 0, 0, 100, 4, 160, 25, 380);
 
   // 5 = clap/snare: noise burst through a mid band-pass.
-  synth_osc(5, 0, 4, 0, 0, 100);
-  synth_filter(5, 2, 1800, 30);
-  synth_env(5, 0, 0, 100, 0, 90, 0, 40)
+  snd_osc(5, 0, 4, 0, 0, 100);
+  snd_filter(5, 2, 1800, 30);
+  snd_env(5, 0, 0, 100, 0, 90, 0, 40)
 }
 
 // high decoration over the chord; returns a pending grace target (-1 = none)
 // to resolve on the next step. grace_in is that pending note from last step.
 fn decorate(pos: Int, ch: Int, grace_in: Int) -> <IO, nondet> Int {
   // resolve a pending grace: the acciaccatura already sounded, now land it.
-  if grace_in >= 0 { synth_on(4, grace_in, 40, 300); return 0 - 1 };
+  if grace_in >= 0 { snd_on(4, grace_in, 40, 300); return 0 - 1 };
   // sparse: only one slot per bar, ~1 in 3 bars.
   if pos == 14 && ri(3) == 0 {
     let root = ROOT[ch];
@@ -82,10 +82,10 @@ fn decorate(pos: Int, ch: Int, grace_in: Int) -> <IO, nondet> Int {
     let note = match ri(3) { 0 => root + 24, 1 => root + 24 + T3[ch], _ => root + 26 };
     if ri(4) == 0 {
       // 1/4 grace: sound a step below now, land on `note` next step.
-      synth_on(4, note - 2, 36, 80);
+      snd_on(4, note - 2, 36, 80);
       return note
     };
-    synth_on(4, note, 40, 300)
+    snd_on(4, note, 40, 300)
   };
   0 - 1
 }
@@ -102,9 +102,9 @@ fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
   let kick_on = b < 52 || b >= 60;          // kick drops in the breakdown
   let full = b >= 8 && kick_on;             // snare/clap once the groove lands
 
-  if kick_on && KICK[pos] == 1 { synth_on(0, 36, 90, 140) };
-  if b >= 4 && HAT[pos] == 1 { synth_on(3, 72, 36 + ri(14), 40) };
-  if full && CLAP[pos] == 1 { synth_on(5, 60, 70, 100) };
+  if kick_on && KICK[pos] == 1 { snd_on(0, 36, 90, 140) };
+  if b >= 4 && HAT[pos] == 1 { snd_on(3, 72, 36 + ri(14), 40) };
+  if full && CLAP[pos] == 1 { snd_on(5, 60, 70, 100) };
 
   let ch = bar % 8;
   let root = ROOT[ch];
@@ -112,7 +112,7 @@ fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
     let bn = BASS[pos];
     if bn != 0 {
       let semi = if bn == 99 { 0 } else { bn };
-      synth_on(1, root - 12 + semi, 78, 150)
+      snd_on(1, root - 12 + semi, 78, 150)
     }
   };
   let g = stab_gain(b);
@@ -122,10 +122,10 @@ fn play_step(pos: Int, bar: Int) -> <IO, nondet> Unit {
     // root/3rd/7th; a rotating top note (per bar) sits an octave up for melody.
     let ti = TOPI[bar % 4];
     let top = match ti { 0 => 0, 1 => T3[ch], 2 => T5[ch], _ => T7[ch] };
-    synth_on(2, root, v, 160);
-    synth_on(2, root + T3[ch], v, 160);
-    synth_on(2, root + T7[ch], v - 8, 160);
-    synth_on(2, root + 12 + top, v - 4, 160)
+    snd_on(2, root, v, 160);
+    snd_on(2, root + T3[ch], v, 160);
+    snd_on(2, root + T7[ch], v - 8, 160);
+    snd_on(2, root + 12 + top, v - 4, 160)
   }
 }
 
@@ -158,7 +158,7 @@ fn main() -> <frame, IO, nondet> Unit {
         let wr = if nb >= 52 && nb < 60 { 1 } else { 0 };
         if wr != rvb {
           rvb = wr;
-          if wr == 1 { bus_reverb(70, 45, 42) } else { bus_reverb(0, 0, 0) }
+          if wr == 1 { snd_bus_reverb(70, 45, 42) } else { snd_bus_reverb(0, 0, 0) }
         }
       };
       pos = np;

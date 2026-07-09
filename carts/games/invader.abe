@@ -69,7 +69,7 @@ fn poly(cx: Int, cy: Int, n: Int, r: Float, rot: Float, col: Int) -> <Graphics> 
   while k < n {
     let a0 = rot + k.to_f() * step;
     let a1 = rot + (k + 1).to_f() * step;
-    tri(cx, cy,
+    gfx_tri(cx, cy,
         cx + (cos(a0) * r).to_i(), cy + (sin(a0) * r).to_i(),
         cx + (cos(a1) * r).to_i(), cy + (sin(a1) * r).to_i(), col);
     k = k + 1
@@ -78,7 +78,7 @@ fn poly(cx: Int, cy: Int, n: Int, r: Float, rot: Float, col: Int) -> <Graphics> 
 
 // --- music ---
 fn wave_row(s: Int, prog: Int, bar: Int) -> <IO, nondet> Unit {
-  if WKICK[s] == 1 { synth_on(0, 36, 85, 140) };
+  if WKICK[s] == 1 { snd_on(0, 36, 85, 140) };
   let tp = if bar % 8 >= 4 { 5 } else { 0 };
   let bn = WBASS[s];
   let play = bn != 0 && (prog >= 1 || s % 4 == 0);
@@ -86,21 +86,21 @@ fn wave_row(s: Int, prog: Int, bar: Int) -> <IO, nondet> Unit {
     let acc = if s == 0 { 18 } else { 0 };
     let vol = if prog >= 3 { 72 } else { 58 };
     let dur = if prog >= 3 { 180 } else { 140 };
-    synth_on(1, bn + tp, vol + acc + ri(8), dur)
+    snd_on(1, bn + tp, vol + acc + ri(8), dur)
   };
-  if prog >= 1 { if WHAT[s] == 1 { synth_on(3, 72, 30 + ri(12), 40) } };
-  if prog >= 2 { if WCLAP[s] == 1 { synth_on(2, 60, 60, 120) } }
+  if prog >= 1 { if WHAT[s] == 1 { snd_on(3, 72, 30 + ri(12), 40) } };
+  if prog >= 2 { if WCLAP[s] == 1 { snd_on(2, 60, 60, 120) } }
 }
 
 fn boss_row(s: Int, card: Int) -> <IO, nondet> Unit {
-  if BKICK[s] == 1 { synth_on(0, 36, 92, 140) };
-  if s % 4 == 2 { synth_on(2, 60, 70, 120) };
+  if BKICK[s] == 1 { snd_on(0, 36, 92, 140) };
+  if s % 4 == 2 { snd_on(2, 60, 70, 120) };
   let bn = BBASS[s];
-  if bn != 0 { synth_on(1, bn, 78, 120) };
-  if card >= 1 { if BHAT[s] == 1 { synth_on(3, 72, 35 + ri(15), 40) } };
+  if bn != 0 { snd_on(1, bn, 78, 120) };
+  if card >= 1 { if BHAT[s] == 1 { snd_on(3, 72, 35 + ri(15), 40) } };
   let ln = BLEAD[s];
-  if card >= 1 { if ln != 0 { synth_on(4, ln, 55, 180) } };
-  if card >= 2 { if ln != 0 { synth_on(4, ln + 12, 38, 120) } }
+  if card >= 1 { if ln != 0 { snd_on(4, ln, 55, 180) } };
+  if card >= 2 { if ln != 0 { snd_on(4, ln + 12, 38, 120) } }
 }
 
 fn music_step(w: &mut World, t: Int) -> <IO, nondet> Unit {
@@ -134,7 +134,7 @@ fn flow_step(w: &mut World, t: Int) -> <Graphics, nondet> Unit {
     let a = field(w.fl.x[i], w.fl.y[i], tt, w.fl.sx, w.fl.sy);
     let nx = w.fl.x[i] + cos(a) * 1.8;
     let ny = w.fl.y[i] + sin(a) * 1.8;
-    linew(w.fl.x[i].to_i(), w.fl.y[i].to_i(), nx.to_i(), ny.to_i(), 6, d);
+    gfx_linew(w.fl.x[i].to_i(), w.fl.y[i].to_i(), nx.to_i(), ny.to_i(), 6, d);
     w.fl.x[i] = wrap(nx, 480.0);
     w.fl.y[i] = wrap(ny, 320.0);
     i = i + 1
@@ -162,7 +162,7 @@ fn spawn_pb(w: &mut World, lng: Int) -> Unit {
 // 单发直射。focus=1 标记拉长（激光感），配 player_step 的更快 cd。
 fn fire(w: &mut World, focus: Int) -> <IO> Unit {
   spawn_pb(w, focus);
-  sfx_play(2, 900, 20, 40)
+  snd_on(2, 81, 20, 40)
 }
 
 // --- enemy bullets (spawn) ---
@@ -342,7 +342,7 @@ fn fx_step(w: &mut World) -> <Graphics> Unit {
     if w.fx[i].on == 1 {
       let age = w.fx[i].age + 1;
       if age >= w.fx[i].life { w.fx[i].on = 0 } else {
-        circb(w.fx[i].x, w.fx[i].y, age * 2, col);
+        gfx_circb(w.fx[i].x, w.fx[i].y, age * 2, col);
         w.fx[i].age = age
       }
     };
@@ -393,7 +393,7 @@ fn bomb(w: &mut World, t: Int) -> <IO> Unit {
   fx_spawn(w, w.p.x, w.p.y, 26);
   w.tm.flash = 4;
   w.tm.freeze = 3;
-  synth_on(5, 57, 80, 400)
+  snd_on(5, 57, 80, 400)
 }
 
 // --- phase transitions ---
@@ -401,7 +401,7 @@ fn enter_boss(w: &mut World, t: Int) -> <IO> Unit {
   w.tm.phase = 1; w.bo.hp = w.bo.hpmax; w.tm.flash = 0; w.tm.sang = 0.0;
   w.bo.card = 0; w.bo.nodeath = 1; w.bo.cardt = t + CARD_LIMIT;
   seq_reset(&mut w.sq, t);
-  synth_on(5, 45, 80, 650)
+  snd_on(5, 45, 80, 650)
 }
 
 fn boss_down(w: &mut World, t: Int) -> <IO, nondet> Unit {
@@ -409,9 +409,9 @@ fn boss_down(w: &mut World, t: Int) -> <IO, nondet> Unit {
   w.bo.hp = w.bo.hpmax;
   flow_reseed(w);
   seq_reset(&mut w.sq, t);
-  synth_on(4, 69, 70, 400);
-  synth_on(4, 72, 70, 400);
-  synth_on(4, 76, 70, 400)
+  snd_on(4, 69, 70, 400);
+  snd_on(4, 72, 70, 400);
+  snd_on(4, 76, 70, 400)
 }
 
 fn card_clear(w: &mut World, t: Int) -> <IO, nondet> Unit {
@@ -420,10 +420,10 @@ fn card_clear(w: &mut World, t: Int) -> <IO, nondet> Unit {
     cancel_eb(w, 1);
     w.p.captures = w.p.captures + 1;
     w.rank = clamp(w.rank + 8, 90, 170);
-    synth_on(4, 69, 70, 300); synth_on(4, 73, 70, 300); synth_on(4, 76, 70, 300)
+    snd_on(4, 69, 70, 300); snd_on(4, 73, 70, 300); snd_on(4, 76, 70, 300)
   } else {
     clear_eb(w);
-    synth_on(5, 50, 70, 300)
+    snd_on(5, 50, 70, 300)
   };
   w.bo.card = w.bo.card + 1;
   if w.bo.card >= w.bo.ncards { boss_down(w, t) }
@@ -436,7 +436,7 @@ fn enemy_down(w: &mut World, j: Int) -> <IO> Unit {
   fx_spawn(w, w.en[j].x.to_i(), w.en[j].y.to_i(), 8);
   w.en[j].on = 0;
   gain_graze(w, 1);
-  sfx_play(3, 300, 60, 90)
+  snd_on(3, 62, 60, 90)
 }
 
 fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, IO, nondet> Unit {
@@ -446,7 +446,7 @@ fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, 
     if w.pb[i].on == 1 {
       w.pb[i].y = w.pb[i].y - (if w.pb[i].lng == 1 { 8 } else { 7 });
       if w.pb[i].y < 0 { w.pb[i].on = 0 } else {
-        if w.pb[i].lng == 1 { rect(w.pb[i].x - 1, w.pb[i].y - 4, 2, 10, y) } else { circ(w.pb[i].x, w.pb[i].y, 2, y) };
+        if w.pb[i].lng == 1 { gfx_rect(w.pb[i].x - 1, w.pb[i].y - 4, 2, 10, y) } else { gfx_circ(w.pb[i].x, w.pb[i].y, 2, y) };
         if bosson == 1 {
           let dx = w.pb[i].x - bx;
           let dy = w.pb[i].y - by;
@@ -468,7 +468,7 @@ fn pbullets(w: &mut World, bx: Int, by: Int, bosson: Int, t: Int) -> <Graphics, 
                   w.pb[i].on = 0;
                   w.en[j].hp = w.en[j].hp - 1;
                   w.en[j].hf = 2;
-                  sfx_play(2, 1300, 35, 40);
+                  snd_on(2, 88, 35, 40);
                   if w.en[j].hp <= 0 { enemy_down(w, j) }
                 }
               }
@@ -515,8 +515,8 @@ fn player_hit(w: &mut World, t: Int) -> <IO, nondet> Unit {
   w.rank = clamp(w.rank - 25, 90, 170);
   fx_spawn(w, w.p.x, w.p.y, 22);
   w.tm.freeze = 6;
-  sfx_play(3, 240, 80, 220);
-  sfx_play(3, 90, 80, 320);
+  snd_on(3, 59, 80, 220);
+  snd_on(3, 42, 80, 320);
   if w.p.lives < 0 { reset_game(w, t) } else { restart_segment(w, t) }
 }
 
@@ -536,8 +536,8 @@ fn ebullets(w: &mut World, t: Int) -> <Graphics, IO, nondet> Unit {
       if oob { w.eb[i].on = 0 } else {
         match w.eb[i].kind {
           1 => poly(x, y, 4, 3.0, 0.0, g),
-          2 => circ(x, y, 3, g),
-          _ => circ(x, y, 2, g)
+          2 => gfx_circ(x, y, 3, g),
+          _ => gfx_circ(x, y, 2, g)
         };
         if t >= w.p.invt {
           let dx = x - w.p.x;
@@ -588,48 +588,49 @@ fn player_step(w: &mut World, b: Int, t: Int) -> <IO> Unit {
 
 fn draw_boss(w: &mut World, bx: Int, by: Int) -> <Graphics> Unit {
   let c = if w.tm.flash > 0 { c_amber() } else { c_teal() };
-  circb(bx, by, 14, c);
-  circb(bx, by, 8, c);
-  if w.tm.flash > 0 { circ(bx, by, 6, c) } else { pset(bx, by, c) }
+  gfx_circb(bx, by, 14, c);
+  gfx_circb(bx, by, 8, c);
+  if w.tm.flash > 0 { gfx_circ(bx, by, 6, c) } else { gfx_pset(bx, by, c) }
 }
 
 fn draw_player(w: &mut World, t: Int, focus: Int) -> <Graphics> Unit {
   let vis = if t >= w.p.invt { 1 } else { t / 80 % 2 };
   if vis == 1 {
-    blit([24, 24, 60, 60, 126, 255, 231, 195], w.p.x - 4, w.p.y - 4, 8, 8, c_white())
+    let icon = b"\x18\x18\x3c\x3c\x7e\xff\xe7\xc3";
+    gfx_blitg(&icon, 0, w.p.x - 4, w.p.y - 4, 8, 8, c_white(), 0)
   };
   if focus == 1 {
-    circb(w.p.x, w.p.y, 5, c_amber());
-    pset(w.p.x, w.p.y, c_white())
+    gfx_circb(w.p.x, w.p.y, 5, c_amber());
+    gfx_pset(w.p.x, w.p.y, c_white())
   }
 }
 
 fn hud(w: &mut World, t: Int) -> <Graphics> Unit {
   let col = c_white();
   if w.tm.phase == 1 {
-    rectb(140, 8, 200, 6, col);
+    gfx_rectb(140, 8, 200, 6, col);
     let bw = w.bo.hp * 200 / w.bo.hpmax;
-    if bw > 0 { rect(140, 8, bw, 6, c_amber()) };
+    if bw > 0 { gfx_rect(140, 8, bw, 6, c_amber()) };
     let mut c = 0;
     while c < w.bo.ncards {
       let pc = if c < w.bo.card { c_dim() } else { c_amber() };
-      rect(140 + c * 8, 2, 5, 3, pc);
+      gfx_rect(140 + c * 8, 2, 5, 3, pc);
       c = c + 1
     };
     let rem = w.bo.cardt - t;
     let tw = if rem > 0 { rem * 200 / CARD_LIMIT } else { 0 };
-    rect(140, 16, tw, 2, c_gray())
+    gfx_rect(140, 16, tw, 2, c_gray())
   };
   let mut i = 0;
-  while i < w.p.lives { rect(8 + i * 8, 306, 5, 5, col); i = i + 1 };
+  while i < w.p.lives { gfx_rect(8 + i * 8, 306, 5, 5, col); i = i + 1 };
   let mut j = 0;
-  while j < w.p.captures { rect(8 + j * 5, 22, 3, 3, c_amber()); j = j + 1 };
-  rectb(388, 306, 84, 5, col);
+  while j < w.p.captures { gfx_rect(8 + j * 5, 22, 3, 3, c_amber()); j = j + 1 };
+  gfx_rectb(388, 306, 84, 5, col);
   let gv = clamp(w.p.graze, 0, GRAZE_MAX);
   let gm = gv * 82 / GRAZE_MAX;
   let gc = if w.p.graze >= BOMB_COST { c_amber() } else { c_teal() };
-  if gm > 0 { rect(389, 307, gm, 3, gc) };
-  rect(389 + 82 * BOMB_COST / GRAZE_MAX, 306, 1, 5, c_gray())
+  if gm > 0 { gfx_rect(389, 307, gm, 3, gc) };
+  gfx_rect(389 + 82 * BOMB_COST / GRAZE_MAX, 306, 1, 5, c_gray())
 }
 
 // One full frame of simulation + draw. On hitstop, just flash and skip the sim.
@@ -637,14 +638,14 @@ fn frame_step(w: &mut World, b: Int, t: Int) -> <Graphics, IO, nondet> Unit {
   if w.tm.freeze > 0 {
     w.tm.freeze = w.tm.freeze - 1;
     let v = w.tm.freeze * 5;
-    cls(rgb(v, v * 2, v))
+    gfx_cls(rgb(v, v * 2, v))
   } else {
     sim_step(w, b, t)
   }
 }
 
 fn sim_step(w: &mut World, b: Int, t: Int) -> <Graphics, IO, nondet> Unit {
-  cls(0x0000);
+  gfx_cls(0x0000);
   flow_step(w, t);
   music_step(w, t);
   player_step(w, b, t);
@@ -681,7 +682,7 @@ fn sim_step(w: &mut World, b: Int, t: Int) -> <Graphics, IO, nondet> Unit {
 
 @cart
 fn main() -> <frame, Graphics, IO, nondet> Unit {
-  screen(480, 320);
+  gfx_screen(480, 320);
   srand(now());
 
   let mut w = World {
@@ -707,16 +708,16 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
   while f < 16 { w.fx[f] = Fx { on: 0, x: 0, y: 0, age: 0, life: 0 }; f = f + 1 };
 
   flow_reseed(&mut w);
-  sfx_inst(2, 0, 1, 30, 0, 20);
-  sfx_inst(3, 4, 1, 80, 0, 60);
+  snd_osc(2, 0, 0, 0, 0, 100); snd_env(2, 0, 0, 100, 1, 30, 0, 20);
+  snd_osc(3, 0, 4, 0, 0, 100); snd_env(3, 0, 0, 100, 1, 80, 0, 60);
   synthkit_setup();
   seq_reset(&mut w.sq, 0);
 
   loop {
     let t = now();
-    let b = device_out(0x8002);
+    let b = in_buttons();
     frame_step(&mut w, b, t);
-    device_in(0x2001, 1);
+    gfx_commit();
     frame.present()
   }
 }
