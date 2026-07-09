@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Instant;
+use crate::backend::{Backend, Clock};
 
 use myriad::{NativeCtx, Value, VirtualMachine};
 
@@ -21,11 +21,14 @@ use crate::plugin::Plugin;
 // fields where callers need direct access (gfx framebuffer, sfx recorder) and
 // iterates them uniformly through the trait for VM/compiler wiring.
 pub struct Host {
-    pub start: Instant,
+    pub clock_src: Rc<dyn Clock>,
     // When Some(ms), now() returns this virtual time instead of wall clock —
     // offline rendering drives it so timing is deterministic and non-realtime.
     pub clock: Rc<std::cell::Cell<Option<u64>>>,
     pub rng: Rc<RefCell<u32>>,
+    // Cart stdout sink for the web console (make_vm wires a BufferConsole here on
+    // wasm). The frontend drains it each frame and tags it as cart output.
+    pub console_out: myriad::devices::console::SharedBuf,
     pub root: PathBuf,
     #[cfg(feature = "gfx")]
     pub gfx: GfxPlugin,
@@ -75,6 +78,7 @@ impl Host {
     }
 
     fn assemble(root: PathBuf, headless: bool, muted: bool, #[cfg(feature = "midi")] midi: MidiPlugin) -> Result<Self, String> {
+        let backend = Backend::new(root.clone());
         #[cfg(not(feature = "gfx"))]
         let _ = headless;
         #[cfg(not(feature = "sfx"))]
@@ -82,11 +86,12 @@ impl Host {
         #[cfg(feature = "sfx")]
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
         #[cfg(feature = "gfx")]
-        let gfx = GfxPlugin::new(headless, root.clone());
+        let gfx = GfxPlugin::new(backend.presenter(headless), root.clone());
         Ok(Self {
-            start: Instant::now(),
+            clock_src: Rc::clone(&backend.clock),
             clock: Rc::new(std::cell::Cell::new(None)),
             rng: Rc::new(RefCell::new(0x9e3779b9)),
+            console_out: Rc::new(RefCell::new(Vec::new())),
             #[cfg(feature = "gfx")]
             input: InputPlugin::new(Rc::clone(&gfx.fb)),
             #[cfg(feature = "gfx")]
@@ -96,7 +101,7 @@ impl Host {
             #[cfg(feature = "sfx")]
             sfx,
             #[cfg(feature = "fs")]
-            fs: FsPlugin::new(root.clone()),
+            fs: FsPlugin::new(Rc::clone(&backend.storage)),
             #[cfg(feature = "midi")]
             midi,
             root,
@@ -123,13 +128,19 @@ impl Host {
     pub fn install(&self, vm: &mut VirtualMachine) {
         for p in self.plugin_list() { p.install(vm); }
         #[cfg(not(feature = "midi"))]
-        vm.install_device(crate::devices::MIDI, Box::new(StubDevice::new("MIDI", "midi")));
+        {
+            vm.install_device(crate::devices::MIDI, Box::new(StubDevice::new("MIDI", "midi")));
+            // stub natives so carts referencing MIDI still resolve on midi-less backends.
+            vm.register_native("midi_poll", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::ZERO, false))));
+            vm.register_native("midi_count", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::ZERO, false))));
+            vm.register_native("midi_send", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::UNIT, false))));
+        }
         #[cfg(not(feature = "gfx"))]
         {
             vm.install_device(crate::devices::SCREEN, Box::new(StubDevice::new("Screen", "gfx")));
             vm.install_device(crate::devices::CONTROLLER, Box::new(StubDevice::new("Controller", "gfx")));
         }
-        register_time_natives(vm, self.start, Rc::clone(&self.clock));
+        register_time_natives(vm, Rc::clone(&self.clock_src), Rc::clone(&self.clock));
         register_rand_natives(vm, Rc::clone(&self.rng));
         crate::debug::register_assert_natives(vm);
     }
@@ -193,9 +204,9 @@ impl myriad::Device for StubDevice {
     }
 }
 
-fn register_time_natives(vm: &mut VirtualMachine, start: Instant, clock: Rc<std::cell::Cell<Option<u64>>>) {
+fn register_time_natives(vm: &mut VirtualMachine, clock_src: Rc<dyn Clock>, clock: Rc<std::cell::Cell<Option<u64>>>) {
     vm.register_native("now", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
-        let ms = clock.get().unwrap_or_else(|| start.elapsed().as_millis() as u64);
+        let ms = clock.get().unwrap_or_else(|| clock_src.now_ms());
         Ok((Value::from_int(ms as i64), false))
     }));
 }

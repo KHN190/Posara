@@ -1,3 +1,9 @@
+#[cfg(all(feature = "gfx-desktop", feature = "gfx-web"))]
+compile_error!("pick one gfx backend: gfx-desktop or gfx-web");
+#[cfg(all(feature = "sfx-desktop", feature = "sfx-web"))]
+compile_error!("pick one sfx backend: sfx-desktop or sfx-web");
+
+pub mod backend;
 pub mod devices;
 pub mod plugin;
 pub mod plugins;
@@ -5,6 +11,7 @@ pub mod debug;
 pub mod host;
 pub mod lint;
 #[cfg(feature = "gfx")]
+#[cfg(feature = "gfx-desktop")]
 pub mod profile;
 pub mod runner;
 
@@ -26,3 +33,4 @@ pub use input::{Button, Controller};
 pub use sfx::{Audio, Mixer};
 pub use host::Host;
 pub use myriad::VirtualMachine;
+pub use polka::Module;

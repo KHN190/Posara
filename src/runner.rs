@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant, SystemTime};
 
 use myriad::VirtualMachine;
@@ -7,8 +8,11 @@ use polka::{Module, Value};
 
 use crate::Host;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 struct StdoutConsole;
+#[cfg(not(target_arch = "wasm32"))]
 impl Console for StdoutConsole {
     fn read_byte(&mut self) -> Result<Option<u8>, String> { Ok(None) }
     fn write_stdout(&mut self, b: u8) -> Result<(), String> {
@@ -22,12 +26,14 @@ impl Console for StdoutConsole {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const FRAME: Duration = Duration::from_micros(16_667);
 
 // Per-frame ops budget. Reaching this prints a rate-limited warning. Hard
 // mid-frame skip would need a mutable step_cap setter in myriad.
 const OPS_BUDGET: u64 = 500_000;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn mtime(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
 }
@@ -49,8 +55,20 @@ fn make_vm(host: &Host, static_names: Vec<String>, fn_names: Vec<String>, dbg: D
         vm = vm.with_debug_sink(crate::debug::sink(dbg.trace, dbg.handlers));
     }
     vm.install_device(SYSTEM_ID, Box::new(SystemDevice::new()));
-    let console: Box<dyn Console> = Box::new(StdoutConsole);
-    vm.install_device(CONSOLE_ID, Box::new(console));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let c: Box<dyn Console> = Box::new(StdoutConsole);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+        let _ = &host.console_out;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut bc = myriad::devices::BufferConsole::new();
+        bc.out_buf = std::rc::Rc::clone(&host.console_out);
+        bc.err_buf = std::rc::Rc::clone(&host.console_out);
+        let c: Box<dyn Console> = Box::new(bc);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+    }
     host.install(&mut vm);
     vm
 }
@@ -78,7 +96,15 @@ fn is_cart(module: &Module) -> bool {
 
 pub fn load_pk(path: &Path) -> Result<Module, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    polka::cartridge::read_pk(&bytes).map_err(|e| format!("read_pk: {e:?}"))
+    read_pk_bytes(&bytes)
+}
+
+pub fn read_pk_bytes(bytes: &[u8]) -> Result<Module, String> {
+    polka::cartridge::read_pk(bytes).map_err(|e| format!("read_pk: {e:?}"))
+}
+
+pub fn write_pk_bytes(module: &Module) -> Result<Vec<u8>, String> {
+    polka::cartridge::write_pk(module).map_err(|e| format!("write_pk: {e:?}"))
 }
 
 fn module_root(entry: &Path) -> Option<PathBuf> {
@@ -136,6 +162,37 @@ pub fn compile_abe(path: &Path, host: &Host) -> Result<LoadResult, String> {
 #[cfg(not(feature = "compiler"))]
 pub fn compile_abe(_path: &Path, _host: &Host) -> Result<LoadResult, String> {
     Err("posara built without `compiler` feature; only .pk supported".into())
+}
+
+// Single-file compile from source (no module resolution) — web code-mode path.
+#[cfg(feature = "compiler")]
+pub fn compile_source(src: &str, host: &Host) -> Result<LoadResult, String> {
+    use abrase::compiler::Compiler;
+    use abrase::lexer::Lexer;
+    use abrase::parser::Parser;
+    use crate::lint::{from_abrase_lint, lint_module};
+
+    let mut parser = Parser::new(Lexer::new(src)).with_source(src.to_string());
+    let ast = parser.parse_program();
+    if !parser.errors.is_empty() {
+        return Err(parser.pretty_print_errors());
+    }
+    let mut compiler = Compiler::new().with_source(src.to_string());
+    host.register_host_fns(&mut compiler)?;
+    let module = compiler.compile_module(&ast)
+        .map_err(|_| compiler.pretty_print_errors())?;
+
+    let mut warnings: Vec<crate::lint::PosaraLint> = compiler.warnings.iter()
+        .map(from_abrase_lint)
+        .collect();
+    warnings.extend(lint_module(&module));
+
+    Ok(LoadResult {
+        static_names: compiler.static_names_by_offset(),
+        fn_names: compiler.fn_names(),
+        module,
+        warnings,
+    })
 }
 
 #[cfg(feature = "compiler")]
@@ -262,7 +319,9 @@ impl<'a> Stepper<'a> {
 
 // Real-time frame loop: step one frame, run `hook(step, frame_idx)`, then sleep
 // to hold 60Hz. Stops when the cart finishes, the window closes, or the hook
-// returns false. Shared by run_aot and run_capture.
+// returns false. Shared by run_aot and run_capture. Desktop-only: web drives
+// frames from requestAnimationFrame, not a blocking sleep loop.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn drive_realtime(
     step: &mut Stepper,
     host: &Host,
@@ -320,6 +379,7 @@ pub fn run_until_frame(module: Module, static_names: Vec<String>, fn_names: Vec<
 
 // Offline: virtual clock, no sleep — runs to the deadline as fast as possible.
 // Used by `dump --at-ms` so a time-point grab lands instantly, not after T ms.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_until_ms(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, deadline_ms: u64) -> Result<(), String> {
     host.clock.set(Some(0));
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
@@ -369,7 +429,9 @@ pub fn run_render(
         while let Some(cmd) = host.sfx.audio.cmds.try_pop() { mixer.apply(cmd); }
         mixer.mix(&mut frame_buf);
         samples.extend_from_slice(&frame_buf);
-        #[cfg(feature = "gfx")]
+        #[cfg(not(feature = "gfx-desktop"))]
+        let _ = vms;
+        #[cfg(feature = "gfx-desktop")]
         if let Some(dir) = &frames {
             if vms >= from_ms as f64 + shot as f64 * interval {
                 let fb = host.gfx.fb.borrow();
@@ -386,14 +448,14 @@ pub fn run_render(
 
 // Real-time run that saves a PNG every 1000/fps ms (starting at from_ms) while
 // the recorder (if armed) captures audio — one run, synced tracks.
-#[cfg(feature = "gfx")]
+#[cfg(feature = "gfx-desktop")]
 pub struct CaptureCfg {
     pub dir: PathBuf,
     pub fps: u32,
     pub from_ms: u64,
 }
 
-#[cfg(feature = "gfx")]
+#[cfg(feature = "gfx-desktop")]
 pub fn run_capture(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, deadline_ms: u64, cap: CaptureCfg) -> Result<u64, String> {
     std::fs::create_dir_all(&cap.dir).map_err(|e| format!("capture dir: {e}"))?;
     let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
@@ -403,7 +465,7 @@ pub fn run_capture(module: Module, static_names: Vec<String>, fn_names: Vec<Stri
     let interval_ms = 1000.0 / cap.fps as f64;
     let mut shot: u64 = 0;
     drive_realtime(&mut step, host, |_, _| {
-        let elapsed = host.start.elapsed().as_millis() as u64;
+        let elapsed = host.clock_src.now_ms();
         if elapsed >= deadline_ms { return Ok(false); }
         let due = cap.from_ms as f64 + shot as f64 * interval_ms;
         if (elapsed as f64) >= due {
@@ -439,6 +501,7 @@ pub fn run_tests(module: Module, static_names: Vec<String>, fn_names: Vec<String
     Ok(failed == 0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_aot<F: FnOnce(&mut VirtualMachine)>(pk: &[u8], register_aot: F, host: &Host) -> Result<i64, String> {
     let module = polka::cartridge::read_pk(pk).map_err(|e| format!("read_pk: {e:?}"))?;
     let mut step = Stepper::start_aot(module, host, register_aot)?;
@@ -447,7 +510,9 @@ pub fn run_aot<F: FnOnce(&mut VirtualMachine)>(pk: &[u8], register_aot: F, host:
     Ok(step.exit_code())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct OverBudgetWarn { hits: u32, last_log: Instant }
+#[cfg(not(target_arch = "wasm32"))]
 impl OverBudgetWarn {
     fn new() -> Self { Self { hits: 0, last_log: Instant::now() - Duration::from_secs(10) } }
     fn check(&mut self, delta: u64) {
@@ -461,6 +526,7 @@ impl OverBudgetWarn {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
     let mut loaded = myriad::loader::load(module)?;
     let mut vm = make_vm(host, static_names, fn_names, dbg);
@@ -480,11 +546,11 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
         vm.call_export(&loaded.module, "start", &[])?;
     }
 
-    #[cfg(feature = "gfx")]
+    #[cfg(feature = "desktop")]
     let mut prof = if profile { crate::profile::Profiler::new() } else { None };
-    #[cfg(not(feature = "gfx"))]
+    #[cfg(not(feature = "desktop"))]
     let _ = profile;
-    #[cfg(feature = "gfx")]
+    #[cfg(feature = "desktop")]
     let mut last_steps: u64 = 0;
     let mut prev = Instant::now();
 
@@ -511,7 +577,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
         }
         #[cfg(feature = "sfx")]
         host.sfx.drain_recorder();
-        #[cfg(feature = "gfx")]
+        #[cfg(feature = "desktop")]
         {
             let work = t0.elapsed();
             if prof.as_ref().is_some_and(|p| !p.is_open()) { prof = None; }
@@ -528,7 +594,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
                 p.draw();
             }
         }
-        #[cfg(not(feature = "gfx"))]
+        #[cfg(not(feature = "desktop"))]
         let _ = (prev, frame_dt);
 
         frame += 1;
@@ -541,7 +607,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
                         Ok((newl, new_static, new_fns)) => {
                             loaded = newl;
                             vm = make_vm(host, new_static, new_fns, dbg);
-                            #[cfg(feature = "gfx")]
+                            #[cfg(feature = "desktop")]
                             { last_steps = 0; }
                             cart = is_cart(&loaded.module);
                             let init = if cart {

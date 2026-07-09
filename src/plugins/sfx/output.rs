@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+#[cfg(feature = "sfx-desktop")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::sfx::mixer::{Cmd, Mixer};
@@ -59,24 +60,52 @@ pub struct Audio {
     pub meter: Meter,
     pub sample_rate: u32,
     pub channels: u16,
+    #[cfg(feature = "sfx-desktop")]
     _stream: Option<cpal::Stream>,
+    #[cfg(not(feature = "sfx-desktop"))]
+    mixer: Mixer,
 }
 
 impl Audio {
-    // No audio device: commands queue and are dropped, everything else runs.
-    // Like --headless for sound. Recording is unavailable in this mode.
+    // No device: commands queue and drop, everything else runs. No recording.
     pub fn silent() -> Result<Self, String> {
+        let meter: Meter = Arc::new(AudioMeter::default());
         Ok(Self {
             cmds: Arc::new(Spsc::new(1024)),
             rec_ring: Arc::new(Spsc::new(8192)),
             rec_on: Arc::new(AtomicBool::new(false)),
-            meter: Arc::new(AudioMeter::default()),
+            #[cfg(not(feature = "sfx-desktop"))]
+            mixer: Mixer::new(44100, 2, Arc::clone(&meter)),
+            meter,
             sample_rate: 44100,
             channels: 2,
+            #[cfg(feature = "sfx-desktop")]
             _stream: None,
         })
     }
 
+    // Web sink: mixer lives here; the AudioWorklet drives it via pull().
+    #[cfg(not(feature = "sfx-desktop"))]
+    pub fn web(sample_rate: u32) -> Result<Self, String> {
+        let meter: Meter = Arc::new(AudioMeter::default());
+        Ok(Self {
+            cmds: Arc::new(Spsc::new(1024)),
+            rec_ring: Arc::new(Spsc::new(8192)),
+            rec_on: Arc::new(AtomicBool::new(false)),
+            mixer: Mixer::new(sample_rate, 2, Arc::clone(&meter)),
+            meter,
+            sample_rate,
+            channels: 2,
+        })
+    }
+
+    #[cfg(not(feature = "sfx-desktop"))]
+    pub fn pull(&mut self, out: &mut [f32]) {
+        while let Some(cmd) = self.cmds.try_pop() { self.mixer.apply(cmd); }
+        self.mixer.mix(out);
+    }
+
+    #[cfg(feature = "sfx-desktop")]
     pub fn new() -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no output device")?;

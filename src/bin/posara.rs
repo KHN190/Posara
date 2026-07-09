@@ -131,6 +131,33 @@ fn cmd_build(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     }
 }
 
+fn cmd_pack(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
+    let mut common = Common { root: None, path: None, headless: true, muted: true };
+    let mut out: Option<PathBuf> = None;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--out" => match args.next() { Some(v) => out = Some(PathBuf::from(v)), None => return usage() },
+            _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
+            _ => common.path = Some(a),
+        }
+    }
+    let Some((root, path)) = resolve_root(&common) else { return usage(); };
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("cart");
+    let out = out.unwrap_or_else(|| path.with_file_name(format!("{stem}.pk")));
+    let host = match Host::new_cart(root, common.headless, common.muted, &path) {
+        Ok(h) => h,
+        Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
+    };
+    let module = match runner::compile_abe(&path, &host) {
+        Ok(r) => r.module,
+        Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
+    };
+    match runner::write_pk_bytes(&module).and_then(|b| std::fs::write(&out, b).map_err(|e| e.to_string())) {
+        Ok(()) => { eprintln!("• wrote {}", out.display()); ExitCode::SUCCESS }
+        Err(e) => { eprintln!("{e}"); ExitCode::from(1) }
+    }
+}
+
 fn cmd_check(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     let mut common = Common { root: None, path: None, headless: true, muted: false };
     while let Some(a) = args.next() {
@@ -285,6 +312,7 @@ fn main() -> ExitCode {
         "dump"   => cmd_dump(args),
         "record" => cmd_record(args),
         "build"  => cmd_build(args),
+        "pack"   => cmd_pack(args),
         _        => usage(),
     }
 }

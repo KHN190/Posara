@@ -43,8 +43,8 @@ impl Plugin for InputPlugin {
 }
 
 pub(crate) fn poll_controller(controller: &RefCell<Controller>, fb: &RefCell<Framebuffer>) {
-    if let Some(win) = fb.borrow().window.as_ref() {
-        controller.borrow_mut().poll(win);
+    if let Some((b, k)) = fb.borrow_mut().poll_input() {
+        controller.borrow_mut().set(b, k);
     }
 }
 

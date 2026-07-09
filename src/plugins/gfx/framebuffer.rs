@@ -1,4 +1,8 @@
-use minifb::{Window, WindowOptions};
+use crate::backend::Presenter;
+
+// Web pixel budget: logical screen ≤ 480×480 (memory bound; presenter scales up).
+#[cfg(not(feature = "gfx-desktop"))]
+pub const MAX_DIM: usize = 480;
 
 pub struct Framebuffer {
     pub w: usize,
@@ -6,7 +10,7 @@ pub struct Framebuffer {
     pub format: u8,
     pub buf: Vec<u16>,
     pub out: Vec<u32>,
-    pub window: Option<Window>,
+    presenter: Option<Box<dyn Presenter>>,
     pub alive: bool,
     pub headless: bool,
     pub palette: [u16; 16],
@@ -16,33 +20,38 @@ pub struct Framebuffer {
 
 impl Framebuffer {
     pub fn new() -> Self {
-        Self { w: 0, h: 0, format: 0, buf: vec![], out: vec![], window: None, alive: true, headless: false, palette: [0; 16], commits: 0, lum_scratch: vec![] }
+        Self { w: 0, h: 0, format: 0, buf: vec![], out: vec![], presenter: None, alive: true, headless: false, palette: [0; 16], commits: 0, lum_scratch: vec![] }
     }
 
-    // Must be called before configure() to take effect; otherwise the window
-    // is already open and we leave it alone (warn).
+    pub fn set_presenter(&mut self, p: Box<dyn Presenter>) {
+        self.presenter = Some(p);
+    }
+
     pub fn set_headless(&mut self) {
-        if self.window.is_some() {
-            eprintln!("screen_off: window already open (screen_off must precede screen); ignored");
+        if !self.buf.is_empty() {
+            eprintln!("screen_off must precede screen; ignored");
             return;
         }
+        self.presenter = None;
         self.headless = true;
+    }
+
+    pub fn poll_input(&mut self) -> Option<(u8, u8)> {
+        self.presenter.as_mut().and_then(|p| p.poll())
     }
 
     pub fn configure(&mut self, w: usize, h: usize, format: u8) -> Result<(), String> {
         if format != 1 { return Err(format!("Screen: format {} unsupported (only 1=RGB565)", format)); }
         if w == 0 || h == 0 { return Err(format!("Screen: invalid size {}x{}", w, h)); }
-        if self.window.is_some() || (self.headless && !self.buf.is_empty()) {
+        #[cfg(not(feature = "gfx-desktop"))]
+        if w > MAX_DIM || h > MAX_DIM { return Err(format!("Screen: {}x{} exceeds web {}x{} budget", w, h, MAX_DIM, MAX_DIM)); }
+        if !self.buf.is_empty() {
             if self.w != w || self.h != h {
                 return Err("Screen: reconfigure with different size not supported".into());
             }
             return Ok(());
         }
-        if !self.headless {
-            let win = Window::new("posara", w, h, WindowOptions::default())
-                .map_err(|e| e.to_string())?;
-            self.window = Some(win);
-        }
+        if let Some(p) = self.presenter.as_mut() { p.configure(w, h)?; }
         self.w = w;
         self.h = h;
         self.format = format;
@@ -65,11 +74,8 @@ impl Framebuffer {
         self.buf[i] = blend565(self.buf[i], c, a);
     }
 
-    // Move the window to a desktop position. No-op when headless.
     pub fn win_pos(&mut self, x: i64, y: i64) {
-        if let Some(w) = self.window.as_mut() {
-            w.set_position(x as isize, y as isize);
-        }
+        if let Some(p) = self.presenter.as_mut() { p.set_pos(x, y); }
     }
 
     pub fn blit_4bpp<F: Fn(usize) -> u8>(
@@ -183,16 +189,20 @@ impl Framebuffer {
 
     pub fn commit(&mut self) -> Result<(), String> {
         self.commits += 1;
-        let Some(win) = self.window.as_mut() else { return Ok(()); };
-        self.alive = win.is_open();
-        if self.alive {
-            for (i, &p) in self.buf.iter().enumerate() {
-                self.out[i] = rgb565_to_rgb888(p);
-            }
-            win.update_with_buffer(&self.out, self.w, self.h).map_err(|e| e.to_string())?;
+        for (i, &p) in self.buf.iter().enumerate() {
+            self.out[i] = rgb565_to_rgba(p);
+        }
+        if let Some(pr) = self.presenter.as_mut() {
+            self.alive = pr.present(&self.buf)?;
         }
         Ok(())
     }
+}
+
+// canvas little-endian 0xAABBGGRR
+pub(crate) fn rgb565_to_rgba(c: u16) -> u32 {
+    let px = rgb565_to_rgb888(c);
+    0xFF00_0000 | ((px & 0xFF) << 16) | (px & 0xFF00) | ((px >> 16) & 0xFF)
 }
 
 fn blend565(d: u16, s: u16, a: u32) -> u16 {
@@ -209,7 +219,7 @@ fn blend565(d: u16, s: u16, a: u32) -> u16 {
     ((r << 11) | (g << 5) | b) as u16
 }
 
-fn rgb565_to_rgb888(c: u16) -> u32 {
+pub(crate) fn rgb565_to_rgb888(c: u16) -> u32 {
     let r = ((c >> 11) & 0x1F) as u32;
     let g = ((c >> 5)  & 0x3F) as u32;
     let b = ( c        & 0x1F) as u32;

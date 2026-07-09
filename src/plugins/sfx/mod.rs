@@ -47,8 +47,12 @@ impl SfxPlugin {
 
     // muted = no audio device (silent run, like --headless for sound).
     pub fn with_audio(root: PathBuf, muted: bool) -> Result<Self, String> {
+        #[cfg(feature = "sfx-desktop")]
+        let audio = if muted { Audio::silent()? } else { Audio::new()? };
+        #[cfg(not(feature = "sfx-desktop"))]
+        let audio = if muted { Audio::silent()? } else { Audio::web(44100)? };
         Ok(Self {
-            audio: if muted { Audio::silent()? } else { Audio::new()? },
+            audio,
             recorder: Rc::new(RefCell::new(None)),
             root,
         })

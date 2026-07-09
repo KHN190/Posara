@@ -59,6 +59,8 @@ fn fs_write_read_roundtrip() {
 }
 
 // fs_read returns a packed Bytes value; byte_at must recover the original bytes.
+// Reads a pre-existing on-disk file → real fs only (web MemStorage has no disk).
+#[cfg(feature = "gfx-desktop")]
 #[test]
 fn fs_read_bytes_roundtrip() {
     use std::io::Write;
