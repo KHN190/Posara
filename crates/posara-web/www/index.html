@@ -266,11 +266,12 @@ posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
 async function seedExamples() {
-  const files = ["acid.abe", "proj.abe", "curl_noise.abe", "diff_growth.abe", "cube_slice.abe"];
+  // acid + libs = code mode; invader.pk = a ready .pk so cart mode is visible too.
+  const files = ["acid.abe", "proj.abe", "curl_noise.abe", "diff_growth.abe", "cube_slice.abe", "invader.pk"];
   for (const f of files) {
     try {
-      const t = await (await fetch("examples/" + f)).text();
-      posara.add_file(f, enc.encode(t)); order.push(f);
+      const bytes = new Uint8Array(await (await fetch("examples/" + f)).arrayBuffer());
+      posara.add_file(f, bytes); order.push(f);
     } catch (e) { onSys("warn", "seed " + f + " failed"); }
   }
   active = posara.list_files().includes("acid.abe") ? "acid.abe" : null;
