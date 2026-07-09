@@ -31,7 +31,7 @@ const FRAME: Duration = Duration::from_micros(16_667);
 
 // Per-frame ops budget. Reaching this prints a rate-limited warning. Hard
 // mid-frame skip would need a mutable step_cap setter in myriad.
-const OPS_BUDGET: u64 = 500_000;
+pub const OPS_BUDGET: u64 = 500_000;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn mtime(p: &Path) -> Option<SystemTime> {

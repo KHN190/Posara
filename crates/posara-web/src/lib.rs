@@ -80,6 +80,8 @@ impl Posara {
     }
 
     pub fn sample_rate(&self) -> u32 { self.host.sfx.audio.sample_rate }
+    pub fn steps(&self) -> u64 { self.stepper.as_ref().map(|s| s.steps()).unwrap_or(0) }
+    pub fn max_ops(&self) -> u64 { posara::runner::OPS_BUDGET }
 
     // cart stdout since last drain (println etc). Frontend tags it as cart output.
     pub fn drain_stdout(&self) -> String {

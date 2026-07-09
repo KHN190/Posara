@@ -14,7 +14,7 @@
   header h1 { font-size:16px; letter-spacing:2px; text-transform:uppercase; margin-right:6px; }
   header .dot { color:var(--accent); }
   header #stat { color:var(--accent); font-size:12px; }
-  header #fps { color:#666; font-size:12px; margin-right:auto; }
+  header #fps { margin-right:auto; height:16px; image-rendering:pixelated; }
   header button { background:none; color:var(--fg); cursor:pointer; font:inherit; }
   header .act { background:var(--accent); color:#000; border:none; padding:5px 16px;
     text-transform:uppercase; letter-spacing:1px; font-size:12px; }
@@ -99,7 +99,7 @@
   <button class="act" id="run" data-t="run" title="⌘/Ctrl+Enter">Run</button>
   <button class="act" id="stop" data-t="stop" title="Esc">Stop</button>
   <span id="stat"></span>
-  <span id="fps"></span>
+  <canvas id="fps" width="48" height="16" title="draw throughput"></canvas>
   <button id="lang" class="langtog"><span class="seg" data-l="en"><b>EN</b></span><span class="seg" data-l="zh"><b>中</b></span></button>
 </header>
 <div class="row">
@@ -261,7 +261,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 let posara, running = false, active = null, order = [];
 let audioCtx = null, audioNode = null, pump = null;
 
-await init("./pkg/posara_web_bg.wasm?v=11");
+await init("./pkg/posara_web_bg.wasm?v=12");
 posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
@@ -470,6 +470,38 @@ async function startAudio() {
 // ---- render ----
 const cv = $("cv"), ctx = cv.getContext("2d");
 let img = null, frames = 0, t0 = 0;
+// manhattan plot: gray = draw fps, green (overlaid, shorter) = ops/frame vs budget.
+// One bar per 500ms, newest on the right; keeps scrolling even when stopped.
+const fpsHist = [], opsHist = [], FBARS = 10;
+let lastSteps = 0;
+function drawFps() {
+  const c = $("fps"), x = c.getContext("2d"), W = c.width, H = c.height, bw = W / FBARS;
+  x.clearRect(0, 0, W, H);
+  for (let i = 0; i < fpsHist.length; i++) {
+    const bx = W - (i + 1) * bw;
+    const g = Math.max(1, Math.min(fpsHist[fpsHist.length-1-i], 60) / 60 * H);
+    x.fillStyle = "#555";
+    x.fillRect(bx, H - g, bw - 1, g);                    // gray: fps
+    const o = opsHist[opsHist.length-1-i] || 0;
+    if (o > 0) {
+      const oh = Math.max(1, Math.min(o, 1) * H);
+      x.fillStyle = "#72dec2";
+      x.fillRect(bx + 1, H - oh, bw - 3, oh);             // green: ops, narrower + in front
+    }
+  }
+}
+setInterval(() => {                                       // sample every 500ms, always
+  const dt = performance.now() - (t0 || performance.now());
+  const fps = t0 ? frames * 1000 / dt : 0;
+  const steps = posara ? Number(posara.steps()) : 0;     // u64 → BigInt; coerce to Number
+  const opsPerFrame = frames > 0 ? (steps - lastSteps) / frames : 0;
+  const maxOps = posara ? Number(posara.max_ops()) : 0;
+  const ops = maxOps ? opsPerFrame / maxOps : 0;
+  fpsHist.push(running ? fps : 0); if (fpsHist.length > FBARS) fpsHist.shift();
+  opsHist.push(running ? ops : 0); if (opsHist.length > FBARS) opsHist.shift();
+  drawFps();
+  lastSteps = steps; frames = 0; t0 = performance.now();
+}, 500);
 function draw() {
   if (!running) return;
   try {
@@ -488,9 +520,7 @@ function draw() {
       img.data.set(posara.framebuffer());
       ctx.putImageData(img,0,0);
     }
-    frames++;
-    const now = performance.now();
-    if (now-t0>500) { $("fps").textContent=(frames*1000/(now-t0)|0)+" fps"; frames=0; t0=now; }
+    frames++;                                            // sampled by the 500ms interval
     if (cont === false) { log(T("ended")); stop(); return; }
   } catch (e) { onSys("error", T("runErr")+e, e && e.stack); stop(); return; }
   requestAnimationFrame(draw);

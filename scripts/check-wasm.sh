@@ -80,6 +80,32 @@ try {
 ok(errored, "missing module should error, not silently pass");
 console.log("missing-module error ok");
 
+// 7. game save: a cart writes a save file (F_WRITE|F_CREATE = 6), a later run
+// reads it back — proves saves persist in the sandbox across runs.
+const D = new TextDecoder();
+p.load_src(`@cart
+fn main() -> <frame, Graphics, IO> Unit {
+  let fd = fs_open("save.dat", 6);
+  let _ = fs_writes(fd, "42");
+  let _ = fs_close(fd);
+  gfx_screen(4, 4);
+  loop { gfx_cls(0); gfx_commit(); frame.present() }
+}`);
+p.frame();
+ok(p.list_files().includes("save.dat"), "save file not created in sandbox");
+ok(D.decode(p.read_file("save.dat")) === "42", "save content wrong");
+p.load_src(`@cart
+fn main() -> <frame, Graphics, IO> Unit {
+  let fd = fs_open("save.dat", 1);
+  let b = fs_read(fd, 2);
+  let _ = fs_close(fd);
+  gfx_screen(b.byte_at(0), b.byte_at(1));
+  loop { gfx_cls(0); gfx_commit(); frame.present() }
+}`);
+p.frame();
+ok(p.width() === 52 && p.height() === 50, `save not read back (${p.width()}x${p.height()})`);
+console.log("game save/load ok (write → persist → read across runs)");
+
 console.log("ALL WASM CHECKS PASSED");
 EOF
 
