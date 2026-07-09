@@ -1,0 +1,219 @@
+// Differential growth on a closed strand. State (point arrays) lives in a Diff
+// record; dg_init/dg_step/dg_grow take &mut Diff. Per-step scratch is local.
+// Two instances (s=0 flat, s=1 volumetric) share flat arrays indexed s*DMAX+i.
+const DMAX: Int = 64;
+const DSTART: Int = 20;
+
+pub type Diff = {
+  dgx: Array<Float>, dgy: Array<Float>, dgz: Array<Float>, dgn: Array<Int>,
+  // per-step scratch, allocated once and reused (memory cheaper than re-alloc).
+  rax: Array<Float>, ray: Array<Float>, raz: Array<Float>, cnt: Array<Int>,
+  fax: Array<Float>, fay: Array<Float>, faz: Array<Float>,
+  gtx: Array<Float>, gty: Array<Float>, gtz: Array<Float>
+}
+
+pub fn dg_new() -> Diff {
+  Diff {
+    dgx: [0.0; 128], dgy: [0.0; 128], dgz: [0.0; 128], dgn: [0; 2],
+    rax: [0.0; 64], ray: [0.0; 64], raz: [0.0; 64], cnt: [0; 64],
+    fax: [0.0; 64], fay: [0.0; 64], faz: [0.0; 64],
+    gtx: [0.0; 64], gty: [0.0; 64], gtz: [0.0; 64]
+  }
+}
+
+fn itof(v: Int) -> Float { v.to_f() }
+fn rrange(a: Float, b: Float) -> <nondet> Float { a + rand() * (b - a) }
+
+fn safe(v: Float) -> Float {
+  if v > 300.0 { 300.0 }
+  else if v < 0.0 - 300.0 { 0.0 - 300.0 }
+  else if v == v { v }
+  else { 0.0 }
+}
+
+pub fn dg_init(d: &mut Diff, s: Int) -> <nondet> Unit {
+  let base = s * DMAX;
+  let zsp = if s == 0 { 4.0 } else { 16.0 };
+  let r = 26.0;
+  let dn = DSTART;
+  let mut i = 0;
+  while i < DSTART {
+    let a = itof(i) / itof(dn) * 6.2832;
+    d.dgx[base + i] = cos(a) * r + rrange(0.0 - 2.0, 2.0);
+    d.dgy[base + i] = sin(a) * r + rrange(0.0 - 2.0, 2.0);
+    d.dgz[base + i] = rrange(0.0 - zsp, zsp);
+    i = i + 1
+  };
+  d.dgn[s] = DSTART
+}
+
+pub fn dg_step(d: &mut Diff, s: Int) -> <nondet> Unit {
+  let base = s * DMAX;
+  let n = d.dgn[s];
+  let rr = 23.0;
+  let rr2 = rr * rr;
+  let rep_f = 0.7;
+  let align = if s == 0 { 0.4 } else { 0.3 };
+  let att_f = 0.2;
+  let min_e2 = 36.0;
+  let big_r = if s == 0 { 104.0 } else { 110.0 };
+  let big_r2 = big_r * big_r;
+  let max_spd = 1.7;
+  let max_spd2 = max_spd * max_spd;
+
+  let mut zz = 0;
+  while zz < n {
+    d.rax[zz] = 0.0;  d.ray[zz] = 0.0;  d.raz[zz] = 0.0;  d.cnt[zz] = 0;
+    zz = zz + 1
+  };
+
+  let mut i = 0;
+  while i < n {
+    let bi = base + i;
+    let ix = d.dgx[bi];
+    let iy = d.dgy[bi];
+    let iz = d.dgz[bi];
+    let mut j = i + 1;
+    while j < n {
+      let bj = base + j;
+      let ex = ix - d.dgx[bj];
+      let ey = iy - d.dgy[bj];
+      let ez = iz - d.dgz[bj];
+      let d2 = ex * ex + ey * ey + ez * ez;
+      if d2 < rr2 {
+        if d2 > 0.25 {
+          let dd = sqrt(d2);
+          let w = (rr - dd) / (rr * dd);
+          let wx = ex * w;
+          let wy = ey * w;
+          let wz = ez * w;
+          d.rax[i] = d.rax[i] + wx;  d.ray[i] = d.ray[i] + wy;  d.raz[i] = d.raz[i] + wz;  d.cnt[i] = d.cnt[i] + 1;
+          d.rax[j] = d.rax[j] - wx;  d.ray[j] = d.ray[j] - wy;  d.raz[j] = d.raz[j] - wz;  d.cnt[j] = d.cnt[j] + 1
+        }
+      };
+      j = j + 1
+    };
+    i = i + 1
+  };
+
+  let mut p = 0;
+  while p < n {
+    let bp = base + p;
+    let px = d.dgx[bp];
+    let py = d.dgy[bp];
+    let pz = d.dgz[bp];
+    let mut fx = 0.0;
+    let mut fy = 0.0;
+    let mut fz = 0.0;
+    let c = d.cnt[p];
+    if c > 0 {
+      let cf = rep_f * rr / itof(c);
+      fx = fx + d.rax[p] * cf;
+      fy = fy + d.ray[p] * cf;
+      fz = fz + d.raz[p] * cf
+    };
+
+    let pi = if p == 0 { n - 1 } else { p - 1 };
+    let ni = if p == n - 1 { 0 } else { p + 1 };
+    let bpi = base + pi;
+    let bni = base + ni;
+    let prx = d.dgx[bpi];
+    let pry = d.dgy[bpi];
+    let prz = d.dgz[bpi];
+    let nxx = d.dgx[bni];
+    let nxy = d.dgy[bni];
+    let nxz = d.dgz[bni];
+    let dpx = prx - px;
+    let dpy = pry - py;
+    let dpz = prz - pz;
+    if dpx * dpx + dpy * dpy + dpz * dpz > min_e2 {
+      fx = fx + dpx * att_f;
+      fy = fy + dpy * att_f;
+      fz = fz + dpz * att_f
+    };
+    let dnx = nxx - px;
+    let dny = nxy - py;
+    let dnz = nxz - pz;
+    if dnx * dnx + dny * dny + dnz * dnz > min_e2 {
+      fx = fx + dnx * att_f;
+      fy = fy + dny * att_f;
+      fz = fz + dnz * att_f
+    };
+
+    fx = fx + ((prx + nxx) * 0.5 - px) * align;
+    fy = fy + ((pry + nxy) * 0.5 - py) * align;
+    fz = fz + ((prz + nxz) * 0.5 - pz) * align;
+
+    let mg2 = px * px + py * py + pz * pz;
+    if mg2 > big_r2 {
+      let mg = sqrt(mg2);
+      let pl = (mg - big_r) * 0.06 / mg;
+      fx = fx - px * pl;
+      fy = fy - py * pl;
+      fz = fz - pz * pl
+    };
+
+    fx = fx + rrange(0.0 - 0.14, 0.14);
+    fy = fy + rrange(0.0 - 0.14, 0.14);
+    fz = fz + rrange(0.0 - 0.14, 0.14);
+
+    let fm2 = fx * fx + fy * fy + fz * fz;
+    if fm2 > max_spd2 {
+      let fm = sqrt(fm2);
+      let k = max_spd / fm;
+      fx = fx * k;
+      fy = fy * k;
+      fz = fz * k
+    };
+    d.fax[p] = fx;
+    d.fay[p] = fy;
+    d.faz[p] = fz;
+    p = p + 1
+  };
+
+  let mut m = 0;
+  while m < n {
+    let bm = base + m;
+    d.dgx[bm] = safe(d.dgx[bm] + d.fax[m]);
+    d.dgy[bm] = safe(d.dgy[bm] + d.fay[m]);
+    d.dgz[bm] = safe(d.dgz[bm] + d.faz[m]);
+    m = m + 1
+  }
+}
+
+pub fn dg_grow(d: &mut Diff, s: Int) -> Unit {
+  let base = s * DMAX;
+  let n = d.dgn[s];
+  let max_e = 11.0;
+  let mut out = 0;
+  let mut i = 0;
+  while i < n {
+    if out < DMAX {
+      d.gtx[out] = d.dgx[base + i];
+      d.gty[out] = d.dgy[base + i];
+      d.gtz[out] = d.dgz[base + i];
+      out = out + 1
+    };
+    let ni = if i == n - 1 { 0 } else { i + 1 };
+    let dx = d.dgx[base + ni] - d.dgx[base + i];
+    let dy = d.dgy[base + ni] - d.dgy[base + i];
+    let dz = d.dgz[base + ni] - d.dgz[base + i];
+    if sqrt(dx * dx + dy * dy + dz * dz) > max_e {
+      if out < DMAX {
+        d.gtx[out] = (d.dgx[base + i] + d.dgx[base + ni]) * 0.5;
+        d.gty[out] = (d.dgy[base + i] + d.dgy[base + ni]) * 0.5;
+        d.gtz[out] = (d.dgz[base + i] + d.dgz[base + ni]) * 0.5;
+        out = out + 1
+      }
+    };
+    i = i + 1
+  };
+  let mut k = 0;
+  while k < out {
+    d.dgx[base + k] = d.gtx[k];
+    d.dgy[base + k] = d.gty[k];
+    d.dgz[base + k] = d.gtz[k];
+    k = k + 1
+  };
+  d.dgn[s] = out
+}

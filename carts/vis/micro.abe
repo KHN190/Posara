@@ -2,24 +2,24 @@
 
 type Rng = { s: Int }
 
-fn load_font() -> <IO> Array<Int> {
+fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
   let data = fs_read(fd, 1520);
   let _ = fs_close(fd);
   data
 }
 
-fn glyph(font: &Array<Int>, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
-  if cp >= 32 { if cp < 127 { blitg(font.clone(), (cp - 32) * 128, x, y, 8, 16, color, mode) } }
+fn glyph(font: &Bytes, cp: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+  if cp >= 32 { if cp < 127 { gfx_blitg(font, (cp - 32) * 128, x, y, 8, 16, color, mode) } }
 }
 
-fn draw_text(font: &Array<Int>, codes: Array<Int>, n: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn draw_text(font: &Bytes, codes: Array<Int>, n: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   let mut i = 0;
   let mut cx = x;
   while i < n { glyph(font, codes[i], cx, y, color, mode); cx = cx + 8; i = i + 1 }
 }
 
-fn draw_int(font: &Array<Int>, v: Int, digits: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
+fn draw_int(font: &Bytes, v: Int, digits: Int, x: Int, y: Int, color: Int, mode: Int) -> <Graphics> Unit {
   let mut val = if v < 0 { 0 - v } else { v };
   let mut i = 0;
   while i < digits {
@@ -42,18 +42,18 @@ fn fill_checker(x: Int, y: Int, w: Int, h: Int, color: Int) -> <Graphics> Unit {
   let mut yy = 0;
   while yy < h {
     let mut xx = (yy % 2);
-    while xx < w { pset(x + xx, y + yy, color); xx = xx + 2 };
+    while xx < w { gfx_pset(x + xx, y + yy, color); xx = xx + 2 };
     yy = yy + 1
   }
 }
 
-fn draw_label(font: &Array<Int>, x: Int, y: Int, code: Int) -> <Graphics> Unit {
-  rectb(x - 2, y - 2, 76, 20, 0x0000);
+fn draw_label(font: &Bytes, x: Int, y: Int, code: Int) -> <Graphics> Unit {
+  gfx_rectb(x - 2, y - 2, 76, 20, 0x0000);
   draw_text(font, [76, 79, 84, 45], 4, x, y, 0x0000, 0);   // "LOT-"
   draw_int(font, code, 4, x + 36, y, 0x0000, 0)
 }
 
-fn draw_error_code(font: &Array<Int>, x: Int, y: Int, code: Int, repeat: Int) -> <Graphics> Unit {
+fn draw_error_code(font: &Bytes, x: Int, y: Int, code: Int, repeat: Int) -> <Graphics> Unit {
   let mut i = 0;
   while i < repeat {
     draw_text(font, [69, 82, 82, 45], 4, x, y + i * 18, 0x0000, 0);   // "ERR-"
@@ -67,21 +67,21 @@ fn draw_barcode(r: &mut Rng, x: Int, y: Int, w: Int, h: Int) -> <Graphics> Unit 
   let x1 = x + w;
   while cx < x1 {
     let bw = 1 + rnd_mod(r, 3);
-    if rnd_mod(r, 2) == 0 { rect(cx, y, bw, h, 0x0000) };
+    if rnd_mod(r, 2) == 0 { gfx_rect(cx, y, bw, h, 0x0000) };
     cx = cx + bw + 1
   }
 }
 
-fn draw_metric(font: &Array<Int>, x: Int, y: Int, value: Int) -> <Graphics> Unit {
+fn draw_metric(font: &Bytes, x: Int, y: Int, value: Int) -> <Graphics> Unit {
   draw_text(font, [77, 65, 88, 32, 71, 82], 6, x, y, 0x0000, 0);       // "MAX GR"
   draw_int(font, value, 5, x, y + 18, 0x0000, 0);
   draw_text(font, [75, 71, 83], 3, x + 48, y + 18, 0x0000, 0)          // "KGS"
 }
 
-fn draw_status_box(font: &Array<Int>, x: Int, y: Int, ok: Int) -> <Graphics> Unit {
-  rectb(x, y, 96, 22, 0x0000);
+fn draw_status_box(font: &Bytes, x: Int, y: Int, ok: Int) -> <Graphics> Unit {
+  gfx_rectb(x, y, 96, 22, 0x0000);
   if ok == 1 {
-    rect(x + 2, y + 2, 92, 18, 0x0000);
+    gfx_rect(x + 2, y + 2, 92, 18, 0x0000);
     draw_text(font, [79, 75], 2, x + 8, y + 3, 0xffff, 1)
   } else {
     draw_text(font, [70, 65, 73, 76], 4, x + 8, y + 3, 0x0000, 0)
@@ -90,7 +90,7 @@ fn draw_status_box(font: &Array<Int>, x: Int, y: Int, ok: Int) -> <Graphics> Uni
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
-  screen(480, 320);
+  gfx_screen(480, 320);
   let font = load_font();
   let mut rng = Rng { s: 305419896 };
   loop {
@@ -98,7 +98,7 @@ fn main() -> <frame, Graphics, IO> Unit {
     let layout = t / 5000;
     rng.s = (layout * 2654435761 + 1) % 2147483648;   // layout-stable seed each frame
 
-    cls(0xffff);
+    gfx_cls(0xffff);
     fill_checker(0, 0, 480, 10, 0x0000);
     draw_text(&font, [80, 79, 83, 65, 82, 65, 32, 73, 78, 68], 10, 12, 16, 0x0000, 0);  // "POSARA IND"
 
@@ -114,20 +114,20 @@ fn main() -> <frame, Graphics, IO> Unit {
     draw_error_code(&font, 16, 130, scroll, 5);
 
     let rot = (t / 1000) % 4;
-    blitg(font.clone(), (65 - 32) * 128, 230, 150, 8, 16, 0x0000, rot * 16);
+    gfx_blitg(&font, (65 - 32) * 128, 230, 150, 8, 16, 0x0000, rot * 16);
 
     let mut i = 0;
     while i < 24 {
       let dx = rnd_mod(&mut rng, 460);
       let dy = 200 + rnd_mod(&mut rng, 110);
-      rect(dx, dy, 2, 2, 0x0000);
+      gfx_rect(dx, dy, 2, 2, 0x0000);
       i = i + 1
     };
 
     let sy = (t / 30) % 320;
-    rect(0, sy, 480, 1, 0x0000);
+    gfx_rect(0, sy, 480, 1, 0x0000);
 
-    device_in(0x2001, 1);
+    gfx_commit();
     frame.present()
   }
 }

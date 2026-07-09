@@ -11,7 +11,7 @@ static REAL: Array<Int> = [
   0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-fn load_sheet() -> <IO> Array<Int> {
+fn load_sheet() -> <IO> Bytes {
   let fd = fs_open("assets/slash.spr", 1);
   let data = fs_read(fd, BYTES);
   let _ = fs_close(fd);
@@ -20,15 +20,15 @@ fn load_sheet() -> <IO> Array<Int> {
 
 @cart
 fn main() -> <frame, Graphics, IO> Unit {
-  screen(480, 320);
-  for i in 0..16 { pal(i, REAL[i]) };
+  gfx_screen(480, 320);
+  for i in 0..16 { gfx_pal(i, REAL[i]) };
   let sheet = load_sheet();
   loop {
     let t = now();
     let f = t / 83 % NF;
-    cls(0x0000);
-    sprite(sheet.clone(), f * FW * FH, 208, 88, FW, FH, 100);
-    device_in(0x2001, 1);
+    gfx_cls(0x0000);
+    gfx_sprite(&sheet, f * FW * FH, 208, 88, FW, FH, 100, 256);
+    gfx_commit();
     frame.present()
   }
 }

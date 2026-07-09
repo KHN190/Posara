@@ -1,13 +1,11 @@
 # Input
 
-uxn-style controller: an 8-button bitmap plus the last ASCII key.
+An 8-button bitmap plus the last ASCII key.
 
 ```rust
-let buttons = device_out(0x8002);   // 8-button bitmap
-let key     = device_out(0x8003);   // last ASCII key code
+let buttons = in_buttons();   // 8-button bitmap
+let key     = in_key();       // last ASCII key code
 ```
-
-(Corresponds to uxn controller ports 0x82 / 0x83.)
 
 ## Button bits
 
@@ -26,13 +24,23 @@ let key     = device_out(0x8003);   // last ASCII key code
 
 ## Example
 
-How `carts/games/invader.abe` tests a bit (no bitwise operator — division + modulo):
-
 ```rust
-fn bit_set(v: Int, mask: Int) -> Int { v / mask % 2 }
+type Btn = A | B | Select | Start | Up | Down | Left | Right;
 
-let b = device_out(0x8002);
-if bit_set(b, 0x80) == 1 { /* Right */ };
-if bit_set(b, 0x10) == 1 { /* Up */ };
-if bit_set(b, 0x01) == 1 { /* A */ };
+fn btn_mask(b: Btn) -> Int {
+  match b {
+    A => 0x01, B => 0x02, Select => 0x04, Start => 0x08,
+    Up => 0x10, Down => 0x20, Left => 0x40, Right => 0x80,
+  }
+}
+fn keydown(bits: Int, b: Btn) -> Bool { (bits & btn_mask(b)) != 0 }
+
+let bits = in_buttons();
+if keydown(bits, Up) { /* Up */ };
+if keydown(bits, A)  { /* A  */ };
 ```
+
+## API
+
+- `in_buttons() -> Int` `<IO>` — 8-button bitmap.
+- `in_key() -> Int` `<IO>` — last ASCII key code.

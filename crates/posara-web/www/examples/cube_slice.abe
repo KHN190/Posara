@@ -1,0 +1,245 @@
+// Cube lattice growth: 9 in-plane differential-growth loops. State in a Cube
+// record (cb_new); cb_init/cb_step/cb_grow/cb_map take &mut Cube. The cart reads
+// cb3x/cb3y/cb3z/cbn to draw. Per-step scratch is local.
+
+const NSL: Int = 9;
+const SMAX: Int = 48;
+const SQ: Float = 18.0;
+
+pub type Cube = {
+  cbpx: Array<Float>, cbpy: Array<Float>, cbn: Array<Int>,
+  cb3x: Array<Float>, cb3y: Array<Float>, cb3z: Array<Float>,
+  phase: Int,
+  // per-step scratch, allocated once and reused.
+  trx: Array<Float>, try_: Array<Float>, tcnt: Array<Int>,
+  tfx: Array<Float>, tfy: Array<Float>,
+  gtx: Array<Float>, gty: Array<Float>
+}
+
+pub fn cb_new() -> Cube {
+  Cube {
+    cbpx: [0.0; 432], cbpy: [0.0; 432], cbn: [0; 9],
+    cb3x: [0.0; 432], cb3y: [0.0; 432], cb3z: [0.0; 432],
+    phase: 0,
+    trx: [0.0; 48], try_: [0.0; 48], tcnt: [0; 48],
+    tfx: [0.0; 48], tfy: [0.0; 48],
+    gtx: [0.0; 48], gty: [0.0; 48]
+  }
+}
+
+fn itof(v: Int) -> Float { v.to_f() }
+fn rrange(a: Float, b: Float) -> <nondet> Float { a + rand() * (b - a) }
+
+fn safe(v: Float) -> Float {
+  if v > 400.0 { 400.0 }
+  else if v < 0.0 - 400.0 { 0.0 - 400.0 }
+  else if v == v { v }
+  else { 0.0 }
+}
+
+pub fn cb_init(c: &mut Cube) -> <nondet> Unit {
+  let mut s = 0;
+  while s < NSL {
+    let base = s * SMAX;
+    let jx = rrange(0.0 - 4.0, 4.0);
+    let jy = rrange(0.0 - 4.0, 4.0);
+    let r = 16.0;
+    let n = 24;
+    let mut i = 0;
+    while i < n {
+      let a = itof(i) / itof(n) * 6.2832;
+      c.cbpx[base + i] = cos(a) * r + jx;
+      c.cbpy[base + i] = sin(a) * r + jy;
+      i = i + 1
+    };
+    c.cbn[s] = n;
+    s = s + 1
+  }
+}
+
+pub fn cb_step(c: &mut Cube) -> <nondet> Unit {
+  let rr = 14.0;
+  let rr2 = 196.0;
+  let rep_f = 0.8;
+  let align = 0.4;
+  let att_f = 0.2;
+  let min_e2 = 36.0;
+  let rad = 60.0;
+  let rad2 = 3600.0;
+  let max_spd = 1.6;
+  let max_spd2 = 2.56;
+
+  let phase = c.phase;
+  c.phase = if phase == 0 { 1 } else { 0 };
+
+  let mut s = phase;
+  while s < NSL {
+    let base = s * SMAX;
+    let n = c.cbn[s];
+
+    let mut z = 0;
+    while z < n {
+      c.trx[z] = 0.0;
+      c.try_[z] = 0.0;
+      c.tcnt[z] = 0;
+      z = z + 1
+    };
+
+    let mut i = 0;
+    while i < n {
+      let bi = base + i;
+      let px = c.cbpx[bi];
+      let py = c.cbpy[bi];
+      let mut j = i + 1;
+      while j < n {
+        let bj = base + j;
+        let dx = px - c.cbpx[bj];
+        let dy = py - c.cbpy[bj];
+        let d2 = dx * dx + dy * dy;
+        if d2 < rr2 {
+          if d2 > 0.25 {
+            let dd = sqrt(d2);
+            let w = (rr - dd) / (rr * dd);
+            let wx = dx * w;
+            let wy = dy * w;
+            c.trx[i] = c.trx[i] + wx;  c.try_[i] = c.try_[i] + wy;  c.tcnt[i] = c.tcnt[i] + 1;
+            c.trx[j] = c.trx[j] - wx;  c.try_[j] = c.try_[j] - wy;  c.tcnt[j] = c.tcnt[j] + 1
+          }
+        };
+        j = j + 1
+      };
+      i = i + 1
+    };
+
+    let mut p = 0;
+    while p < n {
+      let bp = base + p;
+      let px = c.cbpx[bp];
+      let py = c.cbpy[bp];
+      let mut fx = 0.0;
+      let mut fy = 0.0;
+      let cc = c.tcnt[p];
+      if cc > 0 {
+        let cf = rep_f * rr / itof(cc);
+        fx = fx + c.trx[p] * cf;
+        fy = fy + c.try_[p] * cf
+      };
+
+      let pi = if p == 0 { n - 1 } else { p - 1 };
+      let ni = if p == n - 1 { 0 } else { p + 1 };
+      let prx = c.cbpx[base + pi];
+      let pry = c.cbpy[base + pi];
+      let nxx = c.cbpx[base + ni];
+      let nxy = c.cbpy[base + ni];
+      let dpx = prx - px;
+      let dpy = pry - py;
+      if dpx * dpx + dpy * dpy > min_e2 {
+        fx = fx + dpx * att_f;
+        fy = fy + dpy * att_f
+      };
+      let dnx = nxx - px;
+      let dny = nxy - py;
+      if dnx * dnx + dny * dny > min_e2 {
+        fx = fx + dnx * att_f;
+        fy = fy + dny * att_f
+      };
+
+      fx = fx + ((prx + nxx) * 0.5 - px) * align;
+      fy = fy + ((pry + nxy) * 0.5 - py) * align;
+
+      let mg2 = px * px + py * py;
+      if mg2 > rad2 {
+        let mg = sqrt(mg2);
+        let pl = (mg - rad) * 0.07 / mg;
+        fx = fx - px * pl;
+        fy = fy - py * pl
+      };
+
+      fx = fx + rrange(0.0 - 0.14, 0.14);
+      fy = fy + rrange(0.0 - 0.14, 0.14);
+
+      let fm2 = fx * fx + fy * fy;
+      if fm2 > max_spd2 {
+        let fm = sqrt(fm2);
+        let k = max_spd / fm;
+        fx = fx * k;
+        fy = fy * k
+      };
+      c.tfx[p] = fx;
+      c.tfy[p] = fy;
+      p = p + 1
+    };
+
+    let mut m = 0;
+    while m < n {
+      let bm = base + m;
+      c.cbpx[bm] = safe(c.cbpx[bm] + c.tfx[m]);
+      c.cbpy[bm] = safe(c.cbpy[bm] + c.tfy[m]);
+      m = m + 1
+    };
+    s = s + 2
+  }
+}
+
+pub fn cb_grow(c: &mut Cube) -> Unit {
+  let max_e = 11.0;
+  let mut s = 0;
+  while s < NSL {
+    let base = s * SMAX;
+    let n = c.cbn[s];
+    let mut out = 0;
+    let mut i = 0;
+    while i < n {
+      if out < SMAX {
+        c.gtx[out] = c.cbpx[base + i];
+        c.gty[out] = c.cbpy[base + i];
+        out = out + 1
+      };
+      let ni = if i == n - 1 { 0 } else { i + 1 };
+      let dx = c.cbpx[base + ni] - c.cbpx[base + i];
+      let dy = c.cbpy[base + ni] - c.cbpy[base + i];
+      if sqrt(dx * dx + dy * dy) > max_e {
+        if out < SMAX {
+          c.gtx[out] = (c.cbpx[base + i] + c.cbpx[base + ni]) * 0.5;
+          c.gty[out] = (c.cbpy[base + i] + c.cbpy[base + ni]) * 0.5;
+          out = out + 1
+        }
+      };
+      i = i + 1
+    };
+    let mut k = 0;
+    while k < out {
+      c.cbpx[base + k] = c.gtx[k];
+      c.cbpy[base + k] = c.gty[k];
+      k = k + 1
+    };
+    c.cbn[s] = out;
+    s = s + 1
+  }
+}
+
+pub fn cb_map(c: &mut Cube) -> Unit {
+  let mut s = 0;
+  while s < NSL {
+    let base = s * SMAX;
+    let n = c.cbn[s];
+    let orient = s / 3;
+    let k = s - orient * 3;
+    let off = itof(k - 1) * SQ;
+    let mut i = 0;
+    while i < n {
+      let b = base + i;
+      let u = c.cbpx[b];
+      let v = c.cbpy[b];
+      if orient == 0 {
+        c.cb3x[b] = u;    c.cb3y[b] = v;    c.cb3z[b] = off
+      } else if orient == 1 {
+        c.cb3x[b] = off;  c.cb3y[b] = u;    c.cb3z[b] = v
+      } else {
+        c.cb3x[b] = u;    c.cb3y[b] = off;  c.cb3z[b] = v
+      };
+      i = i + 1
+    };
+    s = s + 1
+  }
+}

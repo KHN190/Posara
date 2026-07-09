@@ -20,33 +20,33 @@ static ROOT: Array<Int> = [33, 33, 40, 36];
 fn ri(n: Int) -> <nondet> Int { (rand() * n.to_f()).to_i() }
 
 fn setup_synth() -> <IO> Unit {
-  synth_voices(16);
+  snd_voices(16);
   // 0 = punchy 808 kick with pitch drop.
-  synth_osc(0, 0, 1, 0, 0, 100);
-  synth_filter(0, 0, 1300, 7);
-  synth_env(0, 0, 0, 100, 0, 150, 0, 60);
-  synth_env(0, 1, 2, 34, 0, 70, 0, 0);
+  snd_osc(0, 0, 1, 0, 0, 100);
+  snd_filter(0, 0, 1300, 7);
+  snd_env(0, 0, 0, 100, 0, 150, 0, 60);
+  snd_env(0, 1, 2, 34, 0, 70, 0, 0);
 
   // 1 = detuned square bass, snappy.
-  synth_osc(1, 0, 0, 0, 0, 100);
-  synth_unison(1, 2, 8);
-  synth_filter(1, 0, 1200, 40);
-  synth_env(1, 0, 0, 100, 1, 70, 15, 50);
+  snd_osc(1, 0, 0, 0, 0, 100);
+  snd_unison(1, 2, 8);
+  snd_filter(1, 0, 1200, 40);
+  snd_env(1, 0, 0, 100, 1, 70, 15, 50);
 
   // 2 = snare: noise burst, mid band.
-  synth_osc(2, 0, 4, 0, 0, 100);
-  synth_filter(2, 2, 1900, 36);
-  synth_env(2, 0, 0, 100, 0, 95, 0, 40);
+  snd_osc(2, 0, 4, 0, 0, 100);
+  snd_filter(2, 2, 1900, 36);
+  snd_env(2, 0, 0, 100, 0, 95, 0, 40);
 
   // 3 = tight metallic hat.
-  synth_osc(3, 0, 4, 0, 0, 85);
-  synth_filter(3, 1, 8200, 12);
-  synth_env(3, 0, 0, 100, 0, 28, 0, 14);
+  snd_osc(3, 0, 4, 0, 0, 85);
+  snd_filter(3, 1, 8200, 12);
+  snd_env(3, 0, 0, 100, 0, 28, 0, 14);
 
   // 4 = lead: bright saw, short, a touch of ring.
-  synth_osc(4, 0, 3, 0, 0, 85);
-  synth_filter(4, 1, 2600, 22);
-  synth_env(4, 0, 0, 100, 2, 90, 10, 150)
+  snd_osc(4, 0, 3, 0, 0, 85);
+  snd_filter(4, 1, 2600, 22);
+  snd_env(4, 0, 0, 100, 2, 90, 10, 150)
 }
 
 // bass offset for the current section's pattern.
@@ -59,23 +59,23 @@ fn play_step(pos: Int, bar: Int, bsect: Int, lead_on: Int, fill: Int) -> <IO, no
   let kick_on = b < 48 || b >= 56;        // dropout 48..55
   let snare_on = b >= 16 && kick_on;
 
-  if kick_on && KICK[pos] == 1 { synth_on(0, 34, 92, 150) };
-  if snare_on && SNARE[pos] == 1 { synth_on(2, 62, 70, 95) };
-  if HAT[pos] == 1 { synth_on(3, 74, 30 + ri(16), 28) };
+  if kick_on && KICK[pos] == 1 { snd_on(0, 34, 92, 150) };
+  if snare_on && SNARE[pos] == 1 { snd_on(2, 62, 70, 95) };
+  if HAT[pos] == 1 { snd_on(3, 74, 30 + ri(16), 28) };
   // hat roll fill: last quarter of a section-ending bar.
-  if fill == 1 && pos >= 12 { synth_on(3, 76, 40 + ri(12), 24) };
+  if fill == 1 && pos >= 12 { snd_on(3, 76, 40 + ri(12), 24) };
 
   let root = ROOT[bar % 4];
   if b >= 8 {
     let bn = bass_at(bsect, pos);
     if bn != 0 {
       let semi = if bn == 99 { 0 } else { bn };
-      synth_on(1, root + semi, 70 + ri(14), 110)
+      snd_on(1, root + semi, 70 + ri(14), 110)
     }
   };
   if lead_on == 1 {
     let ln = LEAD[pos];
-    if ln != 0 { synth_on(4, root + 24 + ln - 12, 56 + ri(10), 150) }
+    if ln != 0 { snd_on(4, root + 24 + ln - 12, 56 + ri(10), 150) }
   }
 }
 
@@ -105,7 +105,7 @@ fn main() -> <frame, IO, nondet> Unit {
         let want = if nb >= 24 && nb < 48 { 1 } else { 0 };
         if want != slicer {
           slicer = want;
-          if want == 1 { synth_lfo(1, 1, 3, 1600, 70) } else { synth_lfo(1, 1, 3, 0, 0) }
+          if want == 1 { snd_lfo(1, 0, 3, 1600, 70) } else { snd_lfo(1, 0, 3, 0, 0) }
         }
       };
       pos = np;
