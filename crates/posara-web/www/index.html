@@ -123,7 +123,7 @@
   </div>
 </div>
 <footer>
-  posara <span id="ver">v0.1.0</span> ·
+  posara <span id="ver">v1.0.0</span> ·
   <a href="https://github.com/knh190/posara" target="_blank">GitHub</a> ·
   <a href="https://github.com/knh190/posara/tree/main/docs" target="_blank">Docs</a> ·
   built on <a href="/abrase/">abrase ↗</a>
@@ -261,7 +261,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 let posara, running = false, active = null, order = [];
 let audioCtx = null, audioNode = null, pump = null;
 
-await init("./pkg/posara_web_bg.wasm?v=10");
+await init("./pkg/posara_web_bg.wasm?v=11");
 posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
