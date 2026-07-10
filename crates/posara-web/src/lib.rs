@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use posara::backend::Storage;
 use posara::runner::{compile_source, compile_source_multi, read_pk_bytes, Stepper};
 use posara::Host;
 use wasm_bindgen::prelude::*;
