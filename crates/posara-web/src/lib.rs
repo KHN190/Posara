@@ -50,6 +50,7 @@ impl Posara {
     ) -> Result<(), JsValue> {
         self.stepper = None;
         self.host.gfx.fb.borrow_mut().reset();   // allow a new cart to set a different screen size
+        self.host.clock_src.reset();             // now() starts near 0 for the new cart (matches desktop)
         let host: &'static Host = unsafe { &*(&*self.host as *const Host) };
         self.stepper = Some(Stepper::start_named(module, static_names, fn_names, host).map_err(js)?);
         Ok(())
