@@ -87,6 +87,18 @@
   .ln .chip { flex:0 0 auto; color:#666; font-size:10px; text-transform:uppercase; padding-top:1px; }
   .ln .detail { margin:2px 0 4px 34px; color:#999; font-size:11px; white-space:pre-wrap; }
   footer { font-size:11px; color:#555; text-align:center; padding-top:2px; }
+  footer .local { color:#999; }
+  @media (max-width: 720px) {
+    body { height:auto; min-height:100%; }
+    header { flex-wrap:wrap; gap:8px; }
+    header #fps { margin-right:0; order:9; }
+    .row { flex-direction:column; flex:none; }
+    .files { width:100%; }
+    .mid { min-height:50vh; }
+    .right { width:100%; }
+    .stage { min-height:60vw; }
+    .console { height:120px; }
+  }
   footer a { color:#888; text-decoration:none; }
   footer a:hover { color:var(--accent); }
   input[type=file] { display:none; }
@@ -123,9 +135,10 @@
   </div>
 </div>
 <footer>
-  posara <span id="ver">v1.0.0</span> ·
-  <a href="https://github.com/knh190/posara" target="_blank">GitHub</a> ·
-  <a href="https://github.com/knh190/posara/tree/main/docs" target="_blank">Docs</a> ·
+  <span class="local" data-t="local">everything stays in your browser</span> ·
+  posara <span id="ver">v1.0.1</span> ·
+  <a href="https://github.com/KHN190/posara" target="_blank">GitHub</a> ·
+  <a href="https://github.com/KHN190/posara/tree/main/docs" target="_blank">Docs</a> ·
   built on <a href="/abrase/">abrase ↗</a>
 </footer>
 
@@ -227,12 +240,14 @@ const STR = {
     linksHd:"Learn", lnLang:"abrase language", lnPlay:"abrase playground", download:"Download",
     toZh:"中文", wasmok:"wasm ok", runCode:"running", stopped:"stopped", ended:"cart ended",
     runErr:"error: ", loadFail:"load failed:", added:"added ", created:"created ",
-    removed:"removed ", renamed:"renamed ", noEntry:"no .abe or .pk to run", overLimit:"rejected: " },
+    removed:"removed ", renamed:"renamed ", noEntry:"no .abe or .pk to run", overLimit:"rejected: ",
+    local:"everything stays in your browser" },
   zh: { run:"运行", stop:"停止", drop:"拖入文件", files:"文件", filesHd:"文件",
     linksHd:"学习", lnLang:"abrase 语言", lnPlay:"abrase 演练场", download:"下载",
     toZh:"EN", wasmok:"wasm 就绪", runCode:"运行中", stopped:"已停止", ended:"cart 结束",
     runErr:"错误: ", loadFail:"加载失败:", added:"已加 ", created:"新建 ",
-    removed:"删除 ", renamed:"改名 ", noEntry:"无 .abe 或 .pk 可运行", overLimit:"拒绝: " },
+    removed:"删除 ", renamed:"改名 ", noEntry:"无 .abe 或 .pk 可运行", overLimit:"拒绝: ",
+    local:"所有内容都仅运行/保存在本地设备中" },
 };
 let lang = "en";
 const T = k => STR[lang][k];
@@ -261,7 +276,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 let posara, running = false, active = null, order = [];
 let audioCtx = null, audioNode = null, pump = null;
 
-await init("./pkg/posara_web_bg.wasm?v=12");
+await init("./pkg/posara_web_bg.wasm?v=14");
 posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
@@ -449,23 +464,29 @@ class Sink extends AudioWorkletProcessor {
 }
 registerProcessor('posara-sink', Sink);
 `;
+let audioSr = 44100, lastPull = 0;
 async function startAudio() {
   if (audioCtx) return;
   audioCtx = new AudioContext({ sampleRate: posara.sample_rate() });
+  audioSr = audioCtx.sampleRate;
   const url = URL.createObjectURL(new Blob([WORKLET], { type:"text/javascript" }));
   await audioCtx.audioWorklet.addModule(url);
   audioNode = new AudioWorkletNode(audioCtx, "posara-sink", { outputChannelCount:[2] });
   audioNode.connect(audioCtx.destination);
-  const sr = audioCtx.sampleRate;
-  const pull = frames => {
-    if (frames <= 0) return;
-    const buf = new Float32Array(frames*2);
-    if (running) posara.audio_pull(buf);
-    audioNode.port.postMessage(buf, [buf.buffer]);
-  };
-  pull(Math.ceil(sr*0.08));
-  let last = performance.now();
-  pump = setInterval(() => { const now=performance.now(); pull(Math.round(sr*(now-last)/1000)); last=now; }, 20);
+  audioNode.port.postMessage(new Float32Array(Math.ceil(audioSr*0.08)*2));   // prebuffer 80ms
+}
+// Pulls mixer samples matched to real elapsed time; driven by the worker tick so
+// it keeps feeding audio even when the tab is backgrounded.
+function pullAudio() {
+  if (!audioNode) return;
+  const now = performance.now();
+  const dt = lastPull ? now - lastPull : 16;
+  lastPull = now;
+  const n = Math.min(Math.round(audioSr * dt / 1000), audioSr);   // cap 1s
+  if (n <= 0) return;
+  const buf = new Float32Array(n * 2);
+  if (running) posara.audio_pull(buf);
+  audioNode.port.postMessage(buf, [buf.buffer]);
 }
 
 // ---- render ----
@@ -503,29 +524,39 @@ setInterval(() => {                                       // sample every 500ms,
   drawFps();
   lastSteps = steps; frames = 0; t0 = performance.now();
 }, 500);
-function draw() {
+// step = advance cart + feed audio. Driven by a Web Worker tick whose timer is
+// NOT throttled when the tab is hidden, so sound + game keep running (Spotify-like).
+function step() {
   if (!running) return;
   try {
     const cont = posara.frame();
     const out = posara.drain_stdout(); if (out) onCart(out);   // cart println → console
     posara.set_input(buttons, lastKey); lastKey = 0;
-    const w = posara.width(), h = posara.height();
-    if (w>0 && h>0) {
-      if (!img || cv.width!==w || cv.height!==h) {
-        cv.width=w; cv.height=h; img=ctx.createImageData(w,h);
-        const stage = cv.parentElement;
-        const box = Math.min(stage.clientWidth, stage.clientHeight);
-        const s = box / 480;                  // 480 fills the stage; smaller carts stay proportional
-        cv.style.width=(w*s)+"px"; cv.style.height=(h*s)+"px";
-      }
-      img.data.set(posara.framebuffer());
-      ctx.putImageData(img,0,0);
-    }
+    pullAudio();
     frames++;                                            // sampled by the 500ms interval
-    if (cont === false) { log(T("ended")); stop(); return; }
-  } catch (e) { onSys("error", T("runErr")+e, e && e.stack); stop(); return; }
-  requestAnimationFrame(draw);
+    if (cont === false) { log(T("ended")); stop(); }
+  } catch (e) { onSys("error", T("runErr")+e, e && e.stack); stop(); }
 }
+// render = framebuffer → canvas on rAF (pauses when hidden — nobody's watching).
+function paint() {
+  if (!running) return;
+  const w = posara.width(), h = posara.height();
+  if (w>0 && h>0) {
+    if (!img || cv.width!==w || cv.height!==h) {
+      cv.width=w; cv.height=h; img=ctx.createImageData(w,h);
+      const box = Math.min(cv.parentElement.clientWidth, cv.parentElement.clientHeight);
+      const s = box / 480;                    // 480 fills the stage; smaller carts stay proportional
+      cv.style.width=(w*s)+"px"; cv.style.height=(h*s)+"px";
+    }
+    img.data.set(posara.framebuffer());
+    ctx.putImageData(img,0,0);
+  }
+  if (running) requestAnimationFrame(paint);
+}
+const driver = new Worker(URL.createObjectURL(new Blob(
+  [`let id; onmessage = e => { if (e.data==="start") { if(!id) id=setInterval(()=>postMessage(0),16); } else { clearInterval(id); id=0; } };`],
+  { type:"text/javascript" })));
+driver.onmessage = () => step();
 
 async function run() {
   saveActive();
@@ -539,11 +570,12 @@ async function run() {
   } catch (e) { onSys("error", T("loadFail"), String(e)); return; }
   await startAudio();
   if (audioCtx.state === "suspended") await audioCtx.resume();
-  running = true; t0 = performance.now(); frames = 0; img = null;
+  running = true; t0 = performance.now(); frames = 0; img = null; lastPull = 0;
   $("stat").textContent = T("runCode");
-  requestAnimationFrame(draw);
+  driver.postMessage("start");
+  requestAnimationFrame(paint);
 }
-function stop() { running = false; $("stat").textContent = T("stopped"); }
+function stop() { running = false; driver.postMessage("stop"); $("stat").textContent = T("stopped"); }
 $("run").onclick = run;
 $("stop").onclick = stop;
 </script>
