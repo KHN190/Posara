@@ -276,7 +276,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 let posara, running = false, active = null, order = [];
 let audioCtx = null, audioNode = null, pump = null;
 
-await init("./pkg/posara_web_bg.wasm?v=12");
+await init("./pkg/posara_web_bg.wasm?v=13");
 posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
