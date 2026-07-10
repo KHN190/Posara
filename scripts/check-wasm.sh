@@ -4,7 +4,9 @@
 # .abe reading an uploaded .spr asset from the sandbox, and cart stdout capture.
 set -euo pipefail
 cd "$(dirname "$0")/../crates/posara-web"
-wasm-pack build --target nodejs --out-dir pkg-node >/dev/null 2>&1
+# --dev skips wasm-opt (binaryen) — a smoke test needs no optimization, and
+# wasm-opt flakes on arm64 macOS CI. Full output so CI failures are visible.
+wasm-pack build --dev --target nodejs --out-dir pkg-node
 
 cat > pkg-node/_smoke.mjs << 'EOF'
 import { readFileSync } from 'fs';
