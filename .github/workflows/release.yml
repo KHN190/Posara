@@ -33,6 +33,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      - name: Tests
+        run: cargo test -p posara
+
       - name: Build posara (desktop)
         run: cargo build --release -p posara
 

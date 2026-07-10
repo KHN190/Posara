@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      - name: Tests (desktop)
+        run: cargo test -p posara
+
+      - name: Tests (web)
+        run: cargo test -p posara --no-default-features --features web,test
+
+      - name: Feature matrix
+        run: bash scripts/check-features.sh
+
+      - name: Portable-core oracle
+        run: bash scripts/check-portable.sh
+
+      - name: Wasm execution (node)
+        run: bash scripts/check-wasm.sh
+
+      - name: Build binary
+        run: cargo build --release -p posara
