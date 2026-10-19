@@ -15,6 +15,8 @@ use crate::plugins::SynthPlugin;
 use crate::plugins::FsPlugin;
 #[cfg(feature = "midi")]
 use crate::plugins::MidiPlugin;
+#[cfg(feature = "net")]
+use crate::plugins::NetPlugin;
 use crate::plugin::Plugin;
 
 // Every capability is a Plugin (install + register_fns). Host keeps typed
@@ -42,6 +44,8 @@ pub struct Host {
     pub fs: FsPlugin,
     #[cfg(feature = "midi")]
     midi: MidiPlugin,
+    #[cfg(feature = "net")]
+    pub net: NetPlugin,
 }
 
 impl Host {
@@ -104,6 +108,8 @@ impl Host {
             fs: FsPlugin::new(Rc::clone(&backend.storage)),
             #[cfg(feature = "midi")]
             midi,
+            #[cfg(feature = "net")]
+            net: NetPlugin::new(),
             root,
         })
     }
@@ -122,6 +128,8 @@ impl Host {
         v.push(&self.fs);
         #[cfg(feature = "midi")]
         v.push(&self.midi);
+        #[cfg(feature = "net")]
+        v.push(&self.net);
         v
     }
 

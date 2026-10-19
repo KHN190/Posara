@@ -10,8 +10,8 @@ description = "General platform Myriad runtime visual-audio engine."
 # desktop = minifb/cpal Device impls; web = headless fb + pull-mixer (same ports).
 [features]
 default = ["desktop", "test"]
-desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "compiler", "fs"]
-web = ["gfx-web", "sfx-web", "synth", "compiler", "fs"]
+desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "compiler", "fs", "net"]
+web = ["gfx-web", "sfx-web", "synth", "compiler", "fs", "net"]
 
 gfx = []
 gfx-desktop = ["gfx", "dep:minifb", "dep:image"]
@@ -22,6 +22,8 @@ sfx-web = ["sfx"]
 
 compiler = ["dep:abrase", "dep:polka-rustc"]
 fs = []
+# UDP/OSC. desktop = real UdpSocket, web = stub (see designs/net.md).
+net = []
 # storage backend: real disk (desktop) vs in-memory upload sandbox (web default).
 storage-disk = []
 synth = ["sfx"]

@@ -8,6 +8,8 @@ pub mod synth;
 pub mod fs;
 #[cfg(feature = "midi")]
 pub mod midi;
+#[cfg(feature = "net")]
+pub mod net;
 
 #[cfg(feature = "gfx")]
 pub use gfx::GfxPlugin;
@@ -21,3 +23,5 @@ pub use synth::SynthPlugin;
 pub use fs::FsPlugin;
 #[cfg(feature = "midi")]
 pub use midi::MidiPlugin;
+#[cfg(feature = "net")]
+pub use net::NetPlugin;

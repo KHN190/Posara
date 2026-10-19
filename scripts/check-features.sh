@@ -14,6 +14,7 @@ check() {
 check "gfx capability (zero backend)"     --features gfx
 check "sfx capability (zero backend)"     --features sfx
 check "gfx+sfx+compiler (zero backend)"   --features gfx,sfx,compiler
+check "net capability (zero backend)"     --features net,compiler
 check "web backend"                       --features web
 check "desktop backend"                   --features desktop
 

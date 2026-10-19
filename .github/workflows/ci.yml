@@ -35,6 +35,7 @@ jobs:
       - name: Tests (web)
         run: cargo test -p posara --no-default-features --features web,test
 
+
       - name: Feature matrix
         run: bash scripts/check-features.sh
 
