@@ -186,7 +186,8 @@ mod model {
             for y in 0..h as i64 {
                 for x in 0..w as i64 {
                     let s = [side(x1, y1, x2, y2, x, y), side(x2, y2, x0, y0, x, y), side(x0, y0, x1, y1, x, y)];
-                    if s.iter().all(|&k| k >= 0) || s.iter().all(|&k| k <= 0) { want.insert((x, y)); }
+                    let in_box = x >= x0.min(x1).min(x2) && x <= x0.max(x1).max(x2) && y >= y0.min(y1).min(y2) && y <= y0.max(y1).max(y2);
+                    if in_box && (s.iter().all(|&k| k >= 0) || s.iter().all(|&k| k <= 0)) { want.insert((x, y)); }
                 }
             }
             prop_assert_eq!(lit_at(&f), want);
@@ -240,4 +241,11 @@ fn a_steep_line_crossing_a_tiny_screen_still_draws() {
     let mut f = fb(1, 2);
     f.line(-17, 60, 16, -55, 1);
     assert_eq!(model::lit_at(&f), model::on_screen(model::bresenham(-17, 60, 16, -55), 1, 2));
+}
+
+#[test]
+fn a_flat_triangle_stays_between_its_corners() {
+    let mut f = fb(2, 13);
+    f.tri(16, 30, 26, 42, 11, 24, 1, true);
+    assert_eq!(lit(&f), 0);
 }

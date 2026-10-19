@@ -17,6 +17,14 @@ fn path_arg(ctx: &NativeCtx, args: &[Value], i: usize) -> Option<String> {
 
 fn ret_int(n: i64) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
 
+const MAX_READ: usize = 1 << 26;
+
+fn read_len(a: &[Value]) -> Result<usize, String> {
+    let n = arg(a, 1).max(0) as usize;
+    if n > MAX_READ { return Err(format!("fs_read: {n} bytes is over the {MAX_READ} limit")); }
+    Ok(n)
+}
+
 pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
     let s = Rc::clone(&storage);
     vm.register_native("fs_exists", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
@@ -53,14 +61,14 @@ pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
     // Read up to `n` bytes into a packed Bytes value, zero-padded past EOF.
     let s = Rc::clone(&storage);
     vm.register_native("fs_read", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
+        let (fd, n) = (arg(a, 0), read_len(a)?);
         let Some(mut buf) = s.read(fd, n) else { return ret_int(-1); };
         buf.resize(n, 0);
         Ok((alloc_bytes(ctx.heap, &buf)?, true))
     }));
     let s = Rc::clone(&storage);
     vm.register_native("fs_reads", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let (fd, n) = (arg(a, 0), arg(a, 1).max(0) as usize);
+        let (fd, n) = (arg(a, 0), read_len(a)?);
         let Some(buf) = s.read(fd, n) else { return ret_int(-1); };
         Ok((alloc_string(ctx.heap, &String::from_utf8_lossy(&buf))?, true))
     }));
