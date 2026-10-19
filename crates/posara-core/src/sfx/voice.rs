@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 use crate::sfx::env::Adsr;
 use crate::sfx::fx::Fx;
@@ -68,7 +69,7 @@ impl Voice {
         self.phase = (self.phase + freq / sr) % 1.0;
         let p = self.phase;
         match self.wave {
-            WAVE_SINE => (p * core::f32::consts::TAU).sin(),
+            WAVE_SINE => math::sin(p * core::f32::consts::TAU),
             WAVE_TRIANGLE => if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p },
             WAVE_SAW => 2.0 * p - 1.0,
             _ => if p < 0.5 { 1.0 } else { -1.0 },
@@ -81,7 +82,7 @@ impl Voice {
         if self.gate_samples > 0 { self.gate_samples -= 1; }
 
         let m = if self.lfo.enabled() { self.lfo.tick(sr) } else { 0.0 };
-        let freq = if self.lfo.target == LFO_PITCH { self.freq * (2.0f32).powf(m) } else { self.freq };
+        let freq = if self.lfo.target == LFO_PITCH { self.freq * math::powf(2.0f32, m) } else { self.freq };
         let mut s = self.osc(freq, sr);
 
         let amp = self.env.tick(1.0 / sr) * self.vel;
@@ -90,7 +91,7 @@ impl Voice {
 
         if self.lfo.target == LFO_CUTOFF && self.fx.kind != 0 {
             let base = self.fx.param;
-            self.fx.param = base * (2.0f32).powf(m * 2.0);
+            self.fx.param = base * math::powf(2.0f32, m * 2.0);
             s = self.fx.process(s, sr);
             self.fx.param = base;
         } else {

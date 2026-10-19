@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 pub const FX_BITCRUSH: u8 = 1;
 pub const FX_DRIVE: u8 = 2;
@@ -26,7 +27,7 @@ impl Fx {
     pub fn process(&mut self, x: f32, sr: f32) -> f32 {
         match self.kind {
             FX_BITCRUSH => {
-                let levels = (2.0f32).powf(1.0 + (1.0 - self.amt) * 11.0); // amt↑ → fewer bits
+                let levels = math::powf(2.0f32, 1.0 + (1.0 - self.amt) * 11.0); // amt↑ → fewer bits
                 let q = (x * 0.5 + 0.5) * levels;
                 let crushed = (q.round() / levels) * 2.0 - 1.0;
                 let decim = 1 + (self.amt * 16.0) as u32; // amt↑ → coarser sample-hold
@@ -36,23 +37,23 @@ impl Fx {
             }
             FX_DRIVE => {
                 let g = 1.0 + self.amt * 24.0;
-                (x * g).tanh()
+                math::tanh(x * g)
             }
             FX_LOPASS => {
                 let cut = self.param.max(20.0);
-                let a = (1.0 - (-core::f32::consts::TAU * cut / sr).exp()).clamp(0.0, 1.0);
+                let a = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
                 self.lp += a * (x - self.lp);
                 self.lp
             }
             FX_HIPASS => {
                 let cut = self.param.max(20.0);
-                let a = (1.0 - (-core::f32::consts::TAU * cut / sr).exp()).clamp(0.0, 1.0);
+                let a = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
                 self.lp += a * (x - self.lp);
                 x - self.lp
             }
             FX_RING => {
                 self.ring_phase = (self.ring_phase + self.param.max(0.0) / sr) % 1.0;
-                let m = (self.ring_phase * core::f32::consts::TAU).sin();
+                let m = math::sin(self.ring_phase * core::f32::consts::TAU);
                 x * (1.0 - self.amt + self.amt * m)
             }
             _ => x,

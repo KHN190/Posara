@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 use super::env::Adsr;
 use super::fx::Fx;
@@ -140,7 +141,7 @@ fn wave_sample(wave: u8, phase: f32, lfsr: &mut u32) -> f32 {
         return ((x & 0xFF) as f32 / 128.0) - 1.0;
     }
     match wave {
-        1 => (phase * core::f32::consts::TAU).sin(),
+        1 => math::sin(phase * core::f32::consts::TAU),
         2 => if phase < 0.5 { 4.0 * phase - 1.0 } else { 3.0 - 4.0 * phase },
         3 => 2.0 * phase - 1.0,
         _ => if phase < 0.5 { 1.0 } else { -1.0 },
@@ -169,7 +170,7 @@ impl Voice {
         self.ucount = c;
         for u in 0..c {
             let spread = if c == 1 { 0.0 } else { (u as f32 / (c as f32 - 1.0)) * 2.0 - 1.0 };
-            self.uratio[u] = (2.0f32).powf(spread * p.detune / 1200.0);
+            self.uratio[u] = math::powf(2.0f32, spread * p.detune / 1200.0);
             self.phase[u] = [(u as f32 * 0.137) % 1.0, (u as f32 * 0.331) % 1.0];
         }
         self.lfsr = 0x1234abcd ^ note as u32 ^ (age as u32).wrapping_mul(2654435761);
@@ -186,7 +187,7 @@ impl Voice {
         // Chamberlin SVF: stable only for fc well below sr/6 — clamp to keep f < 1,
         // else it blows up to inf/NaN (silent output that also dodges the meter).
         let fc = cutoff.clamp(20.0, sr * 0.16);
-        let f = 2.0 * (core::f32::consts::PI * fc / sr).sin();
+        let f = 2.0 * math::sin(core::f32::consts::PI * fc / sr);
         let damp = (1.0 - (reso / 100.0) * 0.9).clamp(0.1, 1.0);
         self.flp += f * self.fbp;
         let hp = x - self.flp - damp * self.fbp;
@@ -229,12 +230,12 @@ impl Voice {
         let (mut p_mul, mut cut_mul, mut amp_lfo) = (1.0f32, 1.0f32, 1.0f32);
         match self.lfo.target {
             TGT_AMP => amp_lfo = (1.0 + m).max(0.0),
-            TGT_CUTOFF => cut_mul = (2.0f32).powf(m * 2.0),
-            TGT_PITCH => p_mul = (2.0f32).powf(m),
+            TGT_CUTOFF => cut_mul = math::powf(2.0f32, m * 2.0),
+            TGT_PITCH => p_mul = math::powf(2.0f32, m),
             _ => {}
         }
 
-        let freq = self.base_freq * (2.0f32).powf(pitch_semi / 12.0) * p_mul;
+        let freq = self.base_freq * math::powf(2.0f32, pitch_semi / 12.0) * p_mul;
         let mut s = 0.0f32;
         let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
         let fm = modu.wave == WAVE_FM && modu.level > 0.0;
@@ -244,7 +245,7 @@ impl Voice {
                 self.phase[u][1] = (self.phase[u][1] + uf * modu.mult / sr) % 1.0;
                 self.phase[u][0] = (self.phase[u][0] + uf * car.mult / sr) % 1.0;
                 if car.level > 0.0 {
-                    let pm = (self.phase[u][1] * core::f32::consts::TAU).sin() * modu.level * core::f32::consts::FRAC_1_PI;
+                    let pm = math::sin(self.phase[u][1] * core::f32::consts::TAU) * modu.level * core::f32::consts::FRAC_1_PI;
                     s += wave_sample(car.wave, (self.phase[u][0] + pm).rem_euclid(1.0), &mut self.lfsr) * car.level;
                 }
                 continue;
@@ -262,7 +263,7 @@ impl Voice {
         let cutoff = if self.cfg.fkind == FK_LPG {
             self.cfg.cutoff * (0.05 + 0.95 * amp_env)
         } else {
-            self.cfg.cutoff * (2.0f32).powf(cut_oct) * cut_mul
+            self.cfg.cutoff * math::powf(2.0f32, cut_oct) * cut_mul
         };
         s = self.filter(s, cutoff, self.cfg.reso, sr);
         s *= amp * self.vel * amp_lfo;
@@ -298,7 +299,7 @@ impl Synth {
             if idx < 2 {
                 p.osc[idx] = OscCfg {
                     wave,
-                    mult: (2.0f32).powf((semi as f32 + fine / 100.0) / 12.0),
+                    mult: math::powf(2.0f32, (semi as f32 + fine / 100.0) / 12.0),
                     level: level.max(0.0),
                 };
             }
@@ -399,8 +400,8 @@ impl Synth {
             // equal-power pan from the voice's patch.
             let pan = self.voices[i].cfg.pan;
             let a = (pan + 1.0) * core::f32::consts::FRAC_PI_4;
-            tl += s * a.cos();
-            tr += s * a.sin();
+            tl += s * math::cos(a);
+            tr += s * math::sin(a);
             if pid < 4 { psum[pid] += s; }
         }
         for p in 0..4 {

@@ -5,6 +5,7 @@
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 // Devices: 32.32 fixed point, no soft-float f64 per sample.
 #[cfg(feature = "std")]
@@ -62,7 +63,7 @@ impl SamplePlayer {
         let bit = (self.bytes[bi / 8] >> (7 - (bi & 7))) & 1;
         let raw = if bit == 1 { 1.0 } else { -1.0 };
         let cut = self.rate * 0.45;
-        let a = (1.0 - (-core::f32::consts::TAU * cut / sr).exp()).clamp(0.0, 1.0);
+        let a = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
         self.lp += a * (raw - self.lp);
         self.lp * self.vol
     }

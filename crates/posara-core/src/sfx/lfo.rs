@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 pub const LFO_PITCH: u8 = 0;
 pub const LFO_AMP: u8 = 1;
@@ -31,7 +32,7 @@ impl Lfo {
             1 => if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p },
             2 => 2.0 * p - 1.0,
             3 => if p < 0.5 { 1.0 } else { -1.0 },
-            _ => (p * core::f32::consts::TAU).sin(),
+            _ => math::sin(p * core::f32::consts::TAU),
         };
         s * self.depth
     }

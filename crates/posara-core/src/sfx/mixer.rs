@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 use alloc::sync::Arc;
 use crate::sfx::spsc::Spsc;
@@ -252,8 +253,8 @@ impl Mixer {
             let rv = self.reverb.process((l + r) * 0.5);
             l += rv; r += rv;
             // default amp without hard-clipping dense chords.
-            l = (l * 0.8).tanh();
-            r = (r * 0.8).tanh();
+            l = math::tanh(l * 0.8);
+            r = math::tanh(r * 0.8);
             if l.abs() > out_peak { out_peak = l.abs(); }
             match nc {
                 1 => frame[0] = (l + r) * 0.5,
