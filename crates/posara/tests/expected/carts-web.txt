@@ -2,8 +2,8 @@ basic/hello.abe gfx=cbf29ce484222325 sfx=a597c823b2576c85
 basic/sprite.abe gfx=ffe3dd823de5e325 sfx=3eec405aaa5807a5
 basic/text.abe gfx=0ae04c7c179d8025 sfx=3eec405aaa5807a5
 games/fuji.abe gfx=a763f40d7ebe1af3 sfx=3eec405aaa5807a5
-games/invader.abe gfx=ad1c582cc80d35ad sfx=d42dd510d953f839
-games/invader.pk gfx=ad1c582cc80d35ad sfx=d42dd510d953f839
+games/invader.abe gfx=90e900a4816fb174 sfx=d42dd510d953f839
+games/invader.pk gfx=90e900a4816fb174 sfx=d42dd510d953f839
 music/acid.abe gfx=cbf29ce484222325 sfx=2627c31090c8ec11
 music/ambient.abe gfx=cbf29ce484222325 sfx=f47c6f77e60b266d
 music/cover/vol1.abe err Screen: 800x800 exceeds web 480x480 budget

@@ -2,11 +2,10 @@
 use crate::math::F32Ext;
 use super::Framebuffer;
 
-fn edge(ax: i64, ay: i64, bx: i64, by: i64, px: i64, py: i64) -> i64 {
-    (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+fn edge(ax: i64, ay: i64, bx: i64, by: i64, px: i64, py: i64) -> i128 {
+    (bx as i128 - ax as i128) * (py as i128 - ay as i128) - (by as i128 - ay as i128) * (px as i128 - ax as i128)
 }
 
-// Cohen–Sutherland clip to [0,w)×[0,h). 
 const CLIP_LIM: i64 = 1 << 20;
 
 fn outcode(x: i64, y: i64, w: i64, h: i64) -> u8 {
@@ -16,67 +15,49 @@ fn outcode(x: i64, y: i64, w: i64, h: i64) -> u8 {
     c
 }
 
-fn clip(mut x0: i64, mut y0: i64, mut x1: i64, mut y1: i64, w: i64, h: i64) -> Option<(i64, i64, i64, i64)> {
-    if w <= 0 || h <= 0 { return None; }
-    if x0.abs() > CLIP_LIM || y0.abs() > CLIP_LIM || x1.abs() > CLIP_LIM || y1.abs() > CLIP_LIM {
-        return None;
-    }
-    let mut c0 = outcode(x0, y0, w, h);
-    let mut c1 = outcode(x1, y1, w, h);
-    loop {
-        if c0 | c1 == 0 { return Some((x0, y0, x1, y1)); }
-        if c0 & c1 != 0 { return None; }
-        let c = if c0 != 0 { c0 } else { c1 };
-        let (x, y);
-        if c & 8 != 0 { x = x0 + (x1 - x0) * (h - 1 - y0) / (y1 - y0); y = h - 1; }
-        else if c & 4 != 0 { x = x0 + (x1 - x0) * (0 - y0) / (y1 - y0); y = 0; }
-        else if c & 2 != 0 { y = y0 + (y1 - y0) * (w - 1 - x0) / (x1 - x0); x = w - 1; }
-        else { y = y0 + (y1 - y0) * (0 - x0) / (x1 - x0); x = 0; }
-        if c == c0 { x0 = x; y0 = y; c0 = outcode(x0, y0, w, h); }
-        else { x1 = x; y1 = y; c1 = outcode(x1, y1, w, h); }
-    }
-}
-
 impl Framebuffer {
-    pub fn line(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, c: u16) {
-        let Some((x0, y0, x1, y1)) = clip(x0, y0, x1, y1, self.w as i64, self.h as i64) else { return; };
+    // Walks the unclipped line so the visible pixels never depend on where it leaves the screen.
+    fn walk(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, m: i64, mut f: impl FnMut(&mut Self, i64, i64)) {
+        let (w, h) = (self.w as i64 + 2 * m, self.h as i64 + 2 * m);
+        if [x0, y0, x1, y1].iter().any(|v| v.abs() > CLIP_LIM) { return; }
+        if outcode(x0 + m, y0 + m, w, h) & outcode(x1 + m, y1 + m, w, h) != 0 { return; }
+        let inside = |x: i64, y: i64| x >= -m && y >= -m && x < w - m && y < h - m;
         let (mut x, mut y) = (x0, y0);
         let dx = (x1 - x0).abs();
         let dy = -(y1 - y0).abs();
         let sx = if x0 < x1 { 1 } else { -1 };
         let sy = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
+        let mut seen = false;
         loop {
-            self.pset(x, y, c);
-            if x == x1 && y == y1 { break; }
-            let e2 = 2 * err;
-            if e2 >= dy { err += dy; x += sx; }
-            if e2 <= dx { err += dx; y += sy; }
-        }
-    }
-
-    pub fn line_thick(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, t: i64, c: u16) {
-        let t = t.max(1);
-        if t == 1 { return self.line(x0, y0, x1, y1, c); }
-        let Some((x0, y0, x1, y1)) = clip(x0, y0, x1, y1, self.w as i64, self.h as i64) else { return; };
-        let off = t / 2;
-        let (mut x, mut y) = (x0, y0);
-        let dx = (x1 - x0).abs();
-        let dy = -(y1 - y0).abs();
-        let sx = if x0 < x1 { 1 } else { -1 };
-        let sy = if y0 < y1 { 1 } else { -1 };
-        let mut err = dx + dy;
-        loop {
-            for oy in 0..t {
-                for ox in 0..t {
-                    self.pset(x - off + ox, y - off + oy, c);
-                }
+            if inside(x, y) {
+                seen = true;
+                f(self, x, y);
+            } else if seen {
+                break;
             }
             if x == x1 && y == y1 { break; }
             let e2 = 2 * err;
             if e2 >= dy { err += dy; x += sx; }
             if e2 <= dx { err += dx; y += sy; }
         }
+    }
+
+    pub fn line(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, c: u16) {
+        self.walk(x0, y0, x1, y1, 0, |f, x, y| f.pset(x, y, c));
+    }
+
+    pub fn line_thick(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, t: i64, c: u16) {
+        let t = t.max(1);
+        let off = t / 2;
+        let (w, h) = (self.w as i64, self.h as i64);
+        self.walk(x0, y0, x1, y1, t, |f, x, y| {
+            for py in (y - off).max(0)..(y - off + t).min(h) {
+                for px in (x - off).max(0)..(x - off + t).min(w) {
+                    f.pset(px, py, c);
+                }
+            }
+        });
     }
 
     pub fn rect_outline(&mut self, x: i64, y: i64, w: i64, h: i64, c: u16) {
@@ -88,11 +69,11 @@ impl Framebuffer {
     }
 
     pub fn circ(&mut self, cx: i64, cy: i64, r: i64, c: u16, fill: bool) {
-        if r < 0 { return; }
+        if !(0..=CLIP_LIM).contains(&r) || cx.abs() > CLIP_LIM || cy.abs() > CLIP_LIM { return; }
         if fill {
             // +r ≈ (r+0.5)² radius bias: fills the cardinal spikes the bare
             // dx²+dy²≤r² discretisation leaves on each axis, so the rim reads round.
-            for dy in -r..=r {
+            for dy in (-r).max(-cy)..=r.min(self.h as i64 - 1 - cy) {
                 let dx = (((r * r + r - dy * dy) as super::Real).sqrt()) as i64;
                 self.line(cx - dx, cy + dy, cx + dx, cy + dy, c);
             }
