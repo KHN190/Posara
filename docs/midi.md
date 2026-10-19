@@ -2,6 +2,8 @@
 
 Posara connects to the first available MIDI input and output port the first time a cart touches device `0x90` (you'll see `• MIDI in: <name>` / `• MIDI out: <name>` on stderr). Carts that never use MIDI never open a port. Carts routed by `midi.toml` connect at startup instead, so their virtual source is visible for wiring.
 
+In the browser, Posara asks for Web MIDI access when a cart runs: it listens on every input and sends to every output.
+
 ## Receiving
 
 ```rust

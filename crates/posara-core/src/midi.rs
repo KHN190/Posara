@@ -17,6 +17,16 @@ pub const PORT_SEND: u8 = 0x02;
 
 pub type SharedMidi = Rc<RefCell<Box<dyn MidiPort>>>;
 
+pub fn message(w: u32) -> ([u8; 3], usize) {
+    let [status, d1, d2, _] = w.to_le_bytes();
+    let len = match status {
+        0x80..=0xBF | 0xE0..=0xEF | 0xF2 => 3,
+        0xC0..=0xDF | 0xF1 | 0xF3 => 2,
+        _ => 1,
+    };
+    ([status, d1, d2], len)
+}
+
 pub struct PortDevice {
     port: SharedMidi,
     queue: VecDeque<u32>,
