@@ -10,14 +10,18 @@ pub use storage::{MemStorage, Storage};
 #[cfg(feature = "storage-disk")]
 pub use storage::DiskStorage;
 
-pub trait Presenter {
-    fn configure(&mut self, w: usize, h: usize) -> Result<(), String>;
-    // push RGB565 frame; returns surface-alive.
-    fn present(&mut self, buf: &[u16]) -> Result<bool, String>;
-    fn poll(&mut self) -> Option<(u8, u8)> { None }
-    fn set_pos(&mut self, _x: i64, _y: i64) {}
-}
+pub use posara_core::drivers::Presenter;
 
+#[cfg(feature = "imu")]
+use posara_core::drivers::{Imu, NullImu};
+#[cfg(feature = "midi")]
+use posara_core::drivers::NullMidi;
+#[cfg(feature = "imu")]
+use posara_core::imu::SharedImu;
+#[cfg(feature = "midi")]
+use posara_core::midi::SharedMidi;
+#[cfg(any(feature = "imu", feature = "midi"))]
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -26,6 +30,11 @@ use std::rc::Rc;
 pub struct Backend {
     pub clock: Rc<dyn Clock>,
     pub storage: Rc<dyn Storage>,
+    #[cfg(feature = "imu")]
+    pub imu: SharedImu,
+    // None = desktop midir routing.
+    #[cfg(feature = "midi")]
+    pub midi: Option<SharedMidi>,
 }
 
 impl Backend {
@@ -37,7 +46,24 @@ impl Backend {
             storage: Rc::new(DiskStorage::new(root)),
             #[cfg(not(feature = "storage-disk"))]
             storage: Rc::new(MemStorage::new()),
+            #[cfg(feature = "imu")]
+            imu: Rc::new(RefCell::new(Box::new(NullImu))),
+            #[cfg(feature = "midi")]
+            midi: None,
         }
+    }
+
+    pub fn null(root: PathBuf) -> Self {
+        Self {
+            #[cfg(feature = "midi")]
+            midi: Some(Rc::new(RefCell::new(Box::new(NullMidi)))),
+            ..Self::new(root)
+        }
+    }
+
+    #[cfg(feature = "imu")]
+    pub fn imu(self, imu: Box<dyn Imu>) -> Self {
+        Self { imu: Rc::new(RefCell::new(imu)), ..self }
     }
 
     // The surface backend for a screen. None = headless (render to buf only).

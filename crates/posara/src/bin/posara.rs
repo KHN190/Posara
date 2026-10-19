@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use posara::{Host, runner};
+use posara::gfx::SavePng;
 
 fn usage() -> ExitCode {
     eprintln!("usage: posara <command> [flags] <cart.abe | cart.pk>");
@@ -18,6 +19,7 @@ fn usage() -> ExitCode {
     eprintln!("flags:");
     eprintln!("  common   --root <dir>");
     eprintln!("  build    --out <dir>");
+    eprintln!("  pack     --out <pk> --int32   (i32/f32 cart for small devices)");
     eprintln!("  run      --headless --mute --profile --trace --handlers --leak --debug");
     eprintln!("  bench    --frames N");
     eprintln!("  dump     --headless --out <png> [--at-ms T | --at-frame N] [--region x,y,w,h]");
@@ -134,9 +136,11 @@ fn cmd_build(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
 fn cmd_pack(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
     let mut common = Common { root: None, path: None, headless: true, muted: true };
     let mut out: Option<PathBuf> = None;
+    let mut int32 = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--out" => match args.next() { Some(v) => out = Some(PathBuf::from(v)), None => return usage() },
+            "--int32" => int32 = true,
             _ if parse_root(&mut common, &mut args, &a).unwrap_or(false) => {}
             _ => common.path = Some(a),
         }
@@ -148,7 +152,7 @@ fn cmd_pack(mut args: std::iter::Skip<std::env::Args>) -> ExitCode {
         Ok(h) => h,
         Err(e) => { eprintln!("host init failed: {e}"); return ExitCode::from(1); }
     };
-    let module = match runner::compile_abe(&path, &host) {
+    let module = match runner::compile_abe_with(&path, &host, int32) {
         Ok(r) => r.module,
         Err(e) => { eprintln!("{e}"); return ExitCode::from(1); }
     };

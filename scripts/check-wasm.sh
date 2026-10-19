@@ -3,6 +3,14 @@
 # under node. Covers code mode, cart (.pk) mode, reload across screen sizes, an
 # .abe reading an uploaded .spr asset from the sandbox, and cart stdout capture.
 set -euo pipefail
+# diagnostics: surface toolchain + arch so a macOS-only failure has evidence.
+echo "== env =="
+uname -mrs
+node --version
+wasm-pack --version
+rustc --version
+echo "========"
+trap 'echo "check-wasm.sh FAILED at line $LINENO (exit $?)" >&2' ERR
 cd "$(dirname "$0")/../crates/posara-web"
 # --dev skips wasm-opt (binaryen) — a smoke test needs no optimization, and
 # wasm-opt flakes on arm64 macOS CI. Full output so CI failures are visible.

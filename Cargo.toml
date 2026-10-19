@@ -2,7 +2,7 @@
 # asset converters (opt-in via -p). The main crate lives in crates/posara.
 [workspace]
 resolver = "2"
-members = ["crates/posara", "crates/posara-web", "tools/gfx", "tools/sfx"]
+members = ["crates/posara", "crates/posara-core", "crates/posara-web", "drivers/flash-log", "tools/gfx", "tools/sfx"]
 default-members = ["crates/posara"]
 
 [profile.dev]

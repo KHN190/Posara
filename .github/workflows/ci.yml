@@ -25,7 +25,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown, thumbv8m.main-none-eabihf
       - uses: Swatinem/rust-cache@v2
       - uses: jetli/wasm-pack-action@v0.4.0
 
@@ -34,6 +34,7 @@ jobs:
 
       - name: Tests (web)
         run: cargo test -p posara --no-default-features --features web,test
+
 
       - name: Feature matrix
         run: bash scripts/check-features.sh
