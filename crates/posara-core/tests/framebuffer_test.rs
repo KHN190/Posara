@@ -61,8 +61,8 @@ mod rotation {
         }
 
         #[test]
-        fn quarter_turns_of_matching_parity_draw_every_pixel_once(w in 1i64..48, h in 1i64..48, q in 0i64..4) {
-            prop_assume!(w % 2 == h % 2);
+        fn quarter_turns_of_matching_parity_draw_every_pixel_once(hw in 0i64..24, hh in 0i64..24, odd in 1i64..=2, q in 0i64..4) {
+            let (w, h) = (hw * 2 + odd, hh * 2 + odd);
             prop_assert!(every_pixel_once(&map(w, h, q * 90), w, h));
         }
 
