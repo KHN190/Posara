@@ -2,11 +2,15 @@ use std::path::Path;
 
 use super::Framebuffer;
 
-impl Framebuffer {
+pub trait SavePng {
+    fn save_region_png(&self, x: i64, y: i64, w: i64, h: i64, path: &Path) -> Result<(), String>;
+}
+
+impl SavePng for Framebuffer {
     // RGB565 region → 8-bit RGB PNG. Out-of-bounds region is clamped to the
     // framebuffer rect with a stderr warning; if the clamp leaves zero area
     // returns Err. `image` crate is already a dep (used by png2abe).
-    pub fn save_region_png(&self, x: i64, y: i64, w: i64, h: i64, path: &Path) -> Result<(), String> {
+    fn save_region_png(&self, x: i64, y: i64, w: i64, h: i64, path: &Path) -> Result<(), String> {
         if self.w == 0 || self.h == 0 {
             return Err("framebuffer not configured (call screen() first)".into());
         }

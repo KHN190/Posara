@@ -1,58 +1,20 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "sfx-desktop")]
+use std::sync::atomic::Ordering;
+
+pub use posara_core::sfx::meter::{AudioMeter, AudioSnapshot, Meter};
 
 #[cfg(feature = "sfx-desktop")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::sfx::mixer::{Cmd, Mixer};
+#[cfg(feature = "sfx-desktop")]
+use crate::sfx::mixer::Cmd;
+use crate::sfx::mixer::{Mixer, Retired};
 use crate::sfx::spsc::Spsc;
+use crate::sfx::CmdProd;
 
-pub type CmdProd = Arc<Spsc<Cmd>>;
 pub type SampleRing = Arc<Spsc<f32>>;
-pub type Meter = Arc<AudioMeter>;
-
-// Audio-thread → main-thread telemetry for the profiler's sound panel.
-// Written each buffer by the mixer/callback, read at frame rate.
-#[derive(Default)]
-pub struct AudioMeter {
-    out_peak: AtomicU32,             // master post-mix peak, f32 bits
-    notes: AtomicU32,                // total synth note-ons applied (monotonic)
-    ch_peak: [AtomicU32; 4],         // per-pid output peak, f32 bits
-    ch_voices: [AtomicU32; 4],       // per-pid active voices
-}
-
-pub struct AudioSnapshot {
-    pub notes: u32,
-    pub out_peak: f32,
-    pub ch_peak: [f32; 4],
-    pub ch_voices: [u32; 4],
-}
-
-impl AudioMeter {
-    pub fn set_out(&self, peak: f32) { self.out_peak.store(peak.to_bits(), Ordering::Relaxed); }
-    pub fn inc_notes(&self) { self.notes.fetch_add(1, Ordering::Relaxed); }
-    pub fn set_channels(&self, peak: [f32; 4], voices: [u32; 4]) {
-        for i in 0..4 {
-            self.ch_peak[i].store(peak[i].to_bits(), Ordering::Relaxed);
-            self.ch_voices[i].store(voices[i], Ordering::Relaxed);
-        }
-    }
-    pub fn snapshot(&self) -> AudioSnapshot {
-        let mut ch_peak = [0.0; 4];
-        let mut ch_voices = [0; 4];
-        for i in 0..4 {
-            ch_peak[i] = f32::from_bits(self.ch_peak[i].load(Ordering::Relaxed));
-            ch_voices[i] = self.ch_voices[i].load(Ordering::Relaxed);
-        }
-        AudioSnapshot {
-            notes: self.notes.load(Ordering::Relaxed),
-            out_peak: f32::from_bits(self.out_peak.load(Ordering::Relaxed)),
-            ch_peak,
-            ch_voices,
-        }
-    }
-}
-
 pub struct Audio {
     pub cmds: CmdProd,
     pub rec_ring: SampleRing,
@@ -60,6 +22,7 @@ pub struct Audio {
     pub meter: Meter,
     pub sample_rate: u32,
     pub channels: u16,
+    retired: Arc<Spsc<Retired>>,
     #[cfg(feature = "sfx-desktop")]
     _stream: Option<cpal::Stream>,
     #[cfg(not(feature = "sfx-desktop"))]
@@ -70,12 +33,18 @@ impl Audio {
     // No device: commands queue and drop, everything else runs. No recording.
     pub fn silent() -> Result<Self, String> {
         let meter: Meter = Arc::new(AudioMeter::default());
+        #[cfg(not(feature = "sfx-desktop"))]
+        let mixer = Mixer::new(44100, 2, Arc::clone(&meter), super::DELAY_CAP_MS);
         Ok(Self {
+            #[cfg(not(feature = "sfx-desktop"))]
+            retired: mixer.retired(),
+            #[cfg(feature = "sfx-desktop")]
+            retired: Arc::new(Spsc::new(1)),
             cmds: Arc::new(Spsc::new(1024)),
             rec_ring: Arc::new(Spsc::new(8192)),
             rec_on: Arc::new(AtomicBool::new(false)),
             #[cfg(not(feature = "sfx-desktop"))]
-            mixer: Mixer::new(44100, 2, Arc::clone(&meter)),
+            mixer,
             meter,
             sample_rate: 44100,
             channels: 2,
@@ -88,15 +57,21 @@ impl Audio {
     #[cfg(not(feature = "sfx-desktop"))]
     pub fn web(sample_rate: u32) -> Result<Self, String> {
         let meter: Meter = Arc::new(AudioMeter::default());
+        let mixer = Mixer::new(sample_rate, 2, Arc::clone(&meter), super::DELAY_CAP_MS);
         Ok(Self {
             cmds: Arc::new(Spsc::new(1024)),
             rec_ring: Arc::new(Spsc::new(8192)),
             rec_on: Arc::new(AtomicBool::new(false)),
-            mixer: Mixer::new(sample_rate, 2, Arc::clone(&meter)),
+            retired: mixer.retired(),
+            mixer,
             meter,
             sample_rate,
             channels: 2,
         })
+    }
+
+    pub fn reclaim(&self) {
+        while self.retired.try_pop().is_some() {}
     }
 
     #[cfg(not(feature = "sfx-desktop"))]
@@ -122,7 +97,8 @@ impl Audio {
         let rec_on = Arc::new(AtomicBool::new(false));
         let rec_on_cb = Arc::clone(&rec_on);
         let meter: Meter = Arc::new(AudioMeter::default());
-        let mut mixer = Mixer::new(sample_rate, out_channels, Arc::clone(&meter));
+        let mut mixer = Mixer::new(sample_rate, out_channels, Arc::clone(&meter), super::DELAY_CAP_MS);
+        let retired = mixer.retired();
         let err_fn = |e| eprintln!("audio stream error: {e}");
 
         let stream = match sample_format {
@@ -141,13 +117,9 @@ impl Audio {
         };
         stream.play().map_err(|e| e.to_string())?;
         Ok(Self {
-            cmds, rec_ring, rec_on, meter,
+            cmds, rec_ring, rec_on, meter, retired,
             sample_rate, channels: out_channels as u16,
             _stream: Some(stream),
         })
     }
-}
-
-pub fn push(cmds: &CmdProd, cmd: Cmd) {
-    let _ = cmds.try_push(cmd);
 }

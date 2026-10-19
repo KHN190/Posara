@@ -4,9 +4,15 @@ use std::time::{Duration, Instant, SystemTime};
 
 use myriad::VirtualMachine;
 use myriad::devices::{Console, SystemDevice, CONSOLE_ID, SYSTEM_ID};
-use polka::{Module, Value};
+use polka::Module;
+#[cfg(not(target_arch = "wasm32"))]
+use polka::Value;
 
 use crate::Host;
+#[cfg(not(target_arch = "wasm32"))]
+use posara_core::stepper::is_cart;
+#[cfg(feature = "gfx-desktop")]
+use crate::gfx::SavePng;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
@@ -46,7 +52,8 @@ fn alive(_host: &Host) -> bool { true }
 
 pub use crate::debug::DebugCfg;
 
-fn make_vm(host: &Host, static_names: Vec<String>, fn_names: Vec<String>, dbg: DebugCfg) -> VirtualMachine {
+fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Vec<String>, dbg: DebugCfg) -> VirtualMachine {
+    host.load(module);
     let mut vm = VirtualMachine::new()
         .with_static_names(static_names)
         .with_fn_names(fn_names)
@@ -90,10 +97,6 @@ pub fn load_module(path: &Path, host: &Host) -> Result<LoadResult, String> {
     }
 }
 
-fn is_cart(module: &Module) -> bool {
-    module.functions.iter().any(|c| matches!(c, polka::Chunk::Native(n) if n.name == "__frame_present"))
-}
-
 pub fn load_pk(path: &Path) -> Result<Module, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     read_pk_bytes(&bytes)
@@ -128,8 +131,13 @@ pub fn default_root(entry: &Path) -> PathBuf {
     })
 }
 
-#[cfg(feature = "compiler")]
 pub fn compile_abe(path: &Path, host: &Host) -> Result<LoadResult, String> {
+    compile_abe_with(path, host, false)
+}
+
+// int32 = i32/f32 cart (INT32_SAFE): the VM narrows every Int/Float op.
+#[cfg(feature = "compiler")]
+pub fn compile_abe_with(path: &Path, host: &Host, int32: bool) -> Result<LoadResult, String> {
     use abrase::compiler::Compiler;
     use abrase::loader;
     use crate::lint::{from_abrase_lint, lint_module};
@@ -141,7 +149,7 @@ pub fn compile_abe(path: &Path, host: &Host) -> Result<LoadResult, String> {
             path.parent().unwrap_or_else(|| Path::new(".")).display()),
     }
     let program = loader::load_program_with_root(path, mroot.as_deref()).map_err(|e| e.to_string())?;
-    let mut compiler = Compiler::new().with_source(program.entry_source.clone());
+    let mut compiler = Compiler::new().with_source(program.entry_source.clone()).with_int32_mode(int32);
     host.register_host_fns(&mut compiler)?;
     let module = compiler.compile_module(&program.decls)
         .map_err(|errs| program.render_errors(&errs))?;
@@ -235,7 +243,7 @@ pub fn compile_source_multi(entry: &str, storage: &dyn crate::backend::Storage, 
 }
 
 #[cfg(not(feature = "compiler"))]
-pub fn compile_abe(_path: &Path, _host: &Host) -> Result<LoadResult, String> {
+pub fn compile_abe_with(_path: &Path, _host: &Host, _int32: bool) -> Result<LoadResult, String> {
     Err("posara built without `compiler` feature; only .pk supported".into())
 }
 
@@ -336,12 +344,9 @@ pub fn build_crate(_entry: &Path, _host: &Host, _out: &Path) -> Result<PathBuf, 
 // Drives a loaded module frame by frame, holding the live VM state. Tests use
 // it to inject input between frames; run_until_ms / run_module wrap it.
 pub struct Stepper<'a> {
-    vm: VirtualMachine,
-    loaded: myriad::loader::LoadedModule,
+    inner: posara_core::stepper::Stepper,
+    #[cfg_attr(not(feature = "sfx"), allow(dead_code))]
     host: &'a Host,
-    cart: bool,
-    has_update: bool,
-    done: bool,
 }
 
 impl<'a> Stepper<'a> {
@@ -358,41 +363,26 @@ impl<'a> Stepper<'a> {
     }
 
     fn start_inner<F: FnOnce(&mut VirtualMachine)>(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host, register_aot: F) -> Result<Self, String> {
-        let loaded = myriad::loader::load(module)?;
-        let mut vm = make_vm(host, static_names, fn_names, DebugCfg::default());
-        register_aot(&mut vm);
-        let cart = is_cart(&loaded.module);
-        if cart {
-            vm.run_to_yield(&loaded.module)?;
-        } else if loaded.module.exports.iter().any(|e| e.name == "start") {
-            vm.call_export(&loaded.module, "start", &[])?;
-        }
-        let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
-        Ok(Self { vm, loaded, host, cart, has_update, done: false })
+        let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default());
+        let inner = posara_core::stepper::Stepper::start_with(vm, module, register_aot)?;
+        Ok(Self { inner, host })
     }
 
-    pub fn is_frame_loop(&self) -> bool { self.cart || self.has_update }
-    pub fn steps(&self) -> u64 { self.vm.steps() }
-    pub fn exit_code(&self) -> i64 { self.vm.exit_code().unwrap_or(0) }
+    pub fn is_frame_loop(&self) -> bool { self.inner.is_frame_loop() }
+    pub fn steps(&self) -> u64 { self.inner.steps() }
+    pub fn exit_code(&self) -> i64 { self.inner.exit_code() }
     pub fn print_profile(&self) {
-        if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", self.vm.profile_report()); }
+        if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", self.inner.vm().profile_report()); }
     }
 
     // Run one frame; returns false once the program is finished.
     pub fn frame(&mut self) -> Result<bool, String> {
-        if self.done { return Ok(false); }
-        if self.cart {
-            if !self.vm.resume(&self.loaded.module, Value::from_int(0))? { self.done = true; }
-        } else if self.has_update {
-            self.vm.call_export(&self.loaded.module, "update", &[])?;
-            if self.vm.halted() { self.done = true; }
-        } else {
-            let _: Value = self.vm.run_module(&self.loaded.module)?;
-            self.done = true;
-        }
+        let more = self.inner.frame()?;
         #[cfg(feature = "sfx")]
         self.host.sfx.drain_recorder();
-        Ok(!self.done)
+        #[cfg(feature = "sfx")]
+        self.host.sfx.audio.reclaim();
+        Ok(more)
     }
 }
 
@@ -488,7 +478,7 @@ pub fn run_render(
 ) -> Result<(), String> {
     let sr = host.sfx.audio.sample_rate;
     let ch = host.sfx.audio.channels.max(1) as usize;
-    let mut mixer = crate::sfx::Mixer::new(sr, ch, host.sfx.audio.meter.clone());
+    let mut mixer = crate::sfx::Mixer::new(sr, ch, host.sfx.audio.meter.clone(), crate::sfx::DELAY_CAP_MS);
     let spf = (sr / 60).max(1) as usize;       // samples per video frame, per channel
     let mut frame_buf = vec![0.0f32; spf * ch];
     let mut samples: Vec<f32> = Vec::with_capacity((dur_ms as usize) * sr as usize / 1000 * ch);
@@ -570,7 +560,7 @@ pub fn run_tests(module: Module, static_names: Vec<String>, fn_names: Vec<String
     if names.is_empty() { return Err("no `test_*` exports found".into()); }
     let mut failed = 0;
     for name in &names {
-        let mut vm = make_vm(host, static_names.clone(), fn_names.clone(), DebugCfg::default());
+        let mut vm = make_vm(host, &loaded.module, static_names.clone(), fn_names.clone(), DebugCfg::default());
         match vm.call_export(&loaded.module, name, &[]) {
             Ok(_) => eprintln!("ok   {name}"),
             Err(e) => { eprintln!("FAIL {name}: {e}"); failed += 1; }
@@ -608,7 +598,7 @@ impl OverBudgetWarn {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
     let mut loaded = myriad::loader::load(module)?;
-    let mut vm = make_vm(host, static_names, fn_names, dbg);
+    let mut vm = make_vm(host, &loaded.module, static_names, fn_names, dbg);
 
     let mut cart = is_cart(&loaded.module);
     let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
@@ -685,7 +675,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
                     match load_module(p, host).and_then(|r| myriad::loader::load(r.module).map(|l| (l, r.static_names, r.fn_names))) {
                         Ok((newl, new_static, new_fns)) => {
                             loaded = newl;
-                            vm = make_vm(host, new_static, new_fns, dbg);
+                            vm = make_vm(host, &loaded.module, new_static, new_fns, dbg);
                             #[cfg(feature = "desktop")]
                             { last_steps = 0; }
                             cart = is_cart(&loaded.module);

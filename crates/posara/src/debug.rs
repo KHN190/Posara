@@ -1,18 +1,6 @@
 use myriad::{DebugEvent, DebugSink};
 use myriad::debug::render_fn_label;
 
-pub fn register_assert_natives(vm: &mut myriad::VirtualMachine) {
-    use std::rc::Rc;
-    use myriad::{NativeCtx, Value, read_string};
-    vm.register_native("assert", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
-        if a.first().is_some_and(|v| v.as_bool()) {
-            return Ok((Value::UNIT, false));
-        }
-        let msg = a.get(1).and_then(|v| read_string(ctx.heap, *v)).unwrap_or_default();
-        Err(format!("assert failed: {msg}"))
-    }));
-}
-
 #[derive(Clone, Copy, Default)]
 pub struct DebugCfg {
     pub trace: bool,

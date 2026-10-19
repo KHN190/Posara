@@ -1,0 +1,27 @@
+[package]
+name = "posara-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "no_std posara runtime core: plugins and driver traits shared by every platform."
+
+[features]
+default = []
+std = []
+gfx = ["dep:libm"]
+sfx = ["dep:libm"]
+synth = ["sfx"]
+fs = []
+imu = []
+midi = []
+net = []
+
+[dependencies]
+libm = { version = "0.2", optional = true }
+myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
+polka-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
+
+[lib]
+doctest = false

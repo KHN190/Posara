@@ -26,8 +26,10 @@ osc0 + osc1  →  filter  →  ×amp  →  insert FX  →  pan → mix
 ### Build a patch
 
 - `snd_osc(pid, idx, wave, semi, fine, level)` — set oscillator `idx` (0 or 1).
-  `wave` 0 sq · 1 sin · 2 tri · 3 saw · 4 noise; `semi` pitch offset in semitones,
+  `wave` 0 sq · 1 sin · 2 tri · 3 saw · 4 noise · 5 FM; `semi` pitch offset in semitones,
   `fine` detune in cents, `level` mix 0..100.
+  `wave` 5 on osc 1 makes it a sine modulator: it shapes osc 0's phase instead of
+  sounding, `level` sets the depth (100 = index 2). Values above 5 read as 5.
 - `snd_filter(pid, kind, cutoff_hz, reso)` — one filter after the oscillators.
   `kind` 0 LP · 1 HP · 2 BP · 3 LPG; `cutoff_hz` corner frequency, `reso` 0..100.
 - `snd_env(pid, slot, target, depth, atk, dec, sus, rel)` — one of two envelopes
@@ -88,7 +90,7 @@ Field layout — `offset · width`: `tick` 0·16 · `ch` 16·3 · `note` 19·8 �
 
 Global, applied to all patches.
 
-- `snd_bus_delay(time_ms, feedback, mix)` — delay; `time_ms` tap time, `feedback`/`mix` 0..100.
+- `snd_bus_delay(time_ms, feedback, mix)` — delay; `time_ms` tap time (up to 2000 on desktop and web, shorter on small devices), `feedback`/`mix` 0..100.
 - `snd_bus_reverb(size, damp, mix)` — reverb; `size` room, `damp` high-freq damping, `mix` wet, all 0..100.
 - `snd_bus_record_start(path: String) -> Int` — start WAV capture (needs `fs`).
 - `snd_bus_record_stop() -> Int` — stop capture.

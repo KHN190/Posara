@@ -6,7 +6,17 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 PAT='std::time::Instant|std::time::SystemTime|std::thread|std::fs::'
 
-hits=$(grep -rnE "$PAT" crates/posara/src/host.rs crates/posara/src/plugins crates/posara/src/backend/clock.rs --include=*.rs 2>/dev/null \
+# shipped code only: a file stops at its `#[cfg(test…)] mod`.
+shipped() {
+  awk -v pat="$PAT" '
+    FNR == 1 { skip = 0; prev = "" }
+    prev ~ /#\[cfg\((all\()?test[,)]/ && $0 ~ /^[[:space:]]*mod / { skip = 1 }
+    !skip && $0 ~ pat { print FILENAME ":" FNR ":" $0 }
+    { prev = $0 }
+  ' "$@"
+}
+
+hits=$(shipped crates/posara/src/host.rs crates/posara/src/backend/clock.rs $(find crates/posara/src/plugins crates/posara-core/src -name '*.rs') \
   | grep -vE 'plugins/gfx/png.rs|plugins/sfx/record.rs|plugins/midi/')
 
 if [ -n "$hits" ]; then

@@ -10,22 +10,25 @@ description = "General platform Myriad runtime visual-audio engine."
 # desktop = minifb/cpal Device impls; web = headless fb + pull-mixer (same ports).
 [features]
 default = ["desktop", "test"]
-desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "compiler", "fs"]
-web = ["gfx-web", "sfx-web", "synth", "compiler", "fs"]
+desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "imu", "compiler", "fs", "net"]
+web = ["gfx-web", "sfx-web", "synth", "imu", "compiler", "fs", "net"]
 
-gfx = []
+gfx = ["posara-core/gfx"]
 gfx-desktop = ["gfx", "dep:minifb", "dep:image"]
 gfx-web = ["gfx"]
-sfx = []
+sfx = ["posara-core/sfx"]
 sfx-desktop = ["sfx", "dep:cpal"]
 sfx-web = ["sfx"]
 
 compiler = ["dep:abrase", "dep:polka-rustc"]
 fs = []
+# UDP/OSC. desktop = real UdpSocket, web = stub (see designs/net.md).
+net = ["posara-core/net"]
 # storage backend: real disk (desktop) vs in-memory upload sandbox (web default).
 storage-disk = []
-synth = ["sfx"]
-midi = ["dep:midir", "dep:toml"]
+synth = ["sfx", "posara-core/synth"]
+midi = ["dep:midir", "dep:toml", "posara-core/midi"]
+imu = ["posara-core/imu"]
 test = []
 
 [[bin]]
@@ -42,6 +45,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 midir = { version = "0.10", optional = true }
 toml  = { version = "0.8", optional = true, default-features = false, features = ["parse"] }
 web-time = "1"
+posara-core = { path = "../posara-core", features = ["std", "fs"] }
 myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
