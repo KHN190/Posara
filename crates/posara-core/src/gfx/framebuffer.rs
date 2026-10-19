@@ -111,13 +111,15 @@ impl Framebuffer {
             }
             return;
         }
-        let dw = (w * pct / 100).max(1);
-        let dh = (h * pct / 100).max(1);
-        for dy in 0..dh {
+        let dw = (w.saturating_mul(pct) / 100).max(1);
+        let dh = (h.saturating_mul(pct) / 100).max(1);
+        for y in span(y0, dh, self.h) {
+            let dy = y as i64 - y0;
             let sy = dy * 100 / pct;
-            for dx in 0..dw {
+            for x in span(x0, dw, self.w) {
+                let dx = x as i64 - x0;
                 let sx = dx * 100 / pct;
-                let n = off + (sy * w + sx) as usize;
+                let Ok(n) = usize::try_from(sy as i128 * w as i128 + sx as i128 + off as i128) else { continue; };
                 let byte = get(n / 2);
                 let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
                 if idx == 0 { continue; }
@@ -155,12 +157,9 @@ impl Framebuffer {
     pub fn rect_mix(&mut self, x0: i64, y0: i64, w: i64, h: i64, c: u16, a: i64) {
         let a = a.clamp(0, 256) as u32;
         if a == 0 { return; }
-        for dy in 0..h {
-            for dx in 0..w {
-                let (x, y) = (x0 + dx, y0 + dy);
-                if x < 0 || y < 0 { continue; }
-                let (x, y) = (x as usize, y as usize);
-                if x >= self.w || y >= self.h { continue; }
+        let (ys, xs) = (span(y0, h, self.h), span(x0, w, self.w));
+        for y in ys {
+            for x in xs.clone() {
                 let idx = y * self.w + x;
                 self.buf[idx] = blend565(self.buf[idx], c, a);
             }
@@ -208,6 +207,13 @@ impl Framebuffer {
         }
         Ok(())
     }
+}
+
+// Screen columns or rows covered by [start, start + len).
+pub fn span(start: i64, len: i64, size: usize) -> core::ops::Range<usize> {
+    let lo = start.max(0);
+    let hi = start.saturating_add(len.max(0)).min(size as i64);
+    if lo >= hi { 0..0 } else { lo as usize..hi as usize }
 }
 
 // canvas little-endian 0xAABBGGRR

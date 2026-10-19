@@ -32,81 +32,82 @@ pub use mem::MemStorage;
 
 mod mem {
     use super::*;
-    use core::cell::RefCell;
     use alloc::collections::BTreeMap;
+    use alloc::rc::Rc;
+    use core::cell::RefCell;
 
-    struct OpenFile { path: String, cursor: usize, writable: bool }
+    type Inode = Rc<RefCell<Vec<u8>>>;
+
+    struct OpenFile { file: Inode, cursor: usize, read: bool, write: bool, append: bool }
 
     #[derive(Default)]
     pub struct MemStorage {
-        files: RefCell<BTreeMap<String, Vec<u8>>>,
+        files: RefCell<BTreeMap<String, Inode>>,
         open: RefCell<Vec<Option<OpenFile>>>,
     }
+
     impl MemStorage {
         pub fn new() -> Self { Self::default() }
-        fn slot(&self, path: &str, writable: bool) -> i64 {
-            let mut o = self.open.borrow_mut();
-            let of = OpenFile { path: norm(path), cursor: 0, writable };
-            if let Some(i) = o.iter().position(|s| s.is_none()) { o[i] = Some(of); i as i64 }
-            else { o.push(Some(of)); (o.len() - 1) as i64 }
-        }
     }
+
     fn norm(p: &str) -> String { p.trim_start_matches("./").to_string() }
 
     impl Storage for MemStorage {
         fn open(&self, path: &str, flags: i64) -> i64 {
-            let exists = self.files.borrow().contains_key(&norm(path));
-            if !exists && flags & F_CREATE == 0 && flags & F_READ != 0 { return -1; }
-            if flags & F_CREATE != 0 || (flags & F_TRUNC != 0 && flags & F_APPEND == 0) {
-                self.files.borrow_mut().entry(norm(path)).or_default();
-                if flags & F_TRUNC != 0 { self.files.borrow_mut().insert(norm(path), Vec::new()); }
+            let (read, append) = (flags & F_READ != 0, flags & F_APPEND != 0);
+            let write = flags & F_WRITE != 0 || append;
+            let (create, trunc) = (flags & F_CREATE != 0, flags & F_TRUNC != 0 && !append);
+            if (!read && !write) || (!write && (create || trunc)) { return -1; }
+            let file = match self.files.borrow().get(&norm(path)) {
+                Some(f) => Rc::clone(f),
+                None if create => Inode::default(),
+                None => return -1,
+            };
+            self.files.borrow_mut().entry(norm(path)).or_insert_with(|| Rc::clone(&file));
+            if trunc { file.borrow_mut().clear(); }
+            let of = OpenFile { file, cursor: 0, read, write, append };
+            let mut o = self.open.borrow_mut();
+            match o.iter().position(Option::is_none) {
+                Some(i) => { o[i] = Some(of); i as i64 }
+                None => { o.push(Some(of)); o.len() as i64 - 1 }
             }
-            let fd = self.slot(path, flags & (F_WRITE | F_APPEND) != 0);
-            if flags & F_APPEND != 0 {
-                let len = self.files.borrow().get(&norm(path)).map(|v| v.len()).unwrap_or(0);
-                if let Some(Some(of)) = self.open.borrow_mut().get_mut(fd as usize) { of.cursor = len; }
-            }
-            fd
         }
         fn close(&self, fd: i64) -> bool {
-            match usize::try_from(fd).ok().and_then(|i| self.open.borrow_mut().get_mut(i).map(core::mem::take)) {
-                Some(Some(_)) => true,
-                _ => false,
-            }
+            usize::try_from(fd).ok().and_then(|i| self.open.borrow_mut().get_mut(i).map(core::mem::take)).is_some_and(|f| f.is_some())
         }
         fn seek(&self, fd: i64, whence: i64, off: i64) -> i64 {
             let mut o = self.open.borrow_mut();
-            let Some(Some(of)) = o.get_mut(fd as usize) else { return -1; };
-            let len = self.files.borrow().get(&of.path).map(|v| v.len()).unwrap_or(0) as i64;
-            let pos = match whence { 0 => off, 1 => of.cursor as i64 + off, 2 => len + off, _ => return -1 };
+            let Some(Some(of)) = usize::try_from(fd).ok().and_then(|i| o.get_mut(i)) else { return -1; };
+            let len = of.file.borrow().len() as i64;
+            let pos = match whence { 0 => off.max(0), 1 => of.cursor as i64 + off, 2 => len + off, _ => return -1 };
             if pos < 0 { return -1; }
             of.cursor = pos as usize;
             pos
         }
         fn read(&self, fd: i64, n: usize) -> Option<Vec<u8>> {
             let mut o = self.open.borrow_mut();
-            let of = o.get_mut(fd as usize)?.as_mut()?;
-            let files = self.files.borrow();
-            let data = files.get(&of.path)?;
+            let of = o.get_mut(usize::try_from(fd).ok()?)?.as_mut()?;
+            if !of.read { return Some(Vec::new()); }
+            let data = of.file.borrow();
             let start = of.cursor.min(data.len());
-            let end = (start + n).min(data.len());
-            of.cursor = end;
-            Some(data[start..end].to_vec())
+            let end = start + n.min(data.len() - start);
+            let out = data[start..end].to_vec();
+            drop(data);
+            of.cursor = of.cursor.max(end);
+            Some(out)
         }
-        fn write(&self, fd: i64, data: &[u8]) -> Option<usize> {
+        fn write(&self, fd: i64, bytes: &[u8]) -> Option<usize> {
             let mut o = self.open.borrow_mut();
-            let of = o.get_mut(fd as usize)?.as_mut()?;
-            if !of.writable { return None; }
-            let mut files = self.files.borrow_mut();
-            let buf = files.entry(of.path.clone()).or_default();
-            let at = of.cursor;
-            if buf.len() < at { buf.resize(at, 0); }
-            let tail = &mut buf[at..];
-            let overlap = tail.len().min(data.len());
-            tail[..overlap].copy_from_slice(&data[..overlap]);
-            buf.extend_from_slice(&data[overlap..]);
-            of.cursor = at + data.len();
-            Some(data.len())
+            let of = o.get_mut(usize::try_from(fd).ok()?)?.as_mut()?;
+            if !of.write { return None; }
+            if bytes.is_empty() { return Some(0); }
+            let mut data = of.file.borrow_mut();
+            if of.append { of.cursor = data.len(); }
+            let end = of.cursor + bytes.len();
+            if data.len() < end { data.resize(end, 0); }
+            data[of.cursor..end].copy_from_slice(bytes);
+            of.cursor = end;
+            Some(bytes.len())
         }
         fn exists(&self, path: &str) -> bool { self.files.borrow().contains_key(&norm(path)) }
         fn mkdir(&self, _path: &str) -> bool { true }
@@ -120,24 +121,22 @@ mod mem {
             }
             let mut files = self.files.borrow_mut();
             let key = norm(name);
-            let is_new = !files.contains_key(&key);
-            if is_new && files.len() >= MAX_FILES {
+            if !files.contains_key(&key) && files.len() >= MAX_FILES {
                 return Err(format!("file limit {}", MAX_FILES));
             }
-            let others: usize = files.iter().filter(|(k, _)| **k != key).map(|(_, v)| v.len()).sum();
+            let others: usize = files.iter().filter(|(k, _)| **k != key).map(|(_, v)| v.borrow().len()).sum();
             if others + data.len() > MAX_TOTAL_BYTES {
                 return Err(format!("total exceeds {} bytes", MAX_TOTAL_BYTES));
             }
-            files.insert(key, data);
+            match files.get(&key) {
+                Some(f) => *f.borrow_mut() = data,
+                None => { files.insert(key, Rc::new(RefCell::new(data))); }
+            }
             Ok(())
         }
         fn read_file(&self, name: &str) -> Option<Vec<u8>> {
-            self.files.borrow().get(&norm(name)).cloned()
+            self.files.borrow().get(&norm(name)).map(|f| f.borrow().clone())
         }
-        fn file_names(&self) -> Vec<String> {
-            let mut v: Vec<String> = self.files.borrow().keys().cloned().collect();
-            v.sort();
-            v
-        }
+        fn file_names(&self) -> Vec<String> { self.files.borrow().keys().cloned().collect() }
     }
 }

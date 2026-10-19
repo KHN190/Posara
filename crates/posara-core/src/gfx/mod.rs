@@ -113,10 +113,9 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
     reg!("gfx_rect", move |_: &mut NativeCtx, a: &[Value]| {
         let (x0, y0, w, h, c) = (arg(a, 0), arg(a, 1), arg(a, 2), arg(a, 3), arg(a, 4) as u16);
         let mut fbm = f.borrow_mut();
-        for dy in 0..h {
-            for dx in 0..w {
-                fbm.pset(x0 + dx, y0 + dy, c);
-            }
+        let (fw, fh) = (fbm.w, fbm.h);
+        for y in framebuffer::span(y0, h, fh) {
+            for x in framebuffer::span(x0, w, fw) { fbm.buf[y * fw + x] = c; }
         }
         ret_unit()
     });
@@ -222,9 +221,12 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         if sprite.is_handle_none() { return ret_unit(); }
         let Some(bytes) = myriad::read_bytes(ctx.heap, sprite) else { return ret_unit(); };
         let mut fbm = f.borrow_mut();
+        let bits = bytes.len() as i128 * 8;
         for py in 0..h {
-            for px in 0..w {
-                let bit = off + (py * w + px) as usize;
+            let row = off as i128 + py as i128 * w as i128;
+            if row >= bits { break; }
+            for px in 0..(w as i128).min(bits - row) as i64 {
+                let bit = (row + px as i128) as usize;
                 if bit1(&bytes, bit) {
                     let (dx, dy) = match rot {
                         1 => (h - 1 - py, px),       // 90 cw

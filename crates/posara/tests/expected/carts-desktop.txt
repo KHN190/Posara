@@ -2,8 +2,8 @@ basic/hello.abe gfx=cbf29ce484222325 sfx=a597c823b2576c85
 basic/sprite.abe gfx=3ad60d6bc85e5551 sfx=3eec405aaa5807a5
 basic/text.abe gfx=1c8366f603c75825 sfx=3eec405aaa5807a5
 games/fuji.abe gfx=a763f40d7ebe1af3 sfx=3eec405aaa5807a5
-games/invader.abe gfx=ad1c582cc80d35ad sfx=3eec405aaa5807a5
-games/invader.pk gfx=ad1c582cc80d35ad sfx=3eec405aaa5807a5
+games/invader.abe gfx=90e900a4816fb174 sfx=3eec405aaa5807a5
+games/invader.pk gfx=90e900a4816fb174 sfx=3eec405aaa5807a5
 music/acid.abe gfx=cbf29ce484222325 sfx=3eec405aaa5807a5
 music/ambient.abe gfx=cbf29ce484222325 sfx=3eec405aaa5807a5
 music/cover/vol1.abe gfx=7f7c5568c41439f9 sfx=3eec405aaa5807a5
