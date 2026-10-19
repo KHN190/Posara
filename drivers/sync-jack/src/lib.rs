@@ -69,7 +69,6 @@ const SILENT_US: u64 = 3_000_000;
 #[derive(Clone, Copy, PartialEq)]
 enum Role { Listen(u64), Follow(u64), Lead }
 
-// Plugging in listens 1 s: pulses → follow, none → lead. A leader that hears pulses yields.
 pub struct Jack { plugged: bool, role: Role }
 
 impl Default for Jack {

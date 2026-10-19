@@ -22,6 +22,10 @@ pub(crate) type Real = f32;
 const PI: Real = core::f64::consts::PI;
 #[cfg(not(feature = "std"))]
 const PI: Real = core::f32::consts::PI;
+#[cfg(feature = "std")]
+fn sin_cos(x: Real) -> (Real, Real) { libm::sincos(x) }
+#[cfg(not(feature = "std"))]
+fn sin_cos(x: Real) -> (Real, Real) { libm::sincosf(x) }
 use crate::drivers::Presenter;
 use crate::plugin::Plugin;
 use crate::prelude::*;
@@ -148,7 +152,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         let (cx, cy) = (w as Real / 2.0, h as Real / 2.0);
         let (cxd, cyd) = (x0 + w / 2, y0 + h / 2);
         let theta = deg as Real * PI / 180.0;
-        let (s, c) = theta.sin_cos();
+        let (s, c) = sin_cos(theta);
         let half = (((w * w + h * h) as Real).sqrt() / 2.0).ceil() as i64 + 1;
         let mut fbm = f.borrow_mut();
         let mut ddy = -half;
