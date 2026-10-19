@@ -169,7 +169,7 @@ impl Host {
             x ^= x << 13; x ^= x >> 17; x ^= x << 5;
             *s = x;
             let f = (x as f64) / (u32::MAX as f64);
-            Ok((if f32_bits.get() { Value::from_float_f32(f) } else { Value::from_float(f) }, false))
+            Ok((Value::from_raw(myriad::encode_float(f, f32_bits.get())), false))
         }));
         let r = Rc::clone(&self.rng);
         vm.register_native("srand", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
