@@ -44,3 +44,4 @@ if keydown(bits, A)  { /* A  */ };
 
 - `in_buttons() -> Int` `<IO>` — 8-button bitmap.
 - `in_key() -> Int` `<IO>` — last ASCII key code.
+- `imu_accel(axis: Int) -> Int` `<IO>` — raw acceleration in mg; axis `0` x `1` y `2` z. `0` without a sensor.

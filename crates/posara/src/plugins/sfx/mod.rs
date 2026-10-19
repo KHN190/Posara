@@ -1,42 +1,38 @@
-pub mod env;
-mod bus;
-mod fx;
-mod lfo;
-pub mod mixer;
+pub use posara_core::sfx::{env, mixer, natives, seq, spsc};
+#[cfg(feature = "synth")]
+pub use posara_core::sfx::synth;
 pub mod output;
 pub mod record;
-mod sample;
-mod seq;
-pub mod spsc;
-#[cfg(feature = "synth")]
-pub mod synth;
-mod voice;
 
 pub use mixer::Mixer;
-pub use output::{Audio, AudioMeter, AudioSnapshot, CmdProd, Meter, SampleRing};
+
+pub const DELAY_CAP_MS: u32 = 2000;
+pub use natives::{push, CmdProd};
+pub use output::{Audio, AudioMeter, AudioSnapshot, Meter, SampleRing};
 pub use record::{Recorder, write_wav_f32};
 
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+#[cfg(feature = "fs")]
 use std::sync::Arc;
 #[cfg(feature = "fs")]
 use std::sync::atomic::AtomicBool;
 
-use myriad::{NativeCtx, Value, VirtualMachine};
+use myriad::VirtualMachine;
+#[cfg(feature = "fs")]
+use myriad::{NativeCtx, Value};
 #[cfg(feature = "fs")]
 use myriad::read_string;
 
-use mixer::Cmd;
-use output::push;
-
-use crate::plugin::Plugin;
+use posara_core::plugin::Plugin;
 
 pub type RecorderSlot = Rc<RefCell<Option<Recorder>>>;
 
 pub struct SfxPlugin {
     pub audio: Audio,
     pub recorder: RecorderSlot,
+    #[cfg_attr(not(feature = "fs"), allow(dead_code))]
     root: PathBuf,
 }
 
@@ -77,7 +73,8 @@ impl Drop for SfxPlugin {
 
 impl Plugin for SfxPlugin {
     fn install(&self, vm: &mut VirtualMachine) {
-        register_natives(vm, Arc::clone(&self.audio.cmds));
+        #[cfg(not(feature = "fs"))]
+        let _ = vm;
         #[cfg(feature = "fs")]
         register_record_natives(
             vm,
@@ -89,100 +86,6 @@ impl Plugin for SfxPlugin {
             Rc::clone(&self.recorder),
         );
     }
-
-    #[cfg(feature = "compiler")]
-    fn register_fns(&self, compiler: &mut abrase::compiler::Compiler) -> Result<(), String> {
-        use abrase::ast::EffectItem;
-        let io_eff = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
-        for (name, params, ret) in host_fn_decls() {
-            compiler.register_host_fn(name, params, ret, io_eff())?;
-        }
-        Ok(())
-    }
-}
-
-fn arg(args: &[Value], i: usize) -> i64 {
-    args.get(i).copied().unwrap_or(Value::ZERO).as_int()
-}
-
-fn pct(args: &[Value], i: usize) -> f32 { (arg(args, i).clamp(0, 100) as f32) / 100.0 }
-
-fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
-
-// Every sfx native pushes one Cmd onto the lock-free ring; the audio thread
-// drains it. Ring full → command dropped (`let _`), which only happens under
-// absurd command spam — control rate is tiny vs the 1024-slot ring.
-pub fn register_natives(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
-    let mut names = Vec::new();
-    macro_rules! native {
-        ($name:literal, |$a:ident| $cmd:expr) => {{
-            let p = Arc::clone(&cmds);
-            vm.register_native($name, Rc::new(move |_ctx: &mut NativeCtx, $a: &[Value]| {
-                push(&p, $cmd);
-                ret_unit()
-            }));
-            names.push($name);
-        }};
-    }
-
-    // master-bus time effects (affect synth + sfx)
-    native!("snd_bus_delay", |a| Cmd::BusDelay(arg(a, 0).max(0) as u32,
-        pct(a, 1), pct(a, 2)));
-    native!("snd_bus_reverb", |a| Cmd::BusReverb(pct(a, 0),
-        pct(a, 1), pct(a, 2)));
-
-    // sequencer
-    let p = Arc::clone(&cmds);
-    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let pattern = a.first().copied().unwrap_or(Value::NONE);
-        let ms_per_tick = arg(a, 1).max(1) as u32;
-        if pattern.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = pattern.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
-        let events: Vec<seq::Event> = cells.iter().map(|&w| seq::unpack(w as i64)).collect();
-        push(&p, Cmd::Seq(events, ms_per_tick));
-        ret_unit()
-    }) as myriad::NativeFn;
-    vm.register_native("snd_seq", g);
-    names.push("snd_seq");
-    // sfx_track: like sfx_seq but the array is a packed byte stream (each elem's
-    // low 8 bits = one byte), 8 LE bytes per i64 event — the layout fs_read gives
-    // from a .trk asset. All-zero words (padding) skipped.
-    let p = Arc::clone(&cmds);
-    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let data = a.first().copied().unwrap_or(Value::NONE);
-        let ms_per_tick = arg(a, 1).max(1) as u32;
-        let Some(bytes) = myriad::read_bytes(ctx.heap, data) else { return ret_unit(); };
-        let mut events: Vec<seq::Event> = Vec::with_capacity(bytes.len() / 8);
-        for chunk in bytes.chunks(8) {
-            let mut word: u64 = 0;
-            for (b, &c) in chunk.iter().enumerate() {
-                word |= (c as u64) << (8 * b);
-            }
-            if word != 0 { events.push(seq::unpack(word as i64)); }
-        }
-        push(&p, Cmd::Seq(events, ms_per_tick));
-        ret_unit()
-    }) as myriad::NativeFn;
-    vm.register_native("snd_track", g);
-    names.push("snd_track");
-    native!("snd_seqstop", |_a| Cmd::SeqStop);
-
-    // sfx_sample: play a 1-bit delta-sigma stream (fs_read bytes, low 8 bits =
-    // one byte, MSB-first) at `rate` Hz — the mp32sample playback path.
-    let p = Arc::clone(&cmds);
-    let g = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let buf = a.first().copied().unwrap_or(Value::NONE);
-        let rate = arg(a, 1).max(1) as f32;
-        let vol = pct(a, 2);
-        let Some(bytes) = myriad::read_bytes(ctx.heap, buf) else { return ret_unit(); };
-        push(&p, Cmd::Sample(bytes, rate, vol));
-        ret_unit()
-    }) as myriad::NativeFn;
-    vm.register_native("snd_sample", g);
-    names.push("snd_sample");
-    native!("snd_samplestop", |_a| Cmd::SampleStop);
-    names
 }
 
 #[cfg(feature = "fs")]
@@ -230,26 +133,4 @@ pub fn register_record_natives(
     });
     vm.register_native("snd_bus_record_stop", stop);
     vec!["snd_bus_record_start", "snd_bus_record_stop"]
-}
-
-#[cfg(feature = "compiler")]
-pub fn host_fn_decls() -> Vec<(&'static str, Vec<abrase::ty::Type>, abrase::ty::Type)> {
-    use abrase::ty::Type as T;
-    let arr_int = || T::Generic { name: "Array".into(), args: vec![T::Int] };
-    #[allow(unused_mut)]
-    let mut decls = vec![
-        ("snd_bus_delay",   vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("snd_bus_reverb",  vec![T::Int, T::Int, T::Int],                          T::Unit),
-        ("snd_seq",     vec![arr_int(), T::Int],                               T::Unit),
-        ("snd_track",   vec![T::Named("Bytes".into()), T::Int],               T::Unit),
-        ("snd_sample",  vec![T::Named("Bytes".into()), T::Int, T::Int],       T::Unit),
-        ("snd_samplestop", vec![],                                             T::Unit),
-        ("snd_seqstop", vec![],                                                T::Unit),
-    ];
-    #[cfg(feature = "fs")]
-    {
-        decls.push(("snd_bus_record_start", vec![T::String], T::Int));
-        decls.push(("snd_bus_record_stop",  vec![],          T::Int));
-    }
-    decls
 }

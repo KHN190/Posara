@@ -1,0 +1,15 @@
+[package]
+name = "posara-flash-log"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "Settings on NOR flash for posara: files saved as appended records, one sector."
+
+[lib]
+doctest = false
+
+[dependencies]
+embedded-storage = "0.3"
+posara-core = { path = "../../crates/posara-core", features = ["fs"] }

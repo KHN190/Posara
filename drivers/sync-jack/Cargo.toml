@@ -1,0 +1,11 @@
+[package]
+name = "posara-sync-jack"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "Analog sync jack for posara: 1/8-note pulses to and from MIDI clock."
+
+[lib]
+doctest = false

@@ -1,11 +1,5 @@
-// Time seam. Portable code reads time through Clock; web_time (std on desktop,
-// performance.now on wasm) lives only here.
-pub trait Clock {
-    fn now_ms(&self) -> u64;
-    // Rebase now() to 0. Called when a cart (re)loads so now() is cart-start-
-    // relative — carts assume it starts near 0 (web keeps one Host across runs).
-    fn reset(&self) {}
-}
+// web_time (std on desktop, performance.now on wasm) lives only here.
+pub use posara_core::drivers::Clock;
 
 use std::cell::Cell;
 

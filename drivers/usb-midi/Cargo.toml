@@ -1,0 +1,11 @@
+[package]
+name = "posara-usb-midi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["knh190"]
+description = "USB-MIDI event packets to and from posara MIDI words."
+
+[lib]
+doctest = false
