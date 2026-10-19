@@ -5,9 +5,22 @@
 use alloc::vec::Vec;
 use alloc::boxed::Box;
 
-use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
+#[cfg(not(loom))]
 use core::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(loom)]
+use loom::cell::UnsafeCell;
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(not(loom))]
+struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
+
+#[cfg(not(loom))]
+impl<T> UnsafeCell<T> {
+    fn new(v: T) -> Self { Self(core::cell::UnsafeCell::new(v)) }
+    fn with_mut<R>(&self, f: impl FnOnce(*mut T) -> R) -> R { f(self.0.get()) }
+}
 
 pub struct Spsc<T> {
     buf: Box<[UnsafeCell<MaybeUninit<T>>]>,
@@ -34,7 +47,7 @@ impl<T> Spsc<T> {
         let t = self.tail.load(Ordering::Acquire);
         if h.wrapping_sub(t) >= self.cap { return Err(v); }
         // SAFETY: producer owns slot at h until store(Release) below.
-        unsafe { (*self.buf[h % self.cap].get()).write(v); }
+        self.buf[h % self.cap].with_mut(|p| unsafe { (*p).write(v); });
         self.head.store(h.wrapping_add(1), Ordering::Release);
         Ok(())
     }
@@ -45,7 +58,7 @@ impl<T> Spsc<T> {
         if t == h { return None; }
         // SAFETY: producer published this slot (Release above); consumer reads
         // and then releases the slot via tail store.
-        let v = unsafe { (*self.buf[t % self.cap].get()).assume_init_read() };
+        let v = self.buf[t % self.cap].with_mut(|p| unsafe { (*p).assume_init_read() });
         self.tail.store(t.wrapping_add(1), Ordering::Release);
         Some(v)
     }
