@@ -1,10 +1,8 @@
 use super::Framebuffer;
 
-fn edge(ax: i64, ay: i64, bx: i64, by: i64, px: i64, py: i64) -> i128 {
-    (bx as i128 - ax as i128) * (py as i128 - ay as i128) - (by as i128 - ay as i128) * (px as i128 - ax as i128)
+fn edge(ax: i64, ay: i64, bx: i64, by: i64, px: i64, py: i64) -> i64 {
+    (bx - ax) * (py - ay) - (by - ay) * (px - ax)
 }
-
-const CLIP_LIM: i64 = 1 << 20;
 
 fn outcode(x: i64, y: i64, w: i64, h: i64) -> u8 {
     let mut c = 0u8;
@@ -17,7 +15,6 @@ impl Framebuffer {
     // Walks the unclipped line so the visible pixels never depend on where it leaves the screen.
     fn walk(&mut self, x0: i64, y0: i64, x1: i64, y1: i64, m: i64, mut f: impl FnMut(&mut Self, i64, i64)) {
         let (w, h) = (self.w as i64 + 2 * m, self.h as i64 + 2 * m);
-        if [x0, y0, x1, y1].iter().any(|v| v.abs() > CLIP_LIM) { return; }
         if outcode(x0 + m, y0 + m, w, h) & outcode(x1 + m, y1 + m, w, h) != 0 { return; }
         let inside = |x: i64, y: i64| x >= -m && y >= -m && x < w - m && y < h - m;
         let (mut x, mut y) = (x0, y0);
@@ -67,7 +64,7 @@ impl Framebuffer {
     }
 
     pub fn circ(&mut self, cx: i64, cy: i64, r: i64, c: u16, fill: bool) {
-        if !(0..=CLIP_LIM).contains(&r) || cx.abs() > CLIP_LIM || cy.abs() > CLIP_LIM { return; }
+        if r < 0 { return; }
         if fill {
             // +r ≈ (r+0.5)² radius bias: fills the cardinal spikes the bare
             // dx²+dy²≤r² discretisation leaves on each axis, so the rim reads round.

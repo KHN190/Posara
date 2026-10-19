@@ -38,10 +38,12 @@ fn line_partly_outside_is_clipped_in_bounds() {
 }
 
 #[test]
-fn line_extreme_coords_rejected_without_hang() {
+fn a_line_between_extreme_arguments_finishes_quickly() {
+    let c = |v: i64| posara_core::abi::Args(&[myriad::Value::from_int(v)]).coord(0);
     let mut f = fb(8, 8);
-    f.line(i64::MIN / 2, 0, i64::MAX / 2, 7, 9);
-    assert_eq!(lit(&f), 0);
+    let t = std::time::Instant::now();
+    f.line(c(i64::MIN / 2), 0, c(i64::MAX / 2), 7, 9);
+    assert!(t.elapsed().as_millis() < 500);
 }
 
 #[test]
@@ -210,14 +212,15 @@ mod extremes {
     use super::fb;
 
     fn any_coord() -> impl Strategy<Value = i64> {
-        prop_oneof![-50i64..50, Just(i64::MIN / 4), Just(i64::MAX / 4), Just(-(1i64 << 40)), Just(1i64 << 40), Just(1i64 << 21), Just(-(1i64 << 21))]
+        prop_oneof![-50i64..50, Just(i64::MIN), Just(i64::MAX), any::<i64>()]
+            .prop_map(|v| posara_core::abi::Args(&[myriad::Value::from_int(v)]).coord(0))
     }
 
     proptest! {
         #![proptest_config(ProptestConfig { cases: ProptestConfig::default().cases.min(64), ..ProptestConfig::default() })]
 
         #[test]
-        fn drawing_with_any_coordinates_finishes_and_stays_in_bounds(v in proptest::array::uniform6(any_coord()), t in 1i64..4, a in 0i64..300) {
+        fn drawing_with_any_decoded_coordinates_finishes_and_stays_in_bounds(v in proptest::array::uniform6(any_coord()), t in 1i64..4, a in 0i64..300) {
             let [x0, y0, x1, y1, x2, y2] = v;
             let started = std::time::Instant::now();
             let mut f = fb(16, 12);

@@ -8,4 +8,6 @@ cargo test -q --release -p posara-core --features std,gfx,sfx --test mono_mix_te
 cargo test -q --release -p posara --test gfx_controller_test
 cargo test -q --release -p posara --test gfx_raster_test --test gfx_framebuffer_test --test lang_fs_test
 PROPTEST_CASES=${SFX_CASES:-2000} cargo test -q --release -p posara --test sfx_synth_output_test --test sfx_env_test --test sfx_realtime_alloc_test
+cargo test -q --release -p posara-core --test native_table_test
+cargo test -q --release -p posara --test lang_runner_test every_native
 RUSTFLAGS="--cfg loom" cargo test -q --release -p posara --no-default-features --features sfx --test sfx_spsc_test loom

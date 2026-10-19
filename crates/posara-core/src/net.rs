@@ -2,6 +2,7 @@ use core::cell::RefCell;
 
 use myriad::{alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine};
 
+use crate::abi::Args;
 use crate::prelude::*;
 
 pub const MAX_SOCKETS: usize = 8;
@@ -27,9 +28,6 @@ pub trait Sockets {
     fn live(&self) -> usize;
 }
 
-fn arg(a: &[Value], i: usize) -> i64 {
-    a.get(i).copied().unwrap_or(Value::ZERO).as_int()
-}
 fn ret_int(n: i64) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
 fn bad_sock(id: i64) -> String { format!("udp: invalid socket {id} (stale, unbound, or bind failed)") }
@@ -61,26 +59,26 @@ impl Sockets for NullSockets {
 pub fn register_natives(vm: &mut VirtualMachine, net: Net) {
     let t = Rc::clone(&net);
     vm.register_native("udp_bind", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
-        let p = arg(a, 0);
+        let p = Args(a).word(0);
         if !(0..=65535).contains(&p) { return ret_int(-1); }
         ret_int(t.borrow_mut().bind(p as u16))
     }));
     let t = Rc::clone(&net);
     vm.register_native("udp_addr", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let id = arg(a, 0);
+        let id = Args(a).word(0);
         let s = t.borrow().addr(id).ok_or_else(|| bad_sock(id))?;
         Ok((alloc_string(ctx.heap, &s)?, true))
     }));
     let t = Rc::clone(&net);
     vm.register_native("udp_recv", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let id = arg(a, 0);
+        let id = Args(a).word(0);
         let mut tb = t.borrow_mut();
         tb.recv(id).ok_or_else(|| bad_sock(id))?;           // fills tb's buffer
         Ok((alloc_bytes(ctx.heap, tb.recv_buf())?, true))   // one copy: buffer → heap
     }));
     let t = Rc::clone(&net);
     vm.register_native("udp_from", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let id = arg(a, 0);
+        let id = Args(a).word(0);
         let s = t.borrow().from(id).ok_or_else(|| bad_sock(id))?;
         Ok((alloc_string(ctx.heap, &s)?, true))
     }));
@@ -89,9 +87,9 @@ pub fn register_natives(vm: &mut VirtualMachine, net: Net) {
     // sends with no realloc; sized exactly to the packet, so no length arg.
     let t = Rc::clone(&net);
     vm.register_native("udp_send", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let sock = arg(a, 0);
-        let Some(addr) = a.get(1).and_then(|v| read_string(ctx.heap, *v)) else { return ret_unit(); };
-        let data = a.get(2).copied().unwrap_or(Value::NONE);
+        let sock = Args(a).word(0);
+        let Some(addr) = read_string(ctx.heap, Args(a).handle(1)) else { return ret_unit(); };
+        let data = Args(a).handle(2);
         if data.is_handle_none() { return ret_unit(); }
         let (slot, gen_) = data.as_handle();
         let bytes: Vec<u8> = ctx.heap.cell_data(slot, gen_)?.iter().map(|&w| w as u8).collect();
@@ -100,13 +98,13 @@ pub fn register_natives(vm: &mut VirtualMachine, net: Net) {
     }));
     let t = Rc::clone(&net);
     vm.register_native("udp_broadcast", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
-        let id = arg(a, 0);
-        t.borrow().broadcast(id, a.get(1).copied().unwrap_or(Value::FALSE).as_bool()).ok_or_else(|| bad_sock(id))?;
+        let id = Args(a).word(0);
+        t.borrow().broadcast(id, Args(a).flag(1)).ok_or_else(|| bad_sock(id))?;
         ret_unit()
     }));
     let t = Rc::clone(&net);
     vm.register_native("udp_close", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
-        t.borrow_mut().close(arg(a, 0));
+        t.borrow_mut().close(Args(a).word(0));
         ret_unit()
     }));
 }
