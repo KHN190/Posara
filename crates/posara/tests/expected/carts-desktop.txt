@@ -1,5 +1,5 @@
 basic/hello.abe gfx=cbf29ce484222325 sfx=a597c823b2576c85
-basic/sprite.abe gfx=3ad60d6bc85e5551 sfx=3eec405aaa5807a5
+basic/sprite.abe gfx=fa508193cd749a31 sfx=3eec405aaa5807a5
 basic/text.abe gfx=1c8366f603c75825 sfx=3eec405aaa5807a5
 games/fuji.abe gfx=a763f40d7ebe1af3 sfx=3eec405aaa5807a5
 games/invader.abe gfx=90e900a4816fb174 sfx=3eec405aaa5807a5

@@ -5,40 +5,48 @@
 use alloc::vec::Vec;
 use crate::math;
 
+pub trait Pos: Default {
+    fn bit(&self) -> usize;
+    fn advance(&mut self, step: f32);
+}
+
+impl Pos for f64 {
+    fn bit(&self) -> usize { *self as usize }
+    fn advance(&mut self, step: f32) { *self += step as f64; }
+}
+
 // Devices: 32.32 fixed point, no soft-float f64 per sample.
-#[cfg(feature = "std")]
-type Pos = f64;
-#[cfg(not(feature = "std"))]
-type Pos = u64;
+#[derive(Default)]
+pub struct Fixed(u64);
+
+impl Pos for Fixed {
+    fn bit(&self) -> usize { (self.0 >> 32) as usize }
+    fn advance(&mut self, step: f32) { self.0 += (step * 4294967296.0) as u64; }
+}
 
 #[cfg(feature = "std")]
-fn bit_at(pos: Pos) -> usize { pos as usize }
+type HostPos = f64;
 #[cfg(not(feature = "std"))]
-fn bit_at(pos: Pos) -> usize { (pos >> 32) as usize }
-
-#[cfg(feature = "std")]
-fn advance(pos: &mut Pos, step: f32) { *pos += step as f64; }
-#[cfg(not(feature = "std"))]
-fn advance(pos: &mut Pos, step: f32) { *pos += (step * 4294967296.0) as u64; }
+type HostPos = Fixed;
 
 #[derive(Default)]
-pub struct SamplePlayer {
+pub struct SamplePlayer<P: Pos = HostPos> {
     bytes: Vec<u8>,
     total_bits: usize,
     rate: f32,
     vol: f32,
-    pos: Pos,
+    pos: P,
     lp: f32,
     playing: bool,
 }
 
-impl SamplePlayer {
+impl<P: Pos> SamplePlayer<P> {
     pub fn play(&mut self, bytes: Vec<u8>, rate: f32, vol: f32) -> Vec<u8> {
         self.total_bits = bytes.len() * 8;
         let old = core::mem::replace(&mut self.bytes, bytes);
         self.rate = rate.max(1.0);
         self.vol = vol.clamp(0.0, 1.0);
-        self.pos = Pos::default();
+        self.pos = P::default();
         self.lp = 0.0;
         self.playing = self.total_bits > 0;
         old
@@ -52,12 +60,12 @@ impl SamplePlayer {
         if !self.playing {
             return 0.0;
         }
-        let bi = bit_at(self.pos);
+        let bi = self.pos.bit();
         if bi >= self.total_bits {
             self.playing = false;
             return 0.0;
         }
-        advance(&mut self.pos, self.rate / sr);
+        self.pos.advance(self.rate / sr);
         let bit = (self.bytes[bi / 8] >> (7 - (bi & 7))) & 1;
         let raw = if bit == 1 { 1.0 } else { -1.0 };
         let cut = self.rate * 0.45;
