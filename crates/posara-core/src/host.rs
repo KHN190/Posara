@@ -108,6 +108,8 @@ impl Host {
 
     pub fn load(&self, module: &polka::Module) {
         self.float32.set(module.flags & polka::CART_FLAG_INT32_SAFE != 0);
+        #[cfg(feature = "net")]
+        self.net.sweep();
     }
 
     pub fn now_ms(&self) -> u64 {

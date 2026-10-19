@@ -262,3 +262,31 @@ fn cart_with_net_effect_compiles() {
         loop { gfx_cls(0); gfx_commit(); frame.present() }\n}\n";
     compile_str("posara_net_ok", src).expect("net cart should compile");
 }
+
+#[test]
+fn a_new_cart_on_the_same_host_rebinds_the_old_carts_port() {
+    let port = UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let src = format!(
+        "@cart\nfn main() -> <frame, Graphics, IO, net> Unit {{\n  \
+           let s = udp_bind({port});\n  \
+           gfx_screen(1, 1);\n  \
+           loop {{\n    \
+             if s >= 0 {{ gfx_cls(1) }} else {{ gfx_cls(2) }};\n    \
+             gfx_commit();\n    frame.present()\n  \
+           }}\n}}\n"
+    );
+    let root = std::env::temp_dir().join(format!("posara_net_reload_{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let cart = root.join("bind.abe");
+    std::fs::write(&cart, src).unwrap();
+    let host = Host::new_with(root.clone(), true, true).unwrap();
+    let bound = || {
+        let r = compile_abe(&cart, &host).unwrap();
+        let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
+        step.frame().unwrap();
+        host.gfx.fb.borrow().buf[0] == 1
+    };
+    assert!(bound());
+    assert!(bound(), "second cart could not bind port {port}");
+    std::fs::remove_dir_all(&root).ok();
+}
