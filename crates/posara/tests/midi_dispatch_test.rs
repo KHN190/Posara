@@ -23,3 +23,26 @@ fn midi_prefixed_names_dispatch() {
     step.frame().unwrap_or_else(|e| panic!("dispatch:\n{e}"));
     std::fs::remove_file(&p).ok();
 }
+
+#[test]
+fn a_queued_port_carries_cart_midi_both_ways_as_wire_bytes() {
+    use posara::backend::{Backend, QueueMidi};
+    let mut p = std::env::temp_dir();
+    p.push("posara_midi_queue.abe");
+    let src = "@cart\nfn main() -> <frame, IO> Unit {\n  loop {\n    \
+        if midi_count() > 0 { midi_send(midi_poll()) };\n    \
+        midi_send(248);\n    midi_send(192 + 5 * 256);\n    frame.present()\n  }\n}\n";
+    std::fs::File::create(&p).unwrap().write_all(src.as_bytes()).unwrap();
+
+    let port = QueueMidi::default();
+    let mut backend = Backend::null(std::path::PathBuf::from("."));
+    backend.midi = Some(std::rc::Rc::new(std::cell::RefCell::new(Box::new(port.clone()))));
+    let host = Host::with_backend(std::path::PathBuf::from("."), backend, true, true).unwrap();
+    let r = compile_abe(&p, &host).unwrap_or_else(|e| panic!("compile:\n{e}"));
+    let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
+    port.take_bytes();
+    port.push(0x90 | 60 << 8 | 100 << 16);
+    step.frame().unwrap();
+    assert_eq!(port.take_bytes(), [0x90, 60, 100, 0xF8, 0xC0, 5]);
+    std::fs::remove_file(&p).ok();
+}

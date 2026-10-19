@@ -1,4 +1,4 @@
-#![cfg(feature = "midi")]
+#![cfg(feature = "midi-desktop")]
 use posara::plugins::midi::router::*;
 
 const FULL: &str = r#"
