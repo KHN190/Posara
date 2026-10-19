@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Long property runs: PROPTEST_CASES (default 10000) per property.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PROPTEST_CASES=${PROPTEST_CASES:-10000}
+cargo test -q --release -p posara-usb-midi -p posara-sync-jack -p posara-flash-log
+cargo test -q --release -p posara-core --test mono_mix_test
+cargo test -q --release -p posara --test gfx_controller_test

@@ -22,9 +22,10 @@ pub fn message(w: u32) -> ([u8; 3], usize) {
     let len = match status {
         0x80..=0xBF | 0xE0..=0xEF | 0xF2 => 3,
         0xC0..=0xDF | 0xF1 | 0xF3 => 2,
-        _ => 1,
+        0xF6 | 0xF8..=0xFF => 1,
+        _ => 0,
     };
-    ([status, d1, d2], len)
+    ([status, d1 & 0x7F, d2 & 0x7F], len)
 }
 
 pub struct PortDevice {

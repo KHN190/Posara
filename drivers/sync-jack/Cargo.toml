@@ -9,3 +9,6 @@ description = "Analog sync jack for posara: 1/8-note pulses to and from MIDI clo
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+proptest = "1"

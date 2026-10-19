@@ -25,3 +25,6 @@ polka-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+proptest = "1"
