@@ -74,7 +74,7 @@ pub fn register_natives(vm: &mut VirtualMachine) {
         }
     }));
     vm.register_native("midi_send", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
-        let w = a.first().copied().unwrap_or(Value::ZERO);
+        let w = Value::from_int(crate::abi::Args(a).word(0));
         if let Some(d) = ctx.devices.get_mut(MIDI) {
             d.write(PORT_SEND, w, false, ctx.heap)?;
         }

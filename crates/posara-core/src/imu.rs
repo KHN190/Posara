@@ -30,7 +30,7 @@ impl Device for ImuDevice {
 pub fn install(vm: &mut VirtualMachine, imu: SharedImu) {
     vm.install_device(IMU, Box::new(ImuDevice(imu)));
     vm.register_native("imu_accel", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
-        let axis = a.first().copied().unwrap_or(Value::ZERO).as_int();
+        let axis = crate::abi::Args(a).word(0);
         match (u8::try_from(axis), ctx.devices.get_mut(IMU)) {
             (Ok(port @ 0..=2), Some(d)) => d.read(port),
             _ => Ok((Value::ZERO, false)),

@@ -55,6 +55,7 @@ impl Framebuffer {
     pub fn configure(&mut self, w: usize, h: usize, format: u8) -> Result<(), String> {
         if format != 1 { return Err(format!("Screen: format {} unsupported (only 1=RGB565)", format)); }
         if w == 0 || h == 0 { return Err(format!("Screen: invalid size {}x{}", w, h)); }
+        if w * h > MAX_PIXELS { return Err(format!("Screen: {}x{} is too large", w, h)); }
         if w > self.max_dim || h > self.max_dim { return Err(format!("Screen: {}x{} exceeds web {}x{} budget", w, h, self.max_dim, self.max_dim)); }
         if !self.buf.is_empty() {
             if self.w != w || self.h != h {
@@ -111,15 +112,15 @@ impl Framebuffer {
             }
             return;
         }
-        let dw = (w.saturating_mul(pct) / 100).max(1);
-        let dh = (h.saturating_mul(pct) / 100).max(1);
+        let dw = (w * pct / 100).max(1);
+        let dh = (h * pct / 100).max(1);
         for y in span(y0, dh, self.h) {
             let dy = y as i64 - y0;
             let sy = dy * 100 / pct;
             for x in span(x0, dw, self.w) {
                 let dx = x as i64 - x0;
                 let sx = dx * 100 / pct;
-                let Ok(n) = usize::try_from(sy as i128 * w as i128 + sx as i128 + off as i128) else { continue; };
+                let n = off + (sy * w + sx) as usize;
                 let byte = get(n / 2);
                 let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
                 if idx == 0 { continue; }
@@ -209,10 +210,12 @@ impl Framebuffer {
     }
 }
 
+pub const MAX_PIXELS: usize = 1 << 24;
+
 // Screen columns or rows covered by [start, start + len).
 pub fn span(start: i64, len: i64, size: usize) -> core::ops::Range<usize> {
     let lo = start.max(0);
-    let hi = start.saturating_add(len.max(0)).min(size as i64);
+    let hi = (start + len.max(0)).min(size as i64);
     if lo >= hi { 0..0 } else { lo as usize..hi as usize }
 }
 
