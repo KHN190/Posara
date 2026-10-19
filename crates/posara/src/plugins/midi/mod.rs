@@ -47,6 +47,7 @@ impl Device for MidiDevice {
             PORT_SEND => {
                 let w = val.as_int();
                 let (bytes, len) = posara_core::midi::message(w as u32);
+                if len == 0 { return Ok(()); }
                 let msg = &bytes[..len];
                 // The virtual source carries every send; wires decide who listens.
                 if let Some(v) = &self.virt {

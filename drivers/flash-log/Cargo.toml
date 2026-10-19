@@ -13,3 +13,6 @@ doctest = false
 [dependencies]
 embedded-storage = "0.3"
 posara-core = { path = "../../crates/posara-core", features = ["fs"] }
+
+[dev-dependencies]
+proptest = "1"

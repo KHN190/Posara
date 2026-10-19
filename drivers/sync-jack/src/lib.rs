@@ -98,10 +98,12 @@ impl Jack {
     }
 }
 
-pub struct Link { jack: Jack, rx: SyncIn, tx: SyncOut }
+const COINCIDE_US: u64 = 5_000;
+
+pub struct Link { jack: Jack, rx: SyncIn, tx: SyncOut, sent_us: Option<u64> }
 
 impl Link {
-    pub fn new(src: u8) -> Self { Self { jack: Jack::new(), rx: SyncIn::new(src), tx: SyncOut::new() } }
+    pub fn new(src: u8) -> Self { Self { jack: Jack::new(), rx: SyncIn::new(src), tx: SyncOut::new(), sent_us: None } }
 
     pub fn word(&self) -> u32 { self.rx.word() }
 
@@ -112,7 +114,9 @@ impl Link {
         self.jack.plug(plugged, now_us);
     }
 
+    // coincident pulses: neither leader yields
     pub fn on_pulse(&mut self, now_us: u64) -> u8 {
+        if self.jack.leads() && self.sent_us.is_some_and(|t| now_us.abs_diff(t) < COINCIDE_US) { return 0; }
         self.jack.on_pulse(now_us);
         self.rx.on_pulse(now_us)
     }
@@ -124,5 +128,9 @@ impl Link {
         self.rx.poll(now_us)
     }
 
-    pub fn on_send(&mut self, status: u8) -> bool { self.tx.on_send(status) && self.jack.leads() }
+    pub fn on_send(&mut self, status: u8, now_us: u64) -> bool {
+        let pulse = self.tx.on_send(status) && self.jack.leads();
+        if pulse { self.sent_us = Some(now_us); }
+        pulse
+    }
 }

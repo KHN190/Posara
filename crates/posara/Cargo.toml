@@ -51,3 +51,6 @@ myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
 polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
+
+[dev-dependencies]
+proptest = "1"

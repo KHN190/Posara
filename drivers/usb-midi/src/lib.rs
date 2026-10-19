@@ -9,7 +9,9 @@ pub fn word(p: [u8; 4], src: u8) -> Option<u32> {
 pub fn packet(w: u32) -> [u8; 4] {
     let ([status, d1, d2], len) = posara_core::midi::message(w);
     let cin = match (status, len) {
+        (_, 0) => return [0; 4],
         (0x80..=0xEF, _) => status >> 4,
+        (0xF6, _) => 0x5,
         (_, 1) => 0xF,
         _ => len as u8,
     };
