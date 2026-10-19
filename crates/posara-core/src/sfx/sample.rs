@@ -3,8 +3,6 @@
 // low-freq signal (the noise-shaped quantization error lives up high and is
 // filtered out). The playback-side half of mp32sample.
 use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use crate::math;
 
 // Devices: 32.32 fixed point, no soft-float f64 per sample.

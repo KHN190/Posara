@@ -1,6 +1,4 @@
 use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use crate::math;
 
 #[derive(Clone, Copy)]

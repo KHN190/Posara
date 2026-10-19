@@ -144,3 +144,86 @@ fn a_steady_plug_state_does_not_restart_listening() {
     j.plug(true, 2 * SECOND_US);
     assert!(j.leads());
 }
+
+use posara_sync_jack::Link;
+
+const EIGHTH_US: u64 = 250_000;
+
+fn following(at: u64) -> Link {
+    let mut l = Link::new(1);
+    l.plug(true, at);
+    l
+}
+
+#[test]
+fn a_follower_turns_each_pulse_into_twelve_clocks_and_sends_none() {
+    let mut l = following(0);
+    let mut clocks = 0u32;
+    for k in 0..8u64 {
+        let t = k * EIGHTH_US;
+        clocks += l.on_pulse(t) as u32;
+        for ms in 1..250u64 { clocks += l.poll(t + ms * 1000) as u32; }
+        assert!(!(0..12).any(|_| l.on_send(CLOCK)), "follower pulsed out");
+    }
+    assert_eq!(clocks, 8 * 12);
+}
+
+#[test]
+fn half_an_hour_of_pocket_operator_pulses_never_drifts() {
+    let mut l = following(0);
+    let (mut clocks, mut t) = (0u64, 0u64);
+    for k in 0..7200u64 {
+        let jitter = [0, 700, 300, 1000, 0, 500][k as usize % 6];
+        let pulse = k * EIGHTH_US + jitter;
+        while t + 1000 <= pulse {
+            t += 1000;
+            clocks += l.poll(t) as u64;
+        }
+        clocks += l.on_pulse(pulse) as u64;
+        assert!(clocks.abs_diff(12 * k + 6) <= 6, "pulse {k}: {clocks} clocks");
+    }
+    assert_eq!(clocks + l.poll(t + EIGHTH_US) as u64, 12 * 7200);
+}
+
+#[test]
+fn a_restart_after_silence_delivers_the_first_pulse_whole() {
+    let mut l = following(0);
+    l.on_pulse(0);
+    l.poll(0);
+    l.on_pulse(EIGHTH_US);
+    l.poll(EIGHTH_US + EIGHTH_US / 2);
+    let back = EIGHTH_US + 10 * SECOND_US;
+    l.poll(back - 1);
+    assert_eq!(l.on_pulse(back) + l.poll(back), 12);
+}
+
+#[test]
+fn two_leaders_plugged_together_settle_within_two_beats() {
+    let (mut a, mut b) = (Link::new(1), Link::new(1));
+    let tick_us = 500_000 / 24;
+    let mut leaders_at_2s = 0;
+    for ms in 0..6000u64 {
+        let t = ms * 1000;
+        a.plug(true, t);
+        b.plug(true, t);
+        a.poll(t);
+        b.poll(t);
+        let tick = t % tick_us < 1000;
+        let a_out = tick && a.on_send(CLOCK);
+        let b_out = (t + 7000) % tick_us < 1000 && b.on_send(CLOCK);
+        if a_out { b.on_pulse(t); }
+        if b_out { a.on_pulse(t); }
+        if ms == 2003 { leaders_at_2s = a.leads() as u8 + b.leads() as u8; }
+    }
+    assert_eq!(leaders_at_2s, 1);
+    assert_eq!(a.leads() as u8 + b.leads() as u8, 1);
+}
+
+#[test]
+fn start_realigns_the_outgoing_pulses() {
+    let mut l = Link::new(1);
+    assert!(l.on_send(CLOCK));
+    l.on_send(CLOCK);
+    l.on_send(START);
+    assert!(l.on_send(CLOCK));
+}

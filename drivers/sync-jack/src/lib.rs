@@ -97,3 +97,32 @@ impl Jack {
         };
     }
 }
+
+pub struct Link { jack: Jack, rx: SyncIn, tx: SyncOut }
+
+impl Link {
+    pub fn new(src: u8) -> Self { Self { jack: Jack::new(), rx: SyncIn::new(src), tx: SyncOut::new() } }
+
+    pub fn word(&self) -> u32 { self.rx.word() }
+
+    pub fn leads(&self) -> bool { self.jack.leads() }
+
+    pub fn plug(&mut self, plugged: bool, now_us: u64) {
+        if plugged != self.jack.plugged { self.rx.on_stop(); }
+        self.jack.plug(plugged, now_us);
+    }
+
+    pub fn on_pulse(&mut self, now_us: u64) -> u8 {
+        self.jack.on_pulse(now_us);
+        self.rx.on_pulse(now_us)
+    }
+
+    pub fn poll(&mut self, now_us: u64) -> u8 {
+        let following = matches!(self.jack.role, Role::Follow(_));
+        self.jack.poll(now_us);
+        if following && self.jack.leads() { self.rx.on_stop(); }
+        self.rx.poll(now_us)
+    }
+
+    pub fn on_send(&mut self, status: u8) -> bool { self.tx.on_send(status) && self.jack.leads() }
+}

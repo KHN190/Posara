@@ -22,8 +22,9 @@ if cargo build --target wasm32-unknown-unknown -p posara-web >/dev/null 2>&1; th
   ok "posara-web wasm32 build"; else bad "posara-web wasm32 build"; fi
 
 CORE_ALL=gfx,sfx,synth,fs,midi,net,imu
+clean() { out=$("$@" 2>&1) && ! grep -q "^warning" <<<"$out"; }
 for f in gfx sfx synth fs midi net imu $CORE_ALL; do
-  if cargo check -p posara-core --no-default-features --features "$f" --target thumbv8m.main-none-eabihf >/dev/null 2>&1; then
+  if clean cargo check -p posara-core --no-default-features --features "$f" --target thumbv8m.main-none-eabihf; then
     ok "posara-core [$f] thumbv8m no_std"; else bad "posara-core [$f] thumbv8m no_std"; fi
 done
 for f in "" "$CORE_ALL" "std,$CORE_ALL"; do
@@ -31,7 +32,7 @@ for f in "" "$CORE_ALL" "std,$CORE_ALL"; do
     ok "posara-core tests [${f:-none}]"; else bad "posara-core tests [${f:-none}]"; fi
 done
 for c in posara-core posara-flash-log posara-sync-jack posara-usb-midi; do
-  if cargo check -p "$c" --target thumbv8m.main-none-eabihf >/dev/null 2>&1; then
+  if clean cargo check -p "$c" --target thumbv8m.main-none-eabihf; then
     ok "$c thumbv8m no_std"; else bad "$c thumbv8m no_std"; fi
 done
 

@@ -1,5 +1,3 @@
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use crate::math;
 
 use crate::sfx::env::Adsr;
