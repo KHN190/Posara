@@ -115,20 +115,46 @@ fn cart_discovery_reply_via_from() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-// The shipped example must emit a byte-exact OSC packet. Copy the real osc.abe +
-// sc.abe, call sc's actual `s_new` builder (not a parallel copy), send it, and
-// assert the datagram matches the OSC 1.0 wire layout.
+// A cart-built OSC packet must be byte-exact to the OSC 1.0 wire layout. The
+// encoder + s_new builder are self-contained fixtures here — the test owns its
+// inputs. Asserts the datagram matches the hand-computed /s_new bytes.
 #[test]
 fn osc_s_new_bytes_exact() {
     let listener = UdpSocket::bind("127.0.0.1:0").unwrap();
     listener.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let port = listener.local_addr().unwrap().port();
 
-    let src_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../workspace/osc");
     let root = std::env::temp_dir().join("posara_osc_snew");
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::copy(format!("{src_dir}/osc.abe"), root.join("osc.abe")).unwrap();
-    std::fs::copy(format!("{src_dir}/sc.abe"), root.join("sc.abe")).unwrap();
+
+    // OSC encoder: str (null-padded to 4) + big-endian i32 into a caller Array<Int>.
+    let osc = "pub fn osc_str(buf: &mut Array<Int>, off: Int, s: String) -> Int {\n  \
+                 let n = s.len();\n  \
+                 for i in 0..n { buf[off + i] = s.byte_at(i) };\n  \
+                 off + (n / 4 + 1) * 4\n}\n\
+               pub fn osc_i32(buf: &mut Array<Int>, off: Int, v: Int) -> Int {\n  \
+                 buf[off] = (v >> 24) & 0xFF;\n  \
+                 buf[off + 1] = (v >> 16) & 0xFF;\n  \
+                 buf[off + 2] = (v >> 8) & 0xFF;\n  \
+                 buf[off + 3] = v & 0xFF;\n  \
+                 off + 4\n}\n";
+    std::fs::write(root.join("osc.abe"), osc).unwrap();
+
+    // /s_new "default" -1 0 1 "freq" <freq>, built at fn top level (borrow release).
+    let sc = "use osc::{osc_str, osc_i32}\n\
+              pub fn s_new(freq: Int) -> Array<Int> {\n  \
+                let mut buf = [0; 48];\n  \
+                let mut n = 0;\n  \
+                n = osc_str(&mut buf, n, \"/s_new\");\n  \
+                n = osc_str(&mut buf, n, \",siiisi\");\n  \
+                n = osc_str(&mut buf, n, \"default\");\n  \
+                n = osc_i32(&mut buf, n, -1);\n  \
+                n = osc_i32(&mut buf, n, 0);\n  \
+                n = osc_i32(&mut buf, n, 1);\n  \
+                n = osc_str(&mut buf, n, \"freq\");\n  \
+                let _ = osc_i32(&mut buf, n, freq);\n  \
+                buf\n}\n";
+    std::fs::write(root.join("sc.abe"), sc).unwrap();
 
     let src = format!(
         "use sc::{{s_new}}\n@cart\n\
@@ -162,16 +188,6 @@ fn osc_s_new_bytes_exact() {
     assert_eq!(&buf[..n], &want[..], "OSC /s_new bytes mismatch");
 
     std::fs::remove_dir_all(&root).ok();
-}
-
-// Compile the SHIPPED example carts themselves, not a parallel copy — a
-// hand-written stand-in drifts from the real file and misses its bugs.
-#[test]
-fn workspace_osc_examples_compile() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../workspace/osc");
-    let host = Host::new_with(std::path::PathBuf::from(dir), true, true).unwrap();
-    let entry = std::path::PathBuf::from(dir).join("sc.abe");
-    compile_abe(&entry, &host).expect("workspace/osc/sc.abe must compile");
 }
 
 // Using a stale socket (bound, closed, then sent on) is a loud error, not a

@@ -2,26 +2,12 @@
 pub mod gfx;
 #[cfg(feature = "sfx")]
 pub mod sfx;
-#[cfg(feature = "synth")]
-pub mod synth;
-#[cfg(feature = "fs")]
-pub mod fs;
 #[cfg(feature = "midi")]
 pub mod midi;
 #[cfg(feature = "net")]
 pub mod net;
 
-#[cfg(feature = "gfx")]
-pub use gfx::GfxPlugin;
-#[cfg(feature = "gfx")]
-pub use gfx::input::InputPlugin;
 #[cfg(feature = "sfx")]
 pub use sfx::SfxPlugin;
-#[cfg(feature = "synth")]
-pub use synth::SynthPlugin;
-#[cfg(feature = "fs")]
-pub use fs::FsPlugin;
 #[cfg(feature = "midi")]
 pub use midi::MidiPlugin;
-#[cfg(feature = "net")]
-pub use net::NetPlugin;

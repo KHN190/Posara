@@ -1,0 +1,83 @@
+use alloc::boxed::Box;
+use alloc::collections::VecDeque;
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::String;
+use core::cell::RefCell;
+
+use myriad::{Device, Heap, NativeCtx, Value, VirtualMachine};
+
+use crate::devices::MIDI;
+use crate::drivers::MidiPort;
+use crate::plugin::Plugin;
+
+pub const PORT_EVENT: u8 = 0x00;
+pub const PORT_COUNT: u8 = 0x01;
+pub const PORT_SEND: u8 = 0x02;
+
+pub type SharedMidi = Rc<RefCell<Box<dyn MidiPort>>>;
+
+pub struct PortDevice {
+    port: SharedMidi,
+    queue: VecDeque<u32>,
+}
+
+impl PortDevice {
+    pub fn new(port: SharedMidi) -> Self { Self { port, queue: VecDeque::new() } }
+
+    fn pump(&mut self) {
+        let mut p = self.port.borrow_mut();
+        while let Some(ev) = p.recv() { self.queue.push_back(ev); }
+    }
+}
+
+impl Device for PortDevice {
+    fn read(&mut self, port: u8) -> Result<(Value, bool), String> {
+        self.pump();
+        match port {
+            PORT_EVENT => Ok((Value::from_int(self.queue.pop_front().unwrap_or(0) as i64), false)),
+            PORT_COUNT => Ok((Value::from_int(self.queue.len() as i64), false)),
+            _ => Err(format!("MIDI: read port {:#04x} unsupported", port)),
+        }
+    }
+
+    fn write(&mut self, port: u8, val: Value, _is_handle: bool, _heap: &mut Heap) -> Result<(), String> {
+        match port {
+            PORT_SEND => self.port.borrow_mut().send(val.as_int() as u32),
+            _ => Err(format!("MIDI: write port {:#04x} unsupported", port)),
+        }
+    }
+}
+
+pub fn register_natives(vm: &mut VirtualMachine) {
+    vm.register_native("midi_poll", Rc::new(|ctx: &mut NativeCtx, _: &[Value]| {
+        match ctx.devices.get_mut(MIDI) {
+            Some(d) => d.read(PORT_EVENT),
+            None => Ok((Value::ZERO, false)),
+        }
+    }));
+    vm.register_native("midi_count", Rc::new(|ctx: &mut NativeCtx, _: &[Value]| {
+        match ctx.devices.get_mut(MIDI) {
+            Some(d) => d.read(PORT_COUNT),
+            None => Ok((Value::ZERO, false)),
+        }
+    }));
+    vm.register_native("midi_send", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
+        let w = a.first().copied().unwrap_or(Value::ZERO);
+        if let Some(d) = ctx.devices.get_mut(MIDI) {
+            d.write(PORT_SEND, w, false, ctx.heap)?;
+        }
+        Ok((Value::UNIT, false))
+    }));
+}
+
+pub struct MidiPlugin {
+    pub port: SharedMidi,
+}
+
+impl Plugin for MidiPlugin {
+    fn install(&self, vm: &mut VirtualMachine) {
+        vm.install_device(MIDI, Box::new(PortDevice::new(Rc::clone(&self.port))));
+        register_natives(vm);
+    }
+}

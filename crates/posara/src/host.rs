@@ -1,60 +1,56 @@
 use std::cell::RefCell;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
-use crate::backend::{Backend, Clock};
 
-use myriad::{NativeCtx, Value, VirtualMachine};
+use myriad::VirtualMachine;
+use posara_core::host::Drivers;
 
-#[cfg(feature = "gfx")]
-use crate::plugins::{GfxPlugin, InputPlugin};
+use crate::backend::Backend;
+#[cfg(any(feature = "sfx", feature = "midi"))]
+use crate::plugin::Plugin;
 #[cfg(feature = "sfx")]
 use crate::plugins::SfxPlugin;
-#[cfg(feature = "synth")]
-use crate::plugins::SynthPlugin;
-#[cfg(feature = "fs")]
-use crate::plugins::FsPlugin;
 #[cfg(feature = "midi")]
 use crate::plugins::MidiPlugin;
-#[cfg(feature = "net")]
-use crate::plugins::NetPlugin;
-use crate::plugin::Plugin;
 
-// Every capability is a Plugin (install + register_fns). Host keeps typed
-// fields where callers need direct access (gfx framebuffer, sfx recorder) and
-// iterates them uniformly through the trait for VM/compiler wiring.
+// Desktop/web host: the portable core plus what needs std (audio device,
+// recorder, PNG, midir routing). Deref exposes the core's plugins.
 pub struct Host {
-    pub clock_src: Rc<dyn Clock>,
-    // When Some(ms), now() returns this virtual time instead of wall clock —
-    // offline rendering drives it so timing is deterministic and non-realtime.
-    pub clock: Rc<std::cell::Cell<Option<u64>>>,
-    pub rng: Rc<RefCell<u32>>,
-    // Cart stdout sink for the web console (make_vm wires a BufferConsole here on
-    // wasm). The frontend drains it each frame and tags it as cart output.
+    core: posara_core::host::Host,
+    // Cart stdout sink for the web console; the frontend drains it each frame.
     pub console_out: myriad::devices::console::SharedBuf,
     pub root: PathBuf,
-    #[cfg(feature = "gfx")]
-    pub gfx: GfxPlugin,
-    #[cfg(feature = "gfx")]
-    pub input: InputPlugin,
     #[cfg(feature = "sfx")]
     pub sfx: SfxPlugin,
-    #[cfg(feature = "synth")]
-    synth: SynthPlugin,
-    #[cfg(feature = "fs")]
-    pub fs: FsPlugin,
     #[cfg(feature = "midi")]
-    midi: MidiPlugin,
-    #[cfg(feature = "net")]
-    pub net: NetPlugin,
+    midi_io: Option<MidiPlugin>,
 }
+
+impl Deref for Host {
+    type Target = posara_core::host::Host;
+    fn deref(&self) -> &Self::Target { &self.core }
+}
+
+#[cfg(feature = "midi")]
+type MidiIo = Option<MidiPlugin>;
+#[cfg(not(feature = "midi"))]
+type MidiIo = ();
 
 impl Host {
     pub fn new(root: PathBuf) -> Result<Self, String> { Self::new_with(root, false, false) }
 
     pub fn new_with(root: PathBuf, headless: bool, muted: bool) -> Result<Self, String> {
-        Self::build(root, headless, muted, |_root| {
+        Self::build(root.clone(), Backend::new(root), headless, muted, |_root| {
             #[cfg(feature = "midi")]
-            return MidiPlugin::new();
+            return Some(MidiPlugin::new());
+        })
+    }
+
+    pub fn with_backend(root: PathBuf, backend: Backend, headless: bool, muted: bool) -> Result<Self, String> {
+        Self::build(root, backend, headless, muted, |_root| {
+            #[cfg(feature = "midi")]
+            return None;
         })
     }
 
@@ -64,175 +60,114 @@ impl Host {
     pub fn new_cart(root: PathBuf, headless: bool, muted: bool, entry: &std::path::Path) -> Result<Self, String> {
         #[cfg(not(feature = "midi"))]
         let _ = entry;
-        Self::build(root, headless, muted, |_root| {
+        Self::build(root.clone(), Backend::new(root), headless, muted, |_root| {
             #[cfg(feature = "midi")]
-            return MidiPlugin::new_routed(_root, entry);
+            return Some(MidiPlugin::new_routed(_root, entry));
         })
     }
 
-    #[cfg(feature = "midi")]
-    fn build(root: PathBuf, headless: bool, muted: bool, midi: impl FnOnce(&std::path::Path) -> MidiPlugin) -> Result<Self, String> {
-        let midi = midi(&root);
-        Self::assemble(root, headless, muted, midi)
-    }
-
-    #[cfg(not(feature = "midi"))]
-    fn build(root: PathBuf, headless: bool, muted: bool, _midi: impl FnOnce(&std::path::Path)) -> Result<Self, String> {
-        Self::assemble(root, headless, muted)
-    }
-
-    fn assemble(root: PathBuf, headless: bool, muted: bool, #[cfg(feature = "midi")] midi: MidiPlugin) -> Result<Self, String> {
-        let backend = Backend::new(root.clone());
+    fn build(root: PathBuf, backend: Backend, headless: bool, muted: bool, midi: impl FnOnce(&std::path::Path) -> MidiIo) -> Result<Self, String> {
         #[cfg(not(feature = "gfx"))]
         let _ = headless;
         #[cfg(not(feature = "sfx"))]
         let _ = muted;
+        #[cfg(feature = "midi")]
+        let midi_io = if backend.midi.is_some() { None } else { midi(&root) };
+        #[cfg(not(feature = "midi"))]
+        midi(&root);
         #[cfg(feature = "sfx")]
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
-        #[cfg(feature = "gfx")]
-        let gfx = GfxPlugin::new(backend.presenter(headless), root.clone());
+        let core = posara_core::host::Host::new(Drivers {
+            clock: Rc::clone(&backend.clock),
+            #[cfg(feature = "gfx")]
+            display: backend.presenter(headless),
+            #[cfg(feature = "sfx")]
+            cmds: std::sync::Arc::clone(&sfx.audio.cmds),
+            storage: Rc::clone(&backend.storage),
+            #[cfg(feature = "midi")]
+            midi: backend.midi.clone().unwrap_or_else(|| Rc::new(RefCell::new(Box::new(posara_core::drivers::NullMidi)))),
+            #[cfg(feature = "net")]
+            sockets: Box::new(crate::plugins::net::SocketTable::new()),
+            #[cfg(feature = "imu")]
+            imu: backend.imu,
+        });
+        // Web pixel budget (memory bound; presenter scales up).
+        #[cfg(all(feature = "gfx", not(feature = "gfx-desktop")))]
+        {
+            let mut fb = core.gfx.fb.borrow_mut();
+            fb.max_dim = 480;
+            fb.rgba = true;
+        }
         Ok(Self {
-            clock_src: Rc::clone(&backend.clock),
-            clock: Rc::new(std::cell::Cell::new(None)),
-            rng: Rc::new(RefCell::new(0x9e3779b9)),
+            core,
             console_out: Rc::new(RefCell::new(Vec::new())),
-            #[cfg(feature = "gfx")]
-            input: InputPlugin::new(Rc::clone(&gfx.fb)),
-            #[cfg(feature = "gfx")]
-            gfx,
-            #[cfg(feature = "synth")]
-            synth: SynthPlugin::new(std::sync::Arc::clone(&sfx.audio.cmds)),
+            root,
             #[cfg(feature = "sfx")]
             sfx,
-            #[cfg(feature = "fs")]
-            fs: FsPlugin::new(Rc::clone(&backend.storage)),
             #[cfg(feature = "midi")]
-            midi,
-            #[cfg(feature = "net")]
-            net: NetPlugin::new(),
-            root,
+            midi_io,
         })
     }
 
-    fn plugin_list(&self) -> Vec<&dyn Plugin> {
-        let mut v: Vec<&dyn Plugin> = Vec::new();
-        #[cfg(feature = "gfx")]
-        v.push(&self.gfx);
-        #[cfg(feature = "gfx")]
-        v.push(&self.input);
-        #[cfg(feature = "sfx")]
-        v.push(&self.sfx);
-        #[cfg(feature = "synth")]
-        v.push(&self.synth);
-        #[cfg(feature = "fs")]
-        v.push(&self.fs);
-        #[cfg(feature = "midi")]
-        v.push(&self.midi);
-        #[cfg(feature = "net")]
-        v.push(&self.net);
-        v
-    }
-
     pub fn install(&self, vm: &mut VirtualMachine) {
-        for p in self.plugin_list() { p.install(vm); }
-        #[cfg(not(feature = "midi"))]
-        {
-            vm.install_device(crate::devices::MIDI, Box::new(StubDevice::new("MIDI", "midi")));
-            // stub natives so carts referencing MIDI still resolve on midi-less backends.
-            vm.register_native("midi_poll", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::ZERO, false))));
-            vm.register_native("midi_count", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::ZERO, false))));
-            vm.register_native("midi_send", Rc::new(|_: &mut NativeCtx, _: &[Value]| Ok((Value::UNIT, false))));
-        }
-        #[cfg(not(feature = "gfx"))]
-        {
-            vm.install_device(crate::devices::SCREEN, Box::new(StubDevice::new("Screen", "gfx")));
-            vm.install_device(crate::devices::CONTROLLER, Box::new(StubDevice::new("Controller", "gfx")));
-        }
-        register_time_natives(vm, Rc::clone(&self.clock_src), Rc::clone(&self.clock));
-        register_rand_natives(vm, Rc::clone(&self.rng));
-        crate::debug::register_assert_natives(vm);
-    }
-
-    #[cfg(feature = "gfx")]
-    pub fn set_input(&self, buttons: u8, key: u8) {
-        let mut c = self.input.controller.borrow_mut();
-        c.buttons = buttons;
-        c.key = key;
+        self.core.install(vm);
+        #[cfg(feature = "sfx")]
+        self.sfx.install(vm);
+        #[cfg(all(feature = "gfx", feature = "fs"))]
+        crate::gfx::register_io_natives(vm, Rc::clone(&self.gfx.fb), self.root.clone());
+        #[cfg(feature = "midi")]
+        if let Some(m) = &self.midi_io { m.install(vm); }
     }
 
     #[cfg(feature = "compiler")]
     pub fn register_host_fns(&self, compiler: &mut abrase::compiler::Compiler) -> Result<(), String> {
-        use abrase::ty::Type as T;
         use abrase::ast::EffectItem;
-        let io_eff = || vec![EffectItem { name: vec!["IO".into()], arg: None }];
+        use abrase::ty::Type as T;
+        use posara_core::abi::{Cap, Eff, Ty, NATIVES};
 
-        for p in self.plugin_list() { p.register_fns(compiler)?; }
-
-        compiler.register_host_fn("now",   vec![],       T::Int,   io_eff())?;
-        compiler.register_host_fn("rand",  vec![],       T::Float, vec![EffectItem { name: vec!["nondet".into()], arg: None }])?;
-        compiler.register_host_fn("srand", vec![T::Int], T::Unit,  vec![EffectItem { name: vec!["nondet".into()], arg: None }])?;
-        compiler.register_host_fn("assert", vec![T::Bool, T::String], T::Unit, vec![])?;
-        Ok(())
-    }
-}
-
-fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
-
-#[cfg(any(not(feature = "midi"), not(feature = "gfx")))]
-struct StubDevice {
-    name: &'static str,
-    feature: &'static str,
-    warned: bool,
-}
-
-#[cfg(any(not(feature = "midi"), not(feature = "gfx")))]
-impl StubDevice {
-    fn new(name: &'static str, feature: &'static str) -> Self {
-        Self { name, feature, warned: false }
-    }
-
-    fn warn(&mut self) {
-        if !self.warned {
-            self.warned = true;
-            eprintln!("• {}: posara built without `{}` feature; events dropped", self.name, self.feature);
+        fn enabled(cap: Cap) -> bool {
+            match cap {
+                Cap::Core => true,
+                Cap::Gfx | Cap::Input => cfg!(feature = "gfx"),
+                Cap::GfxFs => cfg!(all(feature = "gfx", feature = "fs")),
+                Cap::Sfx => cfg!(feature = "sfx"),
+                Cap::SfxFs => cfg!(all(feature = "sfx", feature = "fs")),
+                Cap::Synth => cfg!(feature = "synth"),
+                Cap::Fs => cfg!(feature = "fs"),
+                Cap::Midi => cfg!(feature = "midi"),
+                Cap::Net => cfg!(feature = "net"),
+                Cap::Imu => cfg!(feature = "imu"),
+            }
         }
-    }
-}
+        fn ty(t: Ty) -> T {
+            let bytes = || T::Named("Bytes".into());
+            let arr_int = || T::Generic { name: "Array".into(), args: vec![T::Int] };
+            match t {
+                Ty::Int => T::Int,
+                Ty::Float => T::Float,
+                Ty::Bool => T::Bool,
+                Ty::Str => T::String,
+                Ty::Unit => T::Unit,
+                Ty::Bytes => bytes(),
+                Ty::RefBytes => T::Reference { is_mut: false, inner: Box::new(bytes()) },
+                Ty::ArrInt => arr_int(),
+                Ty::RefArrInt => T::Reference { is_mut: false, inner: Box::new(arr_int()) },
+            }
+        }
+        fn eff(e: Eff) -> Vec<EffectItem> {
+            let name = match e {
+                Eff::Pure => return vec![],
+                Eff::Graphics => "Graphics",
+                Eff::IO => "IO",
+                Eff::Network => "net",
+                Eff::Nondet => "nondet",
+            };
+            vec![EffectItem { name: vec![name.into()], arg: None }]
+        }
 
-#[cfg(any(not(feature = "midi"), not(feature = "gfx")))]
-impl myriad::Device for StubDevice {
-    fn read(&mut self, _port: u8) -> Result<(Value, bool), String> {
-        self.warn();
-        Ok((Value::ZERO, false))
-    }
-
-    fn write(&mut self, _port: u8, _val: Value, _is_handle: bool, _heap: &mut myriad::memory::Heap) -> Result<(), String> {
-        self.warn();
+        for s in NATIVES.iter().filter(|s| enabled(s.cap)) {
+            compiler.register_host_fn(s.name, s.params.iter().map(|&t| ty(t)).collect(), ty(s.ret), eff(s.eff))?;
+        }
         Ok(())
     }
-}
-
-fn register_time_natives(vm: &mut VirtualMachine, clock_src: Rc<dyn Clock>, clock: Rc<std::cell::Cell<Option<u64>>>) {
-    vm.register_native("now", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
-        let ms = clock.get().unwrap_or_else(|| clock_src.now_ms());
-        Ok((Value::from_int(ms as i64), false))
-    }));
-}
-
-fn register_rand_natives(vm: &mut VirtualMachine, rng: Rc<RefCell<u32>>) {
-    let r = Rc::clone(&rng);
-    vm.register_native("rand", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
-        let mut s = r.borrow_mut();
-        let mut x = if *s == 0 { 0x9e3779b9 } else { *s };
-        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-        *s = x;
-        let f = (x as f64) / (u32::MAX as f64);
-        Ok((Value::from_float(f), false))
-    }));
-    let r = Rc::clone(&rng);
-    vm.register_native("srand", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
-        let seed = a.first().copied().unwrap_or(Value::ZERO).as_int() as u32;
-        *r.borrow_mut() = if seed == 0 { 0x9e3779b9 } else { seed };
-        ret_unit()
-    }));
 }

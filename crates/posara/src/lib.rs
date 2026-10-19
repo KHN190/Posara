@@ -4,7 +4,7 @@ compile_error!("pick one gfx backend: gfx-desktop or gfx-web");
 compile_error!("pick one sfx backend: sfx-desktop or sfx-web");
 
 pub mod backend;
-pub mod devices;
+pub use posara_core::devices;
 pub mod plugin;
 pub mod plugins;
 pub mod debug;
@@ -23,7 +23,11 @@ pub use plugins::gfx::input;
 #[cfg(feature = "sfx")]
 pub use plugins::sfx;
 #[cfg(feature = "fs")]
-pub use plugins::fs;
+pub mod fs {
+    pub use posara_core::fs::*;
+    pub use crate::backend::storage::resolve;
+}
+pub use posara_core::stepper::is_cart;
 
 #[cfg(feature = "gfx")]
 pub use gfx::Framebuffer;
