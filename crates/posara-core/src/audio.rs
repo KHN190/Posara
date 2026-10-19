@@ -8,7 +8,6 @@ pub fn to_mono_i16(stereo: &[f32], out: &mut [i16]) {
     }
 }
 
-// Headphone width: right lags left by a fixed number of samples (Haas).
 pub struct Width {
     ring: alloc::vec::Vec<f32>,
     at: usize,
