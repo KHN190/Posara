@@ -29,7 +29,7 @@ impl Fx {
             FX_BITCRUSH => {
                 let levels = math::powf(2.0f32, 1.0 + (1.0 - self.amt) * 11.0); // amt↑ → fewer bits
                 let q = (x * 0.5 + 0.5) * levels;
-                let crushed = (q.round() / levels) * 2.0 - 1.0;
+                let crushed = ((q.round() / levels) * 2.0 - 1.0).clamp(-1.0, 1.0);
                 let decim = 1 + (self.amt * 16.0) as u32; // amt↑ → coarser sample-hold
                 if self.hold_n == 0 { self.hold = crushed; self.hold_n = decim; }
                 self.hold_n -= 1;

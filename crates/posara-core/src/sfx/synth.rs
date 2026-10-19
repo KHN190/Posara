@@ -259,6 +259,10 @@ impl Voice {
             }
         }
         s /= self.ucount as f32;
+        if !s.is_finite() {
+            self.phase = [[0.0; 2]; MAX_UNISON];
+            return 0.0;
+        }
 
         let cutoff = if self.cfg.fkind == FK_LPG {
             self.cfg.cutoff * (0.05 + 0.95 * amp_env)
