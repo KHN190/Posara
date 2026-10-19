@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use crate::math::F32Ext;
+use crate::math;
 
 #[derive(Clone, Copy)]
 pub struct Event {
@@ -62,7 +63,7 @@ impl Sequencer {
 }
 
 pub fn note_to_freq(note: u8) -> f32 {
-    440.0 * (2.0f32).powf((note as f32 - 69.0) / 12.0)
+    440.0 * math::powf(2.0f32, (note as f32 - 69.0) / 12.0)
 }
 
 // One event packed per i64: tick:16 | ch:3 | note:8 | vol:7 | dur:16 (LSB→MSB).
