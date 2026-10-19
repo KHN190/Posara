@@ -146,3 +146,32 @@ fn loading_a_long_sequence_never_sorts_on_the_audio_thread() {
     assert_eq!(hits, 0);
 }
 
+
+mod sfx_ops;
+
+mod random_streams {
+    use super::sfx_ops::session;
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn any_command_stream_mixes_without_heap_ops(ops in session(), seq in proptest::collection::vec((0u32..32, 0u8..128), 0..64)) {
+            let mut m = mixer();
+            let mut cmds: Vec<_> = ops.iter().map(|(o, n)| (o.cmd(), *n)).collect();
+            let events: Vec<Event> = seq.iter().map(|&(tick, note)| Event { tick, ch: (note % 4) as usize, note, vel: 0.7, dur: 2 }).collect();
+            let seq_cmd = Cmd::Seq(posara::sfx::seq::by_tick(events), 5);
+            let sample = Cmd::Sample(vec![128u8; 4800], 22_050.0, 0.5);
+            let mut buf = vec![0f32; BLOCK * 2];
+            let hits = heap_hits(|| {
+                m.apply(seq_cmd);
+                m.apply(sample);
+                for (c, n) in cmds.drain(..) {
+                    m.apply(c);
+                    for _ in 0..n { m.mix(&mut buf); }
+                }
+            });
+            prop_assert_eq!(hits, 0);
+        }
+    }
+}
