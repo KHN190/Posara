@@ -60,3 +60,80 @@ fn drop_runs_for_unread_items() {
     }
     assert_eq!(DROPS.load(Ordering::Relaxed), 2);
 }
+
+#[cfg(not(loom))]
+mod against_a_deque {
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+
+    use posara::sfx::spsc::Spsc;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn any_push_pop_sequence_matches_a_bounded_deque(cap in 1usize..9, ops in prop::collection::vec(any::<bool>(), 0..200)) {
+            let q = Spsc::new(cap);
+            let mut model = VecDeque::new();
+            for (i, push) in ops.into_iter().enumerate() {
+                if push {
+                    let full = model.len() == cap;
+                    prop_assert_eq!(q.try_push(i), if full { Err(i) } else { Ok(()) });
+                    if !full { model.push_back(i); }
+                } else {
+                    prop_assert_eq!(q.try_pop(), model.pop_front());
+                }
+            }
+        }
+
+        #[test]
+        fn threads_hand_over_every_item_once_in_order(cap in 1usize..9, n in 0usize..2000, bursts in prop::collection::vec((1usize..20, 0u32..50), 1..16)) {
+            let q = Arc::new(Spsc::new(cap));
+            let tx = Arc::clone(&q);
+            let plan = bursts.clone();
+            let producer = std::thread::spawn(move || {
+                let mut next = 0;
+                for (burst, spin) in plan.iter().cycle() {
+                    for _ in 0..*burst {
+                        if next == n { return; }
+                        while tx.try_push(next).is_err() { std::hint::spin_loop(); }
+                        next += 1;
+                    }
+                    for _ in 0..*spin { std::hint::spin_loop(); }
+                }
+            });
+            let mut got = Vec::with_capacity(n);
+            for (burst, spin) in bursts.iter().rev().cycle() {
+                if got.len() == n { break; }
+                for _ in 0..*burst { if let Some(v) = q.try_pop() { got.push(v); } }
+                for _ in 0..*spin { std::hint::spin_loop(); }
+            }
+            producer.join().unwrap();
+            prop_assert_eq!(got, (0..n).collect::<Vec<_>>());
+            prop_assert_eq!(q.try_pop(), None);
+        }
+    }
+}
+
+#[cfg(loom)]
+#[test]
+fn loom_every_interleaving_hands_over_in_order_across_full_and_wrap() {
+    loom::model(|| {
+        let q = loom::sync::Arc::new(Spsc::new(2));
+        let tx = q.clone();
+        let producer = loom::thread::spawn(move || {
+            for i in 0..3 {
+                while tx.try_push(i).is_err() { loom::thread::yield_now(); }
+            }
+        });
+        let mut got = Vec::new();
+        while got.len() < 3 {
+            match q.try_pop() {
+                Some(v) => got.push(v),
+                None => loom::thread::yield_now(),
+            }
+        }
+        producer.join().unwrap();
+        assert_eq!(got, [0, 1, 2]);
+        assert_eq!(q.try_pop(), None);
+    });
+}

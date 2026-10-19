@@ -104,6 +104,8 @@ mod recorded_output {
     fn run(path: &Path) -> Result<(u64, u64), String> {
         #[cfg(not(feature = "sfx-desktop"))]
         let mut host = Box::new(Host::new_with(default_root(path), true, true)?);
+        #[cfg(not(feature = "sfx-desktop"))]
+        upload_assets(&host, &default_root(path));
         #[cfg(feature = "sfx-desktop")]
         let host = Box::new(Host::with_backend(default_root(path), Backend::null(default_root(path)), true, true)?);
         // web-style alias: Stepper holds &Host, pull needs &mut.
@@ -130,6 +132,20 @@ mod recorded_output {
             if !more { break; }
         }
         Ok((gfx.0, sfx.0))
+    }
+
+    #[cfg(not(feature = "sfx-desktop"))]
+    fn upload_assets(host: &Host, root: &Path) {
+        fn walk(dir: &Path, root: &Path, host: &Host) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() { walk(&p, root, host); continue; }
+                if p.extension().is_some_and(|x| x == "abe" || x == "pk") { continue; }
+                let name = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+                host.fs.storage.add_file(&name, std::fs::read(&p).unwrap()).unwrap();
+            }
+        }
+        walk(root, root, host);
     }
 
     fn line(path: &Path) -> String {

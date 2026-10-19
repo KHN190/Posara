@@ -1,5 +1,3 @@
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use super::Framebuffer;
 
 fn edge(ax: i64, ay: i64, bx: i64, by: i64, px: i64, py: i64) -> i128 {
@@ -74,7 +72,7 @@ impl Framebuffer {
             // +r ≈ (r+0.5)² radius bias: fills the cardinal spikes the bare
             // dx²+dy²≤r² discretisation leaves on each axis, so the rim reads round.
             for dy in (-r).max(-cy)..=r.min(self.h as i64 - 1 - cy) {
-                let dx = (((r * r + r - dy * dy) as super::Real).sqrt()) as i64;
+                let dx = super::circle_span(r, dy);
                 self.line(cx - dx, cy + dy, cx + dx, cy + dy, c);
             }
             return;
