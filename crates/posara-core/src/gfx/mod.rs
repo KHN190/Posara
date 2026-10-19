@@ -11,41 +11,51 @@ use core::cell::RefCell;
 use myriad::{NativeCtx, Value, VirtualMachine};
 
 
-// Desktop/web keep f64 (recorded output); devices use the FPU's f32.
-#[cfg(feature = "std")]
-pub(crate) type Real = f64;
-#[cfg(not(feature = "std"))]
-pub(crate) type Real = f32;
+const fn sin_q16(d: usize) -> i32 {
+    let (q, neg) = if d < 180 { (d, false) } else { (d - 180, true) };
+    let q = if q > 90 { 180 - q } else { q };
+    let x = q as f64 * core::f64::consts::PI / 180.0;
+    let (mut term, mut sum, mut k) = (x, x, 1);
+    while k < 12 {
+        term = -term * x * x / ((2 * k) as f64 * (2 * k + 1) as f64);
+        sum += term;
+        k += 1;
+    }
+    let v = (sum * 65536.0 + 0.5) as i32;
+    if neg { -v } else { v }
+}
 
-pub fn blitr_map<R: crate::math::Real>(w: i64, h: i64, deg: i64, mut put: impl FnMut(i64, i64, i64, i64)) {
-    let two = R::of(2);
-    let (cx, cy) = (R::of(w) / two, R::of(h) / two);
-    let (s, c) = exact_sin_cos::<R>(deg).unwrap_or_else(|| (R::of(deg) * R::PI / R::of(180)).sin_cos());
-    let half = (R::of(w * w + h * h).sqrt() / two).ceil().int() + 1;
+pub const SIN_Q16: [i32; 360] = {
+    let mut t = [0; 360];
+    let mut d = 0;
+    while d < 360 {
+        t[d] = sin_q16(d);
+        d += 1;
+    }
+    t
+};
+
+const ROTATE_MAX: i64 = 4096;
+
+// Destination pixel centres map back to source coordinates in Q16 and floor: integer only, so every platform agrees.
+pub fn blitr_map(w: i64, h: i64, deg: i64, mut put: impl FnMut(i64, i64, i64, i64)) {
+    if !(1..=ROTATE_MAX).contains(&w) || !(1..=ROTATE_MAX).contains(&h) { return; }
+    let d = deg.rem_euclid(360) as usize;
+    let (s, c) = (SIN_Q16[d] as i64, SIN_Q16[(d + 90) % 360] as i64);
+    let half = (crate::math::isqrt_ceil(w * w + h * h) + 1) / 2 + 1;
+    let centre = |n: i64| if n % 2 == 0 { 1 << 15 } else { 0 };
     for ddy in -half..=half {
         for ddx in -half..=half {
-            let sx = (c * R::of(ddx) + s * R::of(ddy) + cx).round().int();
-            let sy = (-s * R::of(ddx) + c * R::of(ddy) + cy).round().int();
+            let (ox, oy) = ((ddx << 16) + centre(w), (ddy << 16) + centre(h));
+            let sx = (c * ox + s * oy + (w << 31)) >> 32;
+            let sy = (-s * ox + c * oy + (h << 31)) >> 32;
             if (0..w).contains(&sx) && (0..h).contains(&sy) { put(ddx, ddy, sx, sy); }
         }
     }
 }
 
-// Multiples of 30° and 45°: ½ and |sin| = |cos| must be exact or x.5 ties round apart between f32 and f64.
-fn exact_sin_cos<R: crate::math::Real>(deg: i64) -> Option<(R, R)> {
-    let d = deg.rem_euclid(360);
-    let two = R::of(2);
-    let (half, r2, r3) = (R::of(1) / two, R::of(2).sqrt() / two, R::of(3).sqrt() / two);
-    if d % 45 == 0 {
-        let sine = |k: i64| [R::of(0), r2, R::of(1), r2, R::of(0), -r2, R::of(-1), -r2][k.rem_euclid(8) as usize];
-        return Some((sine(d / 45), sine(d / 45 + 2)));
-    }
-    if d % 30 != 0 { return None; }
-    let sine = |k: i64| [R::of(0), half, r3, R::of(1), r3, half, R::of(0), -half, -r3, R::of(-1), -r3, -half][k.rem_euclid(12) as usize];
-    Some((sine(d / 30), sine(d / 30 + 3)))
-}
+pub fn circle_span(r: i64, dy: i64) -> i64 { crate::math::isqrt(r * r + r - dy * dy) }
 
-pub fn circle_span<R: crate::math::Real>(r: i64, dy: i64) -> i64 { R::of(r * r + r - dy * dy).sqrt().int() }
 use crate::drivers::Presenter;
 use crate::plugin::Plugin;
 use crate::prelude::*;
@@ -170,7 +180,7 @@ pub fn register_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>) -
         let Some(bytes) = myriad::read_bytes(ctx.heap, sprite) else { return ret_unit(); };
         let (cxd, cyd) = (x0 + w / 2, y0 + h / 2);
         let mut fbm = f.borrow_mut();
-        blitr_map::<Real>(w, h, deg, |ddx, ddy, sx, sy| {
+        blitr_map(w, h, deg, |ddx, ddy, sx, sy| {
             if bit1(&bytes, off + (sy * w + sx) as usize) { fbm.pset_op(cxd + ddx, cyd + ddy, color, mode); }
         });
         ret_unit()

@@ -72,7 +72,7 @@ impl Framebuffer {
             // +r ≈ (r+0.5)² radius bias: fills the cardinal spikes the bare
             // dx²+dy²≤r² discretisation leaves on each axis, so the rim reads round.
             for dy in (-r).max(-cy)..=r.min(self.h as i64 - 1 - cy) {
-                let dx = super::circle_span::<super::Real>(r, dy);
+                let dx = super::circle_span(r, dy);
                 self.line(cx - dx, cy + dy, cx + dx, cy + dy, c);
             }
             return;

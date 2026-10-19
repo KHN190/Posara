@@ -9,37 +9,20 @@ pub fn tanh(x: f32) -> f32 { libm::tanhf(x) }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
 pub fn powf(x: f32, n: f32) -> f32 { libm::powf(x, n) }
 
-#[cfg(any(feature = "gfx", feature = "sfx"))]
-pub trait Real: Copy + core::ops::Add<Output = Self> + core::ops::Mul<Output = Self> + core::ops::Div<Output = Self> + core::ops::Neg<Output = Self> {
-    const PI: Self;
-    fn of(n: i64) -> Self;
-    fn int(self) -> i64;
-    fn round(self) -> Self;
-    fn sqrt(self) -> Self;
-    fn ceil(self) -> Self;
-    fn sin_cos(self) -> (Self, Self);
+pub fn isqrt(n: i64) -> i64 {
+    if n < 2 { return n.max(0); }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
 }
 
-#[cfg(any(feature = "gfx", feature = "sfx"))]
-impl Real for f32 {
-    const PI: f32 = core::f32::consts::PI;
-    fn of(n: i64) -> f32 { n as f32 }
-    fn int(self) -> i64 { self as i64 }
-    fn round(self) -> f32 { libm::roundf(self) }
-    fn sqrt(self) -> f32 { libm::sqrtf(self) }
-    fn ceil(self) -> f32 { libm::ceilf(self) }
-    fn sin_cos(self) -> (f32, f32) { libm::sincosf(self) }
-}
-
-#[cfg(any(feature = "gfx", feature = "sfx"))]
-impl Real for f64 {
-    const PI: f64 = core::f64::consts::PI;
-    fn of(n: i64) -> f64 { n as f64 }
-    fn int(self) -> i64 { self as i64 }
-    fn round(self) -> f64 { libm::round(self) }
-    fn sqrt(self) -> f64 { libm::sqrt(self) }
-    fn ceil(self) -> f64 { libm::ceil(self) }
-    fn sin_cos(self) -> (f64, f64) { libm::sincos(self) }
+pub fn isqrt_ceil(n: i64) -> i64 {
+    let s = isqrt(n);
+    if s * s < n { s + 1 } else { s }
 }
 
 #[cfg(not(feature = "std"))]
