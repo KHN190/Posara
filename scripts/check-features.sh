@@ -30,7 +30,7 @@ for f in "" "$CORE_ALL" "std,$CORE_ALL"; do
   if cargo test -p posara-core --no-default-features ${f:+--features "$f"} >/dev/null 2>&1; then
     ok "posara-core tests [${f:-none}]"; else bad "posara-core tests [${f:-none}]"; fi
 done
-for c in posara-core posara-flash-log; do
+for c in posara-core posara-flash-log posara-sync-jack posara-usb-midi; do
   if cargo check -p "$c" --target thumbv8m.main-none-eabihf >/dev/null 2>&1; then
     ok "$c thumbv8m no_std"; else bad "$c thumbv8m no_std"; fi
 done
