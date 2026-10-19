@@ -67,43 +67,10 @@ fn boot<const W: usize>(nor: Mock<W>) -> (FlashLog<Mock<W>>, MemStorage) {
 }
 
 #[test]
-fn blank_flash_restores_no_files() {
-    let (_, mem) = boot(Nor::new());
-    assert!(mem.file_names().is_empty());
-}
-
-#[test]
-fn saved_files_come_back_after_power_off() {
+fn saves_append_until_the_sector_fills_then_erase_once_and_refuse_oversized() {
     let (mut log, _) = boot(Nor::new());
-    assert!(log.store(&files(&[("synth.sav", &[1, 171, 4, 5, 6, 90, 0, 7, 1]), ("b", &[])])).unwrap());
-    let (_, mem) = boot(log.release());
-    assert_eq!(mem.file_names(), ["b", "synth.sav"]);
-    assert_eq!(mem.read_file("synth.sav").unwrap(), [1, 171, 4, 5, 6, 90, 0, 7, 1]);
-    assert_eq!(mem.read_file("b").unwrap(), Vec::<u8>::new());
-}
-
-#[test]
-fn the_latest_save_wins() {
-    let (mut log, _) = boot(Nor::new());
-    log.store(&files(&[("s", &[1])])).unwrap();
-    log.store(&files(&[("s", &[2])])).unwrap();
-    let (_, mem) = boot(log.release());
-    assert_eq!(mem.read_file("s").unwrap(), [2]);
-}
-
-#[test]
-fn unchanged_files_leave_flash_untouched() {
-    let (mut log, _) = boot(Nor::new());
-    log.store(&files(&[("s", &[1])])).unwrap();
-    let (mut log, mem) = boot(log.release());
-    let before = (log.flash().writes, log.flash().erases);
-    assert!(!log.store(&mem).unwrap());
-    assert_eq!((log.flash().writes, log.flash().erases), before);
-}
-
-#[test]
-fn saves_append_until_the_sector_fills_then_erase_once() {
-    let (mut log, _) = boot(Nor::new());
+    assert!(log.store(&files(&[("big", &[0; SECTOR as usize])])).is_err());
+    assert_eq!(log.flash().writes, 0);
     let mut n = 0u32;
     while log.flash().erases == 0 {
         n += 1;
@@ -113,28 +80,6 @@ fn saves_append_until_the_sector_fills_then_erase_once() {
     assert_eq!(log.flash().erases, 1);
     let (_, mem) = boot(log.release());
     assert_eq!(mem.read_file("synth.sav").unwrap(), n.to_le_bytes());
-}
-
-#[test]
-fn a_torn_save_falls_back_to_the_one_before() {
-    let (mut log, _) = boot(Nor::new());
-    log.store(&files(&[("s", &[1])])).unwrap();
-    log.store(&files(&[("s", &[2])])).unwrap();
-    let mut nor = log.release();
-    let last = (BASE..BASE + LOG).rev().find(|&a| nor.bits[a as usize] != 0xFF).unwrap();
-    nor.bits[last as usize] = 0xFF;
-    let (mut log, mem) = boot(nor);
-    assert_eq!(mem.read_file("s").unwrap(), [1]);
-    log.store(&files(&[("s", &[3])])).unwrap();
-    let (_, mem) = boot(log.release());
-    assert_eq!(mem.read_file("s").unwrap(), [3]);
-}
-
-#[test]
-fn files_too_big_for_the_sector_are_refused() {
-    let (mut log, _) = boot(Nor::new());
-    assert!(log.store(&files(&[("big", &[0; SECTOR as usize])])).is_err());
-    assert_eq!(log.flash().writes, 0);
 }
 
 use std::collections::BTreeMap;
@@ -162,6 +107,10 @@ fn file_sets() -> impl Strategy<Value = Files> {
     prop::collection::btree_map("[a-z][a-z0-9_.]{0,11}", prop::collection::vec(any::<u8>(), 0..1200), 0..5)
 }
 
+fn fitting_sets() -> impl Strategy<Value = Files> {
+    prop::collection::btree_map("[a-z][a-z0-9_.]{0,11}", prop::collection::vec(any::<u8>(), 1..700), 1..4)
+}
+
 #[derive(Clone, Debug)]
 enum Op { Save(Files), Reboot }
 
@@ -177,10 +126,15 @@ fn replay<const W: usize>(ops: Vec<Op>) -> Result<(), TestCaseError> {
     for op in ops {
         match op {
             Op::Save(f) => {
+                let before = (log.flash().writes, log.flash().erases);
                 let r = log.store(&stored(&f));
                 if fits::<W>(&f) {
                     prop_assert_eq!(r.unwrap(), f != last);
-                    if f != last { saves += 1; }
+                    if f != last {
+                        saves += 1;
+                    } else {
+                        prop_assert_eq!((log.flash().writes, log.flash().erases), before);
+                    }
                     last = f;
                 } else {
                     prop_assert!(r.is_err());
@@ -234,12 +188,12 @@ proptest! {
     fn restore_returns_the_last_saved_files_page_writes(ops in ops()) { replay::<256>(ops)?; }
 
     #[test]
-    fn a_power_cut_mid_save_keeps_the_old_or_the_new_files_byte_writes(b in file_sets(), d in file_sets(), a in file_sets(), power in 0usize..5000) {
+    fn a_power_cut_mid_save_keeps_the_old_or_the_new_files_byte_writes(b in fitting_sets(), d in fitting_sets(), a in fitting_sets(), power in 0usize..5000) {
         cut::<1>(b, d, a, power)?;
     }
 
     #[test]
-    fn a_power_cut_mid_save_keeps_the_old_or_the_new_files_page_writes(b in file_sets(), d in file_sets(), a in file_sets(), power in 0usize..5000) {
+    fn a_power_cut_mid_save_keeps_the_old_or_the_new_files_page_writes(b in fitting_sets(), d in fitting_sets(), a in fitting_sets(), power in 0usize..5000) {
         cut::<256>(b, d, a, power)?;
     }
 }

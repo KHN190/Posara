@@ -1,64 +1,5 @@
 #![cfg(feature = "sfx")]
 
-use posara::sfx::env::Adsr;
-
-fn run(a: &mut Adsr, steps: usize, dt: f32) -> f32 {
-    let mut last = 0.0;
-    for _ in 0..steps {
-        last = a.tick(dt);
-        assert!((0.0..=1.0).contains(&last), "level out of range: {last}");
-    }
-    last
-}
-
-#[test]
-fn idle_until_gated() {
-    let mut a = Adsr::default();
-    assert!(!a.active());
-    assert_eq!(a.tick(0.01), 0.0);
-}
-
-#[test]
-fn attack_then_decay_settles_at_sustain() {
-    let mut a = Adsr::default();
-    a.set(0.1, 0.1, 0.4, 0.1);
-    a.gate_on();
-    assert!(a.active());
-    let mut peak = 0.0f32;
-    for _ in 0..40 { peak = peak.max(a.tick(0.005)); }
-    assert!(peak > 0.9, "attack did not reach near 1.0: {peak}");
-    let settled = run(&mut a, 200, 0.005);
-    assert!((settled - 0.4).abs() < 0.02, "sustain off: {settled}");
-}
-
-#[test]
-fn zero_attack_jumps_to_one() {
-    let mut a = Adsr::default();
-    a.set(0.0, 0.0, 0.5, 0.1);
-    a.gate_on();
-    assert_eq!(a.tick(0.01), 1.0);
-}
-
-#[test]
-fn gate_off_releases_to_silence() {
-    let mut a = Adsr::default();
-    a.set(0.0, 0.0, 0.8, 0.05);
-    a.gate_on();
-    run(&mut a, 5, 0.01);
-    a.gate_off();
-    run(&mut a, 20, 0.01);
-    assert_eq!(a.tick(0.01), 0.0);
-    assert!(!a.active());
-}
-
-#[test]
-fn sustain_clamped_to_unit() {
-    let mut a = Adsr::default();
-    a.set(0.0, 0.0, 5.0, 0.0); // out-of-range sustain
-    a.gate_on();
-    assert_eq!(a.tick(0.01), 1.0);
-}
-
 mod stages {
     use posara::sfx::env::Adsr;
     use proptest::prelude::*;
@@ -68,17 +9,25 @@ mod stages {
     proptest! {
         #[test]
         fn the_envelope_rises_settles_and_releases_on_time(
-            atk in 0.0f32..0.1, dec in 0.0f32..0.1, sus in 0.0f32..1.0, rel in 0.0f32..0.1, gate in 1usize..15_000,
+            atk in prop_oneof![Just(0.0f32), 0.0f32..0.1],
+            dec in prop_oneof![Just(0.0f32), 0.0f32..0.1],
+            sus in prop_oneof![0.0f32..1.0, 1.0f32..5.0],
+            rel in prop_oneof![Just(0.0f32), 0.0f32..0.1],
+            gate in 1usize..15_000,
         ) {
             let mut a = Adsr::default();
+            prop_assert!(!a.active() && a.tick(DT) == 0.0);
             a.set(atk, dec, sus, rel);
+            let sus = sus.clamp(0.0, 1.0);
             a.gate_on();
+            prop_assert!(a.active());
             let n = |s: f32| (s / DT).ceil() as usize;
             let mut prev = 0.0f32;
             let mut held = 0.0f32;
             for i in 0..gate {
                 let l = a.tick(DT);
                 prop_assert!((0.0..=1.0).contains(&l));
+                if i == 0 && atk == 0.0 { prop_assert_eq!(l, 1.0); }
                 if i + 1 < n(atk) { prop_assert!(l >= prev - 1e-6, "attack fell at {i}"); }
                 if i > n(atk) + n(dec) + 2 { prop_assert!((l - sus).abs() <= 1e-4, "sustain {l} vs {sus}"); }
                 prev = l;

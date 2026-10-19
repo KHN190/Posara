@@ -3,169 +3,34 @@ use posara_sync_jack::{Jack, SyncIn, SyncOut, CLOCK, START, STOP};
 const BEAT_US: u64 = 500_000;
 
 #[test]
-fn clock_word_is_tagged_with_source() {
-    assert_eq!(SyncIn::new(2).word(), CLOCK as u32 | 2 << 24);
-}
-
-#[test]
-fn first_pulse_has_no_tempo_so_both_halves_arrive_at_once() {
-    let mut s = SyncIn::new(0);
-    assert_eq!(s.on_pulse(0), 6);
-    assert_eq!(s.poll(0), 6);
-    assert_eq!(s.poll(1), 0);
-}
-
-#[test]
-fn second_half_arrives_at_the_midpoint_of_the_last_interval() {
-    let mut s = SyncIn::new(0);
-    s.on_pulse(0);
-    s.poll(0);
-    assert_eq!(s.on_pulse(BEAT_US), 6);
-    assert_eq!(s.poll(BEAT_US), 0);
-    assert_eq!(s.poll(BEAT_US + BEAT_US / 2 - 1), 0);
-    assert_eq!(s.poll(BEAT_US + BEAT_US / 2), 6);
-    assert_eq!(s.poll(BEAT_US + BEAT_US / 2 + 1), 0);
-}
-
-#[test]
-fn every_pulse_yields_twelve_clocks() {
-    let mut s = SyncIn::new(0);
-    let mut total = 0u32;
-    for i in 0..8u64 {
-        let t = i * BEAT_US;
-        total += s.on_pulse(t) as u32;
-        for us in (t..t + BEAT_US).step_by(1000) { total += s.poll(us) as u32; }
-    }
-    assert_eq!(total, 8 * 12);
-}
-
-#[test]
-fn early_pulse_flushes_the_pending_half_first() {
-    let mut s = SyncIn::new(0);
-    s.on_pulse(0);
-    s.poll(0);
+fn first_pulse_and_restart_after_silence_deliver_both_halves_at_once() {
+    let mut s = SyncIn::new(2);
+    assert_eq!(s.word(), CLOCK as u32 | 2 << 24);
+    assert_eq!((s.on_pulse(0), s.poll(0), s.poll(1)), (6, 6, 0));
     s.on_pulse(BEAT_US);
     assert_eq!(s.on_pulse(BEAT_US + BEAT_US / 4), 12);
-}
-
-#[test]
-fn stop_drops_the_pending_half_and_tempo() {
-    let mut s = SyncIn::new(0);
-    s.on_pulse(0);
-    s.poll(0);
-    s.on_pulse(BEAT_US);
     s.on_stop();
-    assert_eq!(s.poll(10 * BEAT_US), 0);
-    assert_eq!(s.on_pulse(20 * BEAT_US), 6);
-    assert_eq!(s.poll(20 * BEAT_US), 6);
-}
+    assert_eq!((s.poll(10 * BEAT_US), s.on_pulse(20 * BEAT_US), s.poll(20 * BEAT_US)), (0, 6, 6));
 
-#[test]
-fn out_pulses_every_twelve_clocks() {
-    let mut s = SyncOut::new();
-    let got: Vec<usize> = (0..25).filter(|_| s.on_send(CLOCK)).collect();
-    assert_eq!(got, [0, 12, 24]);
-}
-
-#[test]
-fn out_start_realigns_and_other_bytes_never_pulse() {
-    let mut s = SyncOut::new();
-    assert!(s.on_send(CLOCK));
-    assert!(!s.on_send(CLOCK));
-    assert!(!s.on_send(START));
-    assert!(s.on_send(CLOCK));
-    assert!(!s.on_send(STOP));
-    assert!(!s.on_send(0x90));
+    let mut l = following(0);
+    l.on_pulse(0);
+    l.poll(0);
+    l.on_pulse(EIGHTH_US);
+    l.poll(EIGHTH_US + EIGHTH_US / 2);
+    let back = EIGHTH_US + 10 * SECOND_US;
+    l.poll(back - 1);
+    assert_eq!(l.on_pulse(back) + l.poll(back), 12);
 }
 
 const SECOND_US: u64 = 1_000_000;
-
-fn plugged_at(t: u64) -> Jack {
-    let mut j = Jack::new();
-    j.plug(true, t);
-    j
-}
-
-#[test]
-fn unplugged_jack_leads() {
-    assert!(Jack::new().leads());
-}
-
-#[test]
-fn plugging_in_listens_for_a_second_then_leads() {
-    let mut j = plugged_at(10);
-    assert!(!j.leads());
-    j.poll(10 + SECOND_US - 1);
-    assert!(!j.leads());
-    j.poll(10 + SECOND_US);
-    assert!(j.leads());
-}
-
-#[test]
-fn a_pulse_while_listening_makes_it_follow() {
-    let mut j = plugged_at(0);
-    j.on_pulse(SECOND_US / 2);
-    j.poll(5 * SECOND_US / 2);
-    assert!(!j.leads());
-}
-
-#[test]
-fn a_leader_hearing_the_other_leader_yields() {
-    let mut j = plugged_at(0);
-    j.poll(SECOND_US);
-    assert!(j.leads());
-    j.on_pulse(2 * SECOND_US);
-    assert!(!j.leads());
-}
-
-#[test]
-fn a_follower_leads_after_three_silent_seconds() {
-    let mut j = plugged_at(0);
-    j.on_pulse(SECOND_US / 2);
-    j.poll(SECOND_US / 2 + 3 * SECOND_US - 1);
-    assert!(!j.leads());
-    j.poll(SECOND_US / 2 + 3 * SECOND_US);
-    assert!(j.leads());
-}
-
-#[test]
-fn replugging_listens_again() {
-    let mut j = plugged_at(0);
-    j.poll(SECOND_US);
-    j.plug(false, 2 * SECOND_US);
-    j.plug(true, 3 * SECOND_US);
-    assert!(!j.leads());
-}
-
-#[test]
-fn a_steady_plug_state_does_not_restart_listening() {
-    let mut j = plugged_at(0);
-    j.poll(SECOND_US);
-    j.plug(true, 2 * SECOND_US);
-    assert!(j.leads());
-}
+const EIGHTH_US: u64 = 250_000;
 
 use posara_sync_jack::Link;
-
-const EIGHTH_US: u64 = 250_000;
 
 fn following(at: u64) -> Link {
     let mut l = Link::new(1);
     l.plug(true, at);
     l
-}
-
-#[test]
-fn a_follower_turns_each_pulse_into_twelve_clocks_and_sends_none() {
-    let mut l = following(0);
-    let mut clocks = 0u32;
-    for k in 0..8u64 {
-        let t = k * EIGHTH_US;
-        clocks += l.on_pulse(t) as u32;
-        for ms in 1..250u64 { clocks += l.poll(t + ms * 1000) as u32; }
-        assert!(!(0..12).any(|_| l.on_send(CLOCK, t)), "follower pulsed out");
-    }
-    assert_eq!(clocks, 8 * 12);
 }
 
 #[test]
@@ -183,49 +48,6 @@ fn half_an_hour_of_pocket_operator_pulses_never_drifts() {
         assert!(clocks.abs_diff(12 * k + 6) <= 6, "pulse {k}: {clocks} clocks");
     }
     assert_eq!(clocks + l.poll(t + EIGHTH_US) as u64, 12 * 7200);
-}
-
-#[test]
-fn a_restart_after_silence_delivers_the_first_pulse_whole() {
-    let mut l = following(0);
-    l.on_pulse(0);
-    l.poll(0);
-    l.on_pulse(EIGHTH_US);
-    l.poll(EIGHTH_US + EIGHTH_US / 2);
-    let back = EIGHTH_US + 10 * SECOND_US;
-    l.poll(back - 1);
-    assert_eq!(l.on_pulse(back) + l.poll(back), 12);
-}
-
-#[test]
-fn two_leaders_plugged_together_settle_within_two_beats() {
-    let (mut a, mut b) = (Link::new(1), Link::new(1));
-    let tick_us = 500_000 / 24;
-    let mut leaders_at_2s = 0;
-    for ms in 0..6000u64 {
-        let t = ms * 1000;
-        a.plug(true, t);
-        b.plug(true, t);
-        a.poll(t);
-        b.poll(t);
-        let tick = t % tick_us < 1000;
-        let a_out = tick && a.on_send(CLOCK, t);
-        let b_out = (t + 7000) % tick_us < 1000 && b.on_send(CLOCK, t);
-        if a_out { b.on_pulse(t); }
-        if b_out { a.on_pulse(t); }
-        if ms == 2003 { leaders_at_2s = a.leads() as u8 + b.leads() as u8; }
-    }
-    assert_eq!(leaders_at_2s, 1);
-    assert_eq!(a.leads() as u8 + b.leads() as u8, 1);
-}
-
-#[test]
-fn start_realigns_the_outgoing_pulses() {
-    let mut l = Link::new(1);
-    assert!(l.on_send(CLOCK, 0));
-    l.on_send(CLOCK, 0);
-    l.on_send(START, 0);
-    assert!(l.on_send(CLOCK, 0));
 }
 
 use proptest::prelude::*;
@@ -285,6 +107,7 @@ proptest! {
     #[test]
     fn out_pulses_fall_on_every_twelfth_clock_since_start(sends in prop::collection::vec(prop_oneof![Just(CLOCK), Just(START), Just(STOP), Just(0x90u8)], 0..300)) {
         let mut out = SyncOut::new();
+        let mut l = Link::new(1);
         let mut since_start = 0u32;
         for s in sends {
             let want = match s {
@@ -293,12 +116,14 @@ proptest! {
                 _ => false,
             };
             prop_assert_eq!(out.on_send(s), want);
+            prop_assert_eq!(l.on_send(s, 0), want);
         }
     }
 
     #[test]
     fn jack_roles_follow_the_spec(evs in prop::collection::vec(ev(), 0..60)) {
         let mut j = Jack::new();
+        prop_assert!(j.leads());
         let (mut plugged, mut mode, mut now) = (false, Mode::Lead, 0u64);
         for (dt_ms, e) in evs {
             now += dt_ms * 1000;
@@ -341,12 +166,12 @@ proptest! {
 
     #[test]
     fn two_devices_plugged_together_settle_on_one_leader(
-        bpm_a in 60u64..180, bpm_b in 60u64..180,
+        (bpm_a, bpm_b) in (60u64..180, 60u64..179).prop_map(|(a, b)| (a, if b >= a { b + 1 } else { b })),
         phase_a in 0u64..1000, phase_b in 0u64..1000,
         plug_a in 0u64..2000, plug_b in 0u64..2000,
     ) {
-        prop_assume!(bpm_a != bpm_b);
         prop_assert_eq!(unsettled([bpm_a, bpm_b], [phase_a, phase_b], [plug_a, plug_b]), None);
+        prop_assert_eq!(unsettled([144, 115], [767, 10], [13, 0]), None);
     }
 
     #[test]
@@ -396,9 +221,4 @@ fn unsettled(bpm: [u64; 2], phase: [u64; 2], plug: [u64; 2]) -> Option<u64> {
         if ms >= settle_ms && a.leads() as u8 + b.leads() as u8 != 1 { return Some(ms); }
     }
     None
-}
-
-#[test]
-fn leaders_pulsing_in_the_same_instant_do_not_both_yield() {
-    assert_eq!(unsettled([144, 115], [767, 10], [13, 0]), None);
 }

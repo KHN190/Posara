@@ -16,18 +16,14 @@ fn samples_until_silent(rate: f32, sr: f32, bytes: usize) -> usize {
 }
 
 #[test]
-fn each_bit_plays_once_at_the_output_rate() {
-    assert_eq!(samples_until_silent(48_000.0, 48_000.0, 4), 32);
-}
-
-#[test]
-fn half_rate_holds_each_bit_for_two_samples() {
-    assert_eq!(samples_until_silent(24_000.0, 48_000.0, 4), 64);
-}
-
-#[test]
-fn long_stream_ends_on_the_last_bit() {
-    assert_eq!(samples_until_silent(96_000.0, 48_000.0, 1000), 4000);
+fn duration_scales_with_rate_and_stream_length() {
+    for (rate, sr, bytes, want) in [
+        (48_000.0, 48_000.0, 4, 32),
+        (24_000.0, 48_000.0, 4, 64),
+        (96_000.0, 48_000.0, 1000, 4000),
+    ] {
+        assert_eq!(samples_until_silent(rate, sr, bytes), want);
+    }
 }
 
 proptest! {

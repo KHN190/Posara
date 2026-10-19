@@ -1,43 +1,11 @@
+use posara_core::midi::message;
 use posara_usb_midi::{packet, word};
-
-#[test]
-fn note_on_packet_becomes_word_tagged_with_source() {
-    assert_eq!(word([0x09, 0x90, 60, 100], 1), Some(0x90 | 60 << 8 | 100 << 16 | 1 << 24));
-}
+use proptest::prelude::*;
 
 #[test]
 fn reserved_code_index_is_ignored() {
     assert_eq!(word([0x00, 0x90, 60, 100], 1), None);
 }
-
-#[test]
-fn word_becomes_packet_on_cable_zero() {
-    assert_eq!(packet(0x90 | 60 << 8 | 100 << 16), [0x09, 0x90, 60, 100]);
-    assert_eq!(packet(0x80 | 60 << 8), [0x08, 0x80, 60, 0]);
-}
-
-#[test]
-fn two_byte_messages_drop_the_third_byte() {
-    assert_eq!(packet(0xC3 | 7 << 8 | 99 << 16), [0x0C, 0xC3, 7, 0]);
-    assert_eq!(packet(0xD0 | 64 << 8 | 99 << 16), [0x0D, 0xD0, 64, 0]);
-}
-
-#[test]
-fn realtime_is_a_single_byte_packet() {
-    for s in [0xF8u32, 0xFA, 0xFB, 0xFC] {
-        assert_eq!(packet(s | 5 << 8 | 6 << 16 | 2 << 24), [0x0F, s as u8, 0, 0]);
-    }
-}
-
-#[test]
-fn round_trip_keeps_channel_messages() {
-    for w in [0x90 | 60 << 8 | 100 << 16, 0xB1 | 7 << 8 | 127 << 16, 0xE2 | 0x7F << 16] {
-        assert_eq!(word(packet(w), 0), Some(w));
-    }
-}
-
-use posara_core::midi::message;
-use proptest::prelude::*;
 
 // MIDI 1.0 status table: data bytes after the status, None = not a sendable message on its own.
 fn data_bytes(status: u8) -> Option<usize> {
@@ -62,6 +30,10 @@ fn cin(status: u8) -> u8 {
         0xF8..=0xFF => 0xF,
         _ => 0x0,
     }
+}
+
+fn sendable_status() -> impl Strategy<Value = u8> {
+    prop_oneof![0x80u8..=0xEF, 0xF1u8..=0xF3, Just(0xF6u8), 0xF8u8..=0xFF]
 }
 
 proptest! {
@@ -95,25 +67,11 @@ proptest! {
     }
 
     #[test]
-    fn a_packet_read_back_is_the_word_tagged_with_its_source(st in 0x80u8..=0xFF, d1 in 0u8..0x80, d2 in 0u8..0x80, src in any::<u8>()) {
-        let n = data_bytes(st);
-        prop_assume!(n.is_some());
-        let n = n.unwrap();
+    fn a_packet_read_back_is_the_word_tagged_with_its_source(st in sendable_status(), d1 in 0u8..0x80, d2 in 0u8..0x80, src in any::<u8>()) {
+        let n = data_bytes(st).unwrap();
         let w = st as u32 | (d1 as u32) << 8 | (d2 as u32) << 16;
         let kept = [d1, d2];
         let want = st as u32 | (kept[..n].iter().enumerate().map(|(i, &b)| (b as u32) << (8 * (i + 1))).sum::<u32>()) | (src as u32) << 24;
         prop_assert_eq!(word(packet(w), src), Some(want));
     }
-}
-
-#[test]
-fn a_data_byte_as_status_sends_nothing() {
-    assert_eq!(message(0x45).1, 0);
-    assert_eq!(packet(0x45), [0; 4]);
-}
-
-#[test]
-fn data_bytes_over_127_are_masked_to_seven_bits() {
-    let (bytes, len) = message(0x90 | 0xBC << 8 | 0xE4 << 16);
-    assert_eq!(&bytes[..len], &[0x90, 0x3C, 0x64]);
 }

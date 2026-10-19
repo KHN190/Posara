@@ -3,13 +3,6 @@
 use posara::Host;
 use std::path::PathBuf;
 
-fn check(path: &str) {
-    let full = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), path);
-    let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
-    let r = posara::runner::compile_abe(&PathBuf::from(&full), &host);
-    assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
-}
-
 // compile AND run one-shot, so a missing/misnamed native surfaces at dispatch,
 // not just at type-check.
 fn run_src(tag: &str, src: &str) {
@@ -30,37 +23,6 @@ fn snd_prefixed_names_dispatch() {
     run_src("snd_names", "@cart\nfn main() -> <frame, IO> Unit {\n  snd_voices(8);\n  snd_osc(0, 0, 1, 0, 0, 80);\n  snd_on(0, 60, 80, 500);\n  snd_bus_reverb(20, 30, 40);\n  loop { frame.present() }\n}\n");
 }
 
-#[test]
-fn hello_compiles() { check("carts/basic/hello.abe"); }
-
-#[test]
-fn text_compiles() { check("carts/basic/text.abe"); }
-
-#[test]
-fn sprite_compiles() { check("carts/basic/sprite.abe"); }
-
-#[test]
-fn invader_compiles() { check("carts/games/invader.abe"); }
-
-#[test]
-fn fuji_compiles() { check("carts/games/fuji.abe"); }
-
-#[test]
-fn song_compiles() { check("carts/music/song.abe"); }
-
-#[test]
-fn detroit_compiles() { check("carts/music/detroit.abe"); }
-
-#[test]
-fn acid_compiles() { check("carts/vis/acid.abe"); }
-
-#[test]
-fn kg_compiles() { check("carts/vis/kg.abe"); }
-
-#[test]
-fn micro_compiles() { check("carts/vis/micro.abe"); }
-
-
 // POSARA_UPDATE=1 re-records tests/expected.
 #[cfg(all(feature = "gfx", feature = "sfx"))]
 mod recorded_output {
@@ -68,6 +30,7 @@ mod recorded_output {
     use posara::backend::Backend;
     use posara::runner::{compile_abe, default_root, read_pk_bytes, Stepper};
     use posara::Host;
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
     const FRAMES: u64 = 300;
@@ -148,19 +111,11 @@ mod recorded_output {
         walk(root, root, host);
     }
 
-    fn line(path: &Path) -> String {
+    fn format_line(path: &Path, res: &Result<(u64, u64), String>) -> String {
         let name = path.strip_prefix(carts_dir()).unwrap().display().to_string();
-        match run(path) {
+        match res {
             Ok((g, s)) => format!("{name} gfx={g:016x} sfx={s:016x}"),
             Err(e) => format!("{name} err {}", e.lines().next().unwrap_or("").replace(env!("CARGO_MANIFEST_DIR"), "")),
-        }
-    }
-
-    #[test]
-    fn pk_runs_identical_to_its_source() {
-        for pk in entries().into_iter().filter(|p| p.extension().is_some_and(|x| x == "pk")) {
-            let abe = pk.with_extension("abe");
-            if abe.exists() { assert_eq!(run(&pk), run(&abe), "{}", pk.display()); }
         }
     }
 
@@ -170,7 +125,8 @@ mod recorded_output {
         let expected = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/expected/carts-web.txt"));
         #[cfg(feature = "sfx-desktop")]
         let expected = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/expected/carts-desktop.txt"));
-        let got: Vec<String> = entries().iter().map(|p| line(p)).collect();
+        let ran: BTreeMap<PathBuf, Result<(u64, u64), String>> = entries().into_iter().map(|p| { let r = run(&p); (p, r) }).collect();
+        let got: Vec<String> = ran.iter().map(|(p, r)| format_line(p, r)).collect();
         if std::env::var("POSARA_UPDATE").as_deref() == Ok("1") {
             std::fs::create_dir_all(expected.parent().unwrap()).unwrap();
             std::fs::write(&expected, got.join("\n") + "\n").unwrap();
@@ -183,5 +139,12 @@ mod recorded_output {
             .map(|(g, w)| format!("  want {w}\n  got  {g}"))
             .collect();
         assert!(diff.is_empty() && got.len() == want.len(), "cart output changed:\n{}", diff.join("\n"));
+        for (pk, pk_res) in &ran {
+            if pk.extension().is_some_and(|x| x == "pk") {
+                if let Some(abe_res) = ran.get(&pk.with_extension("abe")) {
+                    assert_eq!(pk_res, abe_res, "{}", pk.display());
+                }
+            }
+        }
     }
 }

@@ -9,80 +9,6 @@ fn fb(w: usize, h: usize) -> Framebuffer {
     f
 }
 
-fn lit(f: &Framebuffer) -> usize {
-    f.buf.iter().filter(|&&p| p != 0).count()
-}
-
-#[test]
-fn line_horizontal_sets_each_pixel() {
-    let mut f = fb(8, 8);
-    f.line(1, 3, 6, 3, 9);
-    assert_eq!(lit(&f), 6);
-    for x in 1..=6 {
-        assert_eq!(f.buf[3 * 8 + x], 9);
-    }
-}
-
-#[test]
-fn line_fully_outside_draws_nothing() {
-    let mut f = fb(8, 8);
-    f.line(-50, -50, -10, -10, 9);
-    assert_eq!(lit(&f), 0);
-}
-
-#[test]
-fn line_partly_outside_is_clipped_in_bounds() {
-    let mut f = fb(8, 8);
-    f.line(-5, 4, 12, 4, 9); // extends past both edges
-    assert_eq!(lit(&f), 8);  // exactly one full row, nothing out of bounds
-}
-
-#[test]
-fn a_line_between_extreme_arguments_finishes_quickly() {
-    let c = |v: i64| posara_core::abi::Args(&[myriad::Value::from_int(v)]).coord(0);
-    let mut f = fb(8, 8);
-    let t = std::time::Instant::now();
-    f.line(c(i64::MIN / 2), 0, c(i64::MAX / 2), 7, 9);
-    assert!(t.elapsed().as_millis() < 500);
-}
-
-#[test]
-fn circ_fill_covers_center() {
-    let mut f = fb(16, 16);
-    f.circ(8, 8, 4, 9, true);
-    assert_eq!(f.buf[8 * 16 + 8], 9);
-    assert!(lit(&f) > 12);
-}
-
-#[test]
-fn circ_outline_is_symmetric_and_hollow() {
-    let mut f = fb(16, 16);
-    f.circ(8, 8, 5, 9, false);
-    assert_eq!(f.buf[8 * 16 + 8], 0); // center untouched
-    assert_eq!(f.buf[8 * 16 + 13], 9); // +r on x axis
-    assert_eq!(f.buf[8 * 16 + 3], 9);  // -r on x axis
-}
-
-#[test]
-fn rect_outline_draws_border_only() {
-    let mut f = fb(8, 8);
-    f.rect_outline(1, 1, 4, 4, 9);
-    assert_eq!(f.buf[1 * 8 + 1], 9); // corner
-    assert_eq!(f.buf[2 * 8 + 2], 0); // interior empty
-    assert_eq!(lit(&f), 12);         // 4*4 outline = 4w+4h-4
-}
-
-#[test]
-fn tri_fill_includes_interior_point() {
-    let mut f = fb(16, 16);
-    f.tri(2, 2, 12, 2, 2, 12, 9, false);
-    let outline = lit(&f);
-    let mut g = fb(16, 16);
-    g.tri(2, 2, 12, 2, 2, 12, 9, true);
-    assert!(lit(&g) > outline);
-    assert_eq!(g.buf[4 * 16 + 4], 9); // inside the triangle
-}
-
 mod model {
     use proptest::prelude::*;
     use super::fb;
@@ -114,12 +40,38 @@ mod model {
     fn coord() -> impl Strategy<Value = i64> { -60i64..100 }
     fn size() -> impl Strategy<Value = (usize, usize)> { (1usize..48, 1usize..40) }
 
+    fn check_clipped_line(w: usize, h: usize, x0: i64, y0: i64, x1: i64, y1: i64) -> Result<(), TestCaseError> {
+        let mut f = fb(w, h);
+        f.line(x0, y0, x1, y1, 1);
+        prop_assert_eq!(lit_at(&f), on_screen(bresenham(x0, y0, x1, y1), w, h));
+        Ok(())
+    }
+
+    fn check_filled_tri(w: usize, h: usize, [x0, y0, x1, y1, x2, y2]: [i64; 6]) -> Result<(), TestCaseError> {
+        let mut f = fb(w, h);
+        f.tri(x0, y0, x1, y1, x2, y2, 1, true);
+        let side = |ax: i64, ay: i64, bx: i64, by: i64, x: i64, y: i64| ((bx - ax) as i128 * (y - ay) as i128 - (by - ay) as i128 * (x - ax) as i128).signum();
+        let mut want = Px::new();
+        for y in 0..h as i64 {
+            for x in 0..w as i64 {
+                let s = [side(x1, y1, x2, y2, x, y), side(x2, y2, x0, y0, x, y), side(x0, y0, x1, y1, x, y)];
+                let in_box = x >= x0.min(x1).min(x2) && x <= x0.max(x1).max(x2) && y >= y0.min(y1).min(y2) && y <= y0.max(y1).max(y2);
+                if in_box && (s.iter().all(|&k| k >= 0) || s.iter().all(|&k| k <= 0)) { want.insert((x, y)); }
+            }
+        }
+        prop_assert_eq!(lit_at(&f), want);
+        let mut g = fb(w, h);
+        g.tri(x2, y2, x0, y0, x1, y1, 1, true);
+        prop_assert_eq!(lit_at(&g), lit_at(&f));
+        Ok(())
+    }
+
     proptest! {
         #[test]
         fn a_clipped_line_lights_the_on_screen_part_of_the_whole_line((w, h) in size(), x0 in coord(), y0 in coord(), x1 in coord(), y1 in coord()) {
-            let mut f = fb(w, h);
-            f.line(x0, y0, x1, y1, 1);
-            prop_assert_eq!(lit_at(&f), on_screen(bresenham(x0, y0, x1, y1), w, h));
+            check_clipped_line(w, h, x0, y0, x1, y1)?;
+            check_clipped_line(7, 32, 3, 21, 0, 32)?;
+            check_clipped_line(1, 2, -17, 60, 16, -55)?;
         }
 
         #[test]
@@ -180,31 +132,10 @@ mod model {
 
         #[test]
         fn a_filled_triangle_is_every_pixel_inside_its_edges((w, h) in size(), v in proptest::array::uniform6(-20i64..70)) {
-            let [x0, y0, x1, y1, x2, y2] = v;
-            let mut f = fb(w, h);
-            f.tri(x0, y0, x1, y1, x2, y2, 1, true);
-            let side = |ax: i64, ay: i64, bx: i64, by: i64, x: i64, y: i64| ((bx - ax) as i128 * (y - ay) as i128 - (by - ay) as i128 * (x - ax) as i128).signum();
-            let mut want = Px::new();
-            for y in 0..h as i64 {
-                for x in 0..w as i64 {
-                    let s = [side(x1, y1, x2, y2, x, y), side(x2, y2, x0, y0, x, y), side(x0, y0, x1, y1, x, y)];
-                    let in_box = x >= x0.min(x1).min(x2) && x <= x0.max(x1).max(x2) && y >= y0.min(y1).min(y2) && y <= y0.max(y1).max(y2);
-                    if in_box && (s.iter().all(|&k| k >= 0) || s.iter().all(|&k| k <= 0)) { want.insert((x, y)); }
-                }
-            }
-            prop_assert_eq!(lit_at(&f), want);
-            let mut g = fb(w, h);
-            g.tri(x2, y2, x0, y0, x1, y1, 1, true);
-            prop_assert_eq!(lit_at(&g), lit_at(&f));
+            check_filled_tri(w, h, v)?;
+            check_filled_tri(2, 13, [16, 30, 26, 42, 11, 24])?;
         }
     }
-}
-
-#[test]
-fn a_line_leaving_the_screen_keeps_its_slope() {
-    let mut f = fb(7, 32);
-    f.line(3, 21, 0, 32, 1);
-    assert_eq!(model::lit_at(&f), model::on_screen(model::bresenham(3, 21, 0, 32), 7, 32));
 }
 
 mod extremes {
@@ -212,7 +143,7 @@ mod extremes {
     use super::fb;
 
     fn any_coord() -> impl Strategy<Value = i64> {
-        prop_oneof![-50i64..50, Just(i64::MIN), Just(i64::MAX), any::<i64>()]
+        prop_oneof![-50i64..50, Just(i64::MIN), Just(i64::MAX), Just(i64::MIN / 2), Just(i64::MAX / 2), any::<i64>()]
             .prop_map(|v| posara_core::abi::Args(&[myriad::Value::from_int(v)]).coord(0))
     }
 
@@ -237,18 +168,4 @@ mod extremes {
             prop_assert!(started.elapsed().as_millis() < 500, "{:?} took {:?}", v, started.elapsed());
         }
     }
-}
-
-#[test]
-fn a_steep_line_crossing_a_tiny_screen_still_draws() {
-    let mut f = fb(1, 2);
-    f.line(-17, 60, 16, -55, 1);
-    assert_eq!(model::lit_at(&f), model::on_screen(model::bresenham(-17, 60, 16, -55), 1, 2));
-}
-
-#[test]
-fn a_flat_triangle_stays_between_its_corners() {
-    let mut f = fb(2, 13);
-    f.tri(16, 30, 26, 42, 11, 24, 1, true);
-    assert_eq!(lit(&f), 0);
 }
