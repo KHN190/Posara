@@ -2,6 +2,7 @@ use core::cell::{Cell, RefCell};
 
 use myriad::{read_string, NativeCtx, Value, VirtualMachine};
 
+use crate::abi::Args;
 use crate::drivers::{Clock, NullClock};
 use crate::plugin::Plugin;
 use crate::prelude::*;
@@ -169,19 +170,19 @@ impl Host {
             x ^= x << 13; x ^= x >> 17; x ^= x << 5;
             *s = x;
             let f = (x as f64) / (u32::MAX as f64);
-            Ok((if f32_bits.get() { Value::from_float_f32(f) } else { Value::from_float(f) }, false))
+            Ok((Value::from_raw(myriad::encode_float(f, f32_bits.get())), false))
         }));
         let r = Rc::clone(&self.rng);
         vm.register_native("srand", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
-            let seed = a.first().copied().unwrap_or(Value::ZERO).as_int() as u32;
+            let seed = Args(a).word(0) as u32;
             *r.borrow_mut() = if seed == 0 { 0x9e3779b9 } else { seed };
             Ok((Value::UNIT, false))
         }));
         vm.register_native("assert", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
-            if a.first().is_some_and(|v| v.as_bool()) {
+            if Args(a).flag(0) {
                 return Ok((Value::UNIT, false));
             }
-            let msg = a.get(1).and_then(|v| read_string(ctx.heap, *v)).unwrap_or_default();
+            let msg = read_string(ctx.heap, Args(a).handle(1)).unwrap_or_default();
             Err(format!("assert failed: {msg}"))
         }));
     }

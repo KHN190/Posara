@@ -1,6 +1,6 @@
 [package]
 name = "posara"
-version = "1.0.1"
+version = "1.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -10,8 +10,8 @@ description = "General platform Myriad runtime visual-audio engine."
 # desktop = minifb/cpal Device impls; web = headless fb + pull-mixer (same ports).
 [features]
 default = ["desktop", "test"]
-desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi", "imu", "compiler", "fs", "net"]
-web = ["gfx-web", "sfx-web", "synth", "imu", "compiler", "fs", "net"]
+desktop = ["gfx-desktop", "sfx-desktop", "storage-disk", "synth", "midi-desktop", "imu", "compiler", "fs", "net"]
+web = ["gfx-web", "sfx-web", "synth", "midi", "imu", "compiler", "fs", "net"]
 
 gfx = ["posara-core/gfx"]
 gfx-desktop = ["gfx", "dep:minifb", "dep:image"]
@@ -27,7 +27,8 @@ net = ["posara-core/net"]
 # storage backend: real disk (desktop) vs in-memory upload sandbox (web default).
 storage-disk = []
 synth = ["sfx", "posara-core/synth"]
-midi = ["dep:midir", "dep:toml", "posara-core/midi"]
+midi = ["posara-core/midi"]
+midi-desktop = ["midi", "dep:midir", "dep:toml"]
 imu = ["posara-core/imu"]
 test = []
 
@@ -50,3 +51,12 @@ myriad-rs = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 polka-rs  = { git = "https://github.com/KHN190/Abrase", branch = "dev" }
 abrase    = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
 polka-rustc = { git = "https://github.com/KHN190/Abrase", optional = true, branch = "dev" }
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

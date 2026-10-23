@@ -275,8 +275,22 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 
 let posara, running = false, active = null, order = [];
 let audioCtx = null, audioNode = null, pump = null;
+let midiAccess = null, midiOuts = [];
+async function startMidi() {
+  if (midiAccess || !navigator.requestMIDIAccess) return;
+  try {
+    midiAccess = await navigator.requestMIDIAccess();
+    const wire = () => {
+      midiOuts = [...midiAccess.outputs.values()];
+      for (const i of midiAccess.inputs.values())
+        i.onmidimessage = e => { const d = e.data; posara.midi_in(d[0] | (d[1] || 0) << 8 | (d[2] || 0) << 16); };
+    };
+    wire();
+    midiAccess.onstatechange = wire;
+  } catch (e) { onSys("warn", "MIDI: " + e); }
+}
 
-await init("./pkg/posara_web_bg.wasm?v=14");
+await init("./pkg/posara_web_bg.wasm?v=15");
 posara = new Posara();
 MAX_FILES = posara.max_files();
 $("ver").textContent = "v" + posara.version();
@@ -533,6 +547,8 @@ function step() {
     const out = posara.drain_stdout(); if (out) onCart(out);   // cart println → console
     posara.set_input(buttons, lastKey); lastKey = 0;
     pullAudio();
+    const midi = posara.midi_out();
+    if (midi.length) for (const o of midiOuts) o.send(midi);
     frames++;                                            // sampled by the 500ms interval
     if (cont === false) { log(T("ended")); stop(); }
   } catch (e) { onSys("error", T("runErr")+e, e && e.stack); stop(); }
@@ -569,6 +585,7 @@ async function run() {
     }
   } catch (e) { onSys("error", T("loadFail"), String(e)); return; }
   await startAudio();
+  await startMidi();
   if (audioCtx.state === "suspended") await audioCtx.resume();
   running = true; t0 = performance.now(); frames = 0; img = null; lastPull = 0;
   $("stat").textContent = T("runCode");

@@ -15,7 +15,7 @@ pub use posara_core::drivers::Presenter;
 #[cfg(feature = "imu")]
 use posara_core::drivers::{Imu, NullImu};
 #[cfg(feature = "midi")]
-use posara_core::drivers::NullMidi;
+use posara_core::drivers::{MidiPort, NullMidi};
 #[cfg(feature = "imu")]
 use posara_core::imu::SharedImu;
 #[cfg(feature = "midi")]
@@ -74,5 +74,29 @@ impl Backend {
             return Some(Box::new(minifb::MinifbPresenter::new()));
         }
         None
+    }
+}
+
+#[cfg(feature = "midi")]
+#[derive(Clone, Default)]
+pub struct QueueMidi {
+    inbox: Rc<RefCell<std::collections::VecDeque<u32>>>,
+    outbox: Rc<RefCell<Vec<u8>>>,
+}
+
+#[cfg(feature = "midi")]
+impl QueueMidi {
+    pub fn push(&self, w: u32) { self.inbox.borrow_mut().push_back(w); }
+    pub fn take_bytes(&self) -> Vec<u8> { std::mem::take(&mut *self.outbox.borrow_mut()) }
+}
+
+#[cfg(feature = "midi")]
+impl MidiPort for QueueMidi {
+    fn recv(&mut self) -> Option<u32> { self.inbox.borrow_mut().pop_front() }
+
+    fn send(&mut self, w: u32) -> Result<(), String> {
+        let (bytes, len) = posara_core::midi::message(w);
+        self.outbox.borrow_mut().extend_from_slice(&bytes[..len]);
+        Ok(())
     }
 }

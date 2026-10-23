@@ -82,7 +82,7 @@ Primitives
 - `gfx_dither(c1, c2)` — set the 2-color dither pair.
 
 Blit
-- `gfx_blitg(data: Array<Int>, bit_off, x, y, w, h, color, mode)` — 1bpp bitmap, tinted; `mode = (rot<<4)|op`, op `0` replace `1` XOR.
-- `gfx_blitr(data: Array<Int>, x, y, w, h, color, mode, deg)` — arbitrary-angle rotation (slow path).
-- `gfx_sprite(&data: Bytes, byte_off, x, y, w, h, scale, alpha)` — indexed 4bpp sprite; feed a `fs_readb` sheet. scale = percent, alpha `0..256`.
+- `gfx_blitg(data: &Bytes, bit_off, x, y, w, h, color, mode)` — 1bpp bitmap, tinted; `mode = (rot<<4)|op`, op `0` replace `1` XOR.
+- `gfx_blitr(data: &Bytes, x, y, w, h, color, mode, deg)` — arbitrary-angle rotation (slow path).
+- `gfx_sprite(data: &Bytes, pixel_off, x, y, w, h, scale, alpha)` — indexed 4bpp sprite; feed a `fs_read` sheet. scale = percent, alpha `0..256`.
 - `gfx_save_png(x, y, w, h, path)` `<IO>` — dump a screen region to PNG.

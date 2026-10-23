@@ -3,13 +3,6 @@
 use posara::Host;
 use std::path::PathBuf;
 
-fn check(path: &str) {
-    let full = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), path);
-    let host = Host::new_with(PathBuf::from("."), true, true).expect("host init");
-    let r = posara::runner::compile_abe(&PathBuf::from(&full), &host);
-    assert!(r.is_ok(), "{path} failed to compile:\n{}", r.err().unwrap());
-}
-
 // compile AND run one-shot, so a missing/misnamed native surfaces at dispatch,
 // not just at type-check.
 fn run_src(tag: &str, src: &str) {
@@ -30,37 +23,6 @@ fn snd_prefixed_names_dispatch() {
     run_src("snd_names", "@cart\nfn main() -> <frame, IO> Unit {\n  snd_voices(8);\n  snd_osc(0, 0, 1, 0, 0, 80);\n  snd_on(0, 60, 80, 500);\n  snd_bus_reverb(20, 30, 40);\n  loop { frame.present() }\n}\n");
 }
 
-#[test]
-fn hello_compiles() { check("carts/basic/hello.abe"); }
-
-#[test]
-fn text_compiles() { check("carts/basic/text.abe"); }
-
-#[test]
-fn sprite_compiles() { check("carts/basic/sprite.abe"); }
-
-#[test]
-fn invader_compiles() { check("carts/games/invader.abe"); }
-
-#[test]
-fn fuji_compiles() { check("carts/games/fuji.abe"); }
-
-#[test]
-fn song_compiles() { check("carts/music/song.abe"); }
-
-#[test]
-fn detroit_compiles() { check("carts/music/detroit.abe"); }
-
-#[test]
-fn acid_compiles() { check("carts/vis/acid.abe"); }
-
-#[test]
-fn kg_compiles() { check("carts/vis/kg.abe"); }
-
-#[test]
-fn micro_compiles() { check("carts/vis/micro.abe"); }
-
-
 // POSARA_UPDATE=1 re-records tests/expected.
 #[cfg(all(feature = "gfx", feature = "sfx"))]
 mod recorded_output {
@@ -68,6 +30,7 @@ mod recorded_output {
     use posara::backend::Backend;
     use posara::runner::{compile_abe, default_root, read_pk_bytes, Stepper};
     use posara::Host;
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
     const FRAMES: u64 = 300;
@@ -104,6 +67,8 @@ mod recorded_output {
     fn run(path: &Path) -> Result<(u64, u64), String> {
         #[cfg(not(feature = "sfx-desktop"))]
         let mut host = Box::new(Host::new_with(default_root(path), true, true)?);
+        #[cfg(not(feature = "sfx-desktop"))]
+        upload_assets(&host, &default_root(path));
         #[cfg(feature = "sfx-desktop")]
         let host = Box::new(Host::with_backend(default_root(path), Backend::null(default_root(path)), true, true)?);
         // web-style alias: Stepper holds &Host, pull needs &mut.
@@ -132,19 +97,25 @@ mod recorded_output {
         Ok((gfx.0, sfx.0))
     }
 
-    fn line(path: &Path) -> String {
-        let name = path.strip_prefix(carts_dir()).unwrap().display().to_string();
-        match run(path) {
-            Ok((g, s)) => format!("{name} gfx={g:016x} sfx={s:016x}"),
-            Err(e) => format!("{name} err {}", e.lines().next().unwrap_or("").replace(env!("CARGO_MANIFEST_DIR"), "")),
+    #[cfg(not(feature = "sfx-desktop"))]
+    fn upload_assets(host: &Host, root: &Path) {
+        fn walk(dir: &Path, root: &Path, host: &Host) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() { walk(&p, root, host); continue; }
+                if p.extension().is_some_and(|x| x == "abe" || x == "pk") { continue; }
+                let name = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+                host.fs.storage.add_file(&name, std::fs::read(&p).unwrap()).unwrap();
+            }
         }
+        walk(root, root, host);
     }
 
-    #[test]
-    fn pk_runs_identical_to_its_source() {
-        for pk in entries().into_iter().filter(|p| p.extension().is_some_and(|x| x == "pk")) {
-            let abe = pk.with_extension("abe");
-            if abe.exists() { assert_eq!(run(&pk), run(&abe), "{}", pk.display()); }
+    fn format_line(path: &Path, res: &Result<(u64, u64), String>) -> String {
+        let name = path.strip_prefix(carts_dir()).unwrap().display().to_string();
+        match res {
+            Ok((g, s)) => format!("{name} gfx={g:016x} sfx={s:016x}"),
+            Err(e) => format!("{name} err {}", e.lines().next().unwrap_or("").replace(env!("CARGO_MANIFEST_DIR"), "")),
         }
     }
 
@@ -154,7 +125,8 @@ mod recorded_output {
         let expected = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/expected/carts-web.txt"));
         #[cfg(feature = "sfx-desktop")]
         let expected = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/expected/carts-desktop.txt"));
-        let got: Vec<String> = entries().iter().map(|p| line(p)).collect();
+        let ran: BTreeMap<PathBuf, Result<(u64, u64), String>> = entries().into_iter().map(|p| { let r = run(&p); (p, r) }).collect();
+        let got: Vec<String> = ran.iter().map(|(p, r)| format_line(p, r)).collect();
         if std::env::var("POSARA_UPDATE").as_deref() == Ok("1") {
             std::fs::create_dir_all(expected.parent().unwrap()).unwrap();
             std::fs::write(&expected, got.join("\n") + "\n").unwrap();
@@ -167,5 +139,35 @@ mod recorded_output {
             .map(|(g, w)| format!("  want {w}\n  got  {g}"))
             .collect();
         assert!(diff.is_empty() && got.len() == want.len(), "cart output changed:\n{}", diff.join("\n"));
+        for (pk, pk_res) in &ran {
+            if pk.extension().is_some_and(|x| x == "pk") {
+                if let Some(abe_res) = ran.get(&pk.with_extension("abe")) {
+                    assert_eq!(pk_res, abe_res, "{}", pk.display());
+                }
+            }
+        }
     }
+}
+
+#[test]
+fn workspace_cart_sources_compile_when_present() {
+    use posara::backend::Backend;
+    use posara::runner::{compile_abe, default_root};
+    use std::path::Path;
+    let workspace=Path::new(concat!(env!("CARGO_MANIFEST_DIR"),"/../../workspace"));
+    if !workspace.is_dir(){return;}
+    fn visit(dir:&Path,errors:&mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path=entry.path();
+            if path.is_dir(){if !matches!(path.file_name().and_then(|n|n.to_str()),Some("lib"|"target"|".git")){visit(&path,errors);}continue;}
+            if path.extension().is_none_or(|e|e!="abe"){continue;}
+            let source=std::fs::read_to_string(&path).unwrap();
+            if !source.contains("fn main("){continue;}
+            let root=default_root(&path);
+            let host=Host::with_backend(root.clone(),Backend::null(root),true,true).unwrap();
+            if let Err(error)=compile_abe(&path,&host){errors.push(format!("{}: {error}",path.display()));}
+        }
+    }
+    let mut errors=Vec::new();visit(workspace,&mut errors);
+    assert!(errors.is_empty(),"workspace cart compilation failed:\n{}",errors.join("\n"));
 }

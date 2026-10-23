@@ -103,7 +103,7 @@ pub fn register_record_natives(
     let rg = Arc::clone(&ring);
     let en = Arc::clone(&enabled);
     let start = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let Some(rel) = a.first().copied().and_then(|v| read_string(ctx.heap, v)) else {
+        let Some(rel) = read_string(ctx.heap, posara_core::abi::Args(a).handle(0)) else {
             return Ok((Value::from_int(-1), false));
         };
         let Some(path) = crate::fs::resolve(&r, &rel) else {

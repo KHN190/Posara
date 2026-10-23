@@ -9,3 +9,9 @@ description = "USB-MIDI event packets to and from posara MIDI words."
 
 [lib]
 doctest = false
+
+[dependencies]
+posara-core = { path = "../../crates/posara-core", features = ["midi"] }
+
+[dev-dependencies]
+proptest = "1"

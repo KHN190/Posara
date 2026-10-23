@@ -114,7 +114,7 @@ fn vis_bat(bx: Int, by: Int, wing: Int) -> <Graphics> Unit {
 
 pub fn load_big_font() -> <IO> Array<Int> {
   let fd = fs_open("assets/big20x28.fnt", 1);
-  let data = fs_read(fd, 700);
+  let data: Bytes = match fs_read(fd, 700) { Ok(value) => value, Err(message) => { println(message); b"" }, _ => b"" };
   let _ = fs_close(fd);
   data
 }

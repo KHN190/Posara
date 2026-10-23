@@ -8,8 +8,8 @@ use super::lfo::Lfo;
 use super::seq::note_to_freq;
 
 const MAX_PATCHES: usize = 16;
-const MAX_VOICES: usize = 32;
-const MAX_UNISON: usize = 7;
+pub const MAX_VOICES: usize = 32;
+pub const MAX_UNISON: usize = 7;
 
 const FK_HI: u8 = 1;
 const FK_BAND: u8 = 2;
@@ -259,6 +259,10 @@ impl Voice {
             }
         }
         s /= self.ucount as f32;
+        if !s.is_finite() {
+            self.phase = [[0.0; 2]; MAX_UNISON];
+            return 0.0;
+        }
 
         let cutoff = if self.cfg.fkind == FK_LPG {
             self.cfg.cutoff * (0.05 + 0.95 * amp_env)
@@ -300,7 +304,7 @@ impl Synth {
                 p.osc[idx] = OscCfg {
                     wave,
                     mult: math::powf(2.0f32, (semi as f32 + fine / 100.0) / 12.0),
-                    level: level.max(0.0),
+                    level,
                 };
             }
         }
@@ -310,14 +314,14 @@ impl Synth {
         if let Some(p) = self.patch(pid) {
             p.fkind = kind;
             p.cutoff = cutoff.max(20.0);
-            p.reso = reso.clamp(0.0, 100.0);
+            p.reso = reso;
         }
     }
 
     pub fn env(&mut self, pid: usize, slot: usize, target: u8, depth: f32, atk: f32, dec: f32, sus: f32, rel: f32) {
         if let Some(p) = self.patch(pid) {
             if slot < 2 {
-                p.env[slot] = EnvCfg { target, depth, atk, dec, sus: sus.clamp(0.0, 1.0), rel };
+                p.env[slot] = EnvCfg { target, depth, atk, dec, sus, rel };
             }
         }
     }
@@ -330,13 +334,13 @@ impl Synth {
 
     pub fn pan(&mut self, pid: usize, pos: f32) {
         if let Some(p) = self.patch(pid) {
-            p.pan = pos.clamp(-1.0, 1.0);
+            p.pan = pos;
         }
     }
 
     pub fn unison(&mut self, pid: usize, count: u8, detune: f32) {
         if let Some(p) = self.patch(pid) {
-            p.unison = count.clamp(1, MAX_UNISON as u8);
+            p.unison = count;
             p.detune = detune;
         }
     }
@@ -350,7 +354,7 @@ impl Synth {
     }
 
     pub fn set_voices(&mut self, n: usize) {
-        self.pool = n.clamp(1, MAX_VOICES);
+        self.pool = n;
     }
 
     fn alloc(&self) -> usize {

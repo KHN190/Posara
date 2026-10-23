@@ -32,7 +32,7 @@ impl Delay {
         }
         self.len = len;
         self.fb = fb.clamp(0.0, 0.97);
-        self.mix = mix.clamp(0.0, 1.0);
+        self.mix = mix;
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
@@ -103,14 +103,14 @@ impl Reverb {
 
     // room/damp/mix 0..1.
     pub fn set(&mut self, room: f32, damp: f32, mix: f32) {
-        let fb = 0.7 + room.clamp(0.0, 1.0) * 0.28;
-        let d = damp.clamp(0.0, 1.0);
+        let fb = 0.7 + room * 0.28;
+        let d = damp;
         for c in self.combs.iter_mut() {
             c.fb = fb;
             c.damp1 = d;
             c.damp2 = 1.0 - d;
         }
-        self.mix = mix.clamp(0.0, 1.0);
+        self.mix = mix;
     }
 
     // returns wet signal already scaled by mix (caller adds to dry).

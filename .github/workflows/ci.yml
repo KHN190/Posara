@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main]
 
 jobs:
   test:
@@ -29,6 +28,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: jetli/wasm-pack-action@v0.4.0
 
+      - name: Native and cart output contract oracles
+        run: python3 scripts/check-contract.py
+
       - name: Tests (desktop)
         run: cargo test -p posara
 
@@ -47,3 +49,13 @@ jobs:
 
       - name: Build binary
         run: cargo build --release -p posara
+
+  ci:
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both platform checks
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: test "$TEST_RESULT" = success

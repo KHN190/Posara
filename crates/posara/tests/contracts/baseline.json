@@ -1,0 +1,9 @@
+{
+  "commit": "93e515782df497e69685ee89612a7801f3d28b4f",
+  "fixtures": {
+    "crates/posara/tests/expected/carts-desktop.txt": "d420db5f9377688ff495a8cd081aaade8e6ce4a6723f62f4cb01c55a5adb3402",
+    "crates/posara/tests/expected/carts-web.txt": "54028d7c9d8eab9d7288743cd119ea441e548dce1f3c7fa322aca7c2baeff21b",
+    "crates/posara/tests/contracts/natives-1.0.1.txt": "6ede04fd9d7e1ac01f1f0ef8a6e2efc17e0459ebd0629c196eb340b1c9e19172",
+    "crates/posara/tests/contracts/natives.txt": "f8e0f0cd8176fe5f0ddb6b854b2209a75b491f37c2417cad93acb5351905de20"
+  }
+}

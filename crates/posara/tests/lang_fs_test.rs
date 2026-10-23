@@ -5,23 +5,18 @@ use std::path::{Path, PathBuf};
 use posara::fs::resolve;
 
 #[test]
-fn resolve_accepts_normal_and_curdir() {
+fn resolve_accepts_relative_paths_and_rejects_escapes() {
     let root = Path::new("/root");
-    assert_eq!(resolve(root, "a/b.spr"), Some(PathBuf::from("/root/a/b.spr")));
-    assert_eq!(resolve(root, "./a"), Some(PathBuf::from("/root/a")));
-}
-
-#[test]
-fn resolve_rejects_parent_escape() {
-    let root = Path::new("/root");
-    assert_eq!(resolve(root, ".."), None);
-    assert_eq!(resolve(root, "../etc/passwd"), None);
-    assert_eq!(resolve(root, "a/../../b"), None);
-}
-
-#[test]
-fn resolve_rejects_absolute() {
-    assert_eq!(resolve(Path::new("/root"), "/etc/passwd"), None);
+    for (p, want) in [
+        ("a/b.spr", Some(PathBuf::from("/root/a/b.spr"))),
+        ("./a", Some(PathBuf::from("/root/a"))),
+        ("..", None),
+        ("../etc/passwd", None),
+        ("a/../../b", None),
+        ("/etc/passwd", None),
+    ] {
+        assert_eq!(resolve(root, p), want, "{p}");
+    }
 }
 
 // fs round-trip: a cart writes bytes then reads them back, proving
@@ -43,7 +38,7 @@ fn fs_write_read_roundtrip() {
         gfx_screen(4, 4);\n  \
         loop {\n    \
         let r = fs_open(\"out.bin\", 1);\n    \
-        let s = fs_reads(r, 1);\n    \
+        let s: String = match fs_reads(r, 1) { Ok(value) => value, Err(_) => \"\", _ => \"\" };\n    \
         let _ = fs_close(r);\n    \
         gfx_cls(s.byte_at(0));\n    \
         gfx_commit();\n    frame.present()\n  }\n}\n";
@@ -58,61 +53,276 @@ fn fs_write_read_roundtrip() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-// fs_read returns a packed Bytes value; byte_at must recover the original bytes.
-// Reads a pre-existing on-disk file → real fs only (web MemStorage has no disk).
-#[cfg(feature = "gfx-desktop")]
-#[test]
-fn fs_read_bytes_roundtrip() {
-    use std::io::Write;
-    use posara::Host;
-    use posara::runner::{compile_abe, Stepper};
+mod posix_model {
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
 
-    let root = std::env::temp_dir().join("posara_fs_readb");
-    std::fs::create_dir_all(&root).unwrap();
-    std::fs::File::create(root.join("blob.bin")).unwrap().write_all(&[0x11, 0x22, 0x33]).unwrap();
-    let cart = root.join("rb.abe");
-    // read 3 bytes as Bytes, paint the 3rd (0x33) across the screen.
-    let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  \
-        let fd = fs_open(\"blob.bin\", 1);\n  \
-        let b = fs_read(fd, 3);\n  \
-        let _ = fs_close(fd);\n  \
-        gfx_screen(4, 4);\n  \
-        loop { gfx_cls(b.byte_at(2)); gfx_commit(); frame.present() }\n}\n";
-    std::fs::File::create(&cart).unwrap().write_all(src.as_bytes()).unwrap();
+    use posara::fs::Storage;
+    use proptest::prelude::*;
 
-    let host = Host::new_with(root.clone(), true, true).unwrap();
-    let r = compile_abe(&cart, &host).unwrap();
-    let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
-    step.frame().unwrap();
+    type Inode = Rc<RefCell<Vec<u8>>>;
 
-    assert!(host.gfx.fb.borrow().buf.iter().all(|&c| c == 0x33), "fs_readb byte mismatch");
-    std::fs::remove_dir_all(&root).ok();
+    struct Fd { file: Inode, pos: usize, read: bool, write: bool, append: bool }
+
+    #[derive(Default)]
+    pub struct Model { names: BTreeMap<String, Inode>, fds: Vec<Option<Fd>> }
+
+    impl Model {
+        fn open(&mut self, path: &str, flags: i64) -> i64 {
+            let (read, append) = (flags & 1 != 0, flags & 8 != 0);
+            let write = flags & 2 != 0 || append;
+            let (create, trunc) = (flags & 4 != 0, flags & 16 != 0 && !append);
+            if !read && !write { return -1; }
+            if !write && (create || trunc) { return -1; }
+            let file = match self.names.get(path) {
+                Some(f) => Rc::clone(f),
+                None if create => Rc::clone(self.names.entry(path.into()).or_default()),
+                None => return -1,
+            };
+            if trunc { file.borrow_mut().clear(); }
+            let fd = Fd { file, pos: 0, read, write, append };
+            match self.fds.iter().position(Option::is_none) {
+                Some(i) => { self.fds[i] = Some(fd); i as i64 }
+                None => { self.fds.push(Some(fd)); self.fds.len() as i64 - 1 }
+            }
+        }
+        fn fd(&mut self, fd: i64) -> Option<&mut Fd> { usize::try_from(fd).ok().and_then(|i| self.fds.get_mut(i)?.as_mut()) }
+        fn close(&mut self, fd: i64) -> bool {
+            usize::try_from(fd).ok().and_then(|i| self.fds.get_mut(i)).is_some_and(|s| s.take().is_some())
+        }
+        fn seek(&mut self, fd: i64, whence: i64, off: i64) -> i64 {
+            let Some(f) = self.fd(fd) else { return -1; };
+            let len = f.file.borrow().len() as i64;
+            let to = match whence { 0 => off.max(0), 1 => f.pos as i64 + off, 2 => len + off, _ => return -1 };
+            if to < 0 { return -1; }
+            f.pos = to as usize;
+            to
+        }
+        fn read(&mut self, fd: i64, n: usize) -> Option<Vec<u8>> {
+            let f = self.fd(fd)?;
+            if !f.read && n > 0 { return None; }
+            let data = f.file.borrow();
+            let start = f.pos.min(data.len());
+            let end = (start + n).min(data.len());
+            let out = data[start..end].to_vec();
+            drop(data);
+            f.pos = end.max(f.pos);
+            Some(out)
+        }
+        fn write(&mut self, fd: i64, bytes: &[u8]) -> Option<usize> {
+            let f = self.fd(fd)?;
+            if !f.write { return None; }
+            if bytes.is_empty() { return Some(0); }
+            let mut data = f.file.borrow_mut();
+            if f.append { f.pos = data.len(); }
+            if data.len() < f.pos { data.resize(f.pos, 0); }
+            let end = f.pos + bytes.len();
+            if data.len() < end { data.resize(end, 0); }
+            data[f.pos..end].copy_from_slice(bytes);
+            f.pos = end;
+            Some(bytes.len())
+        }
+        fn exists(&self, path: &str) -> bool { self.names.contains_key(path) }
+        fn remove(&mut self, path: &str) -> bool { self.names.remove(path).is_some() }
+        fn list(&self) -> Vec<String> { self.names.keys().cloned().collect() }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum Op { Open(usize, i64), Close(i64), Seek(i64, i64, i64), Read(i64, usize), Write(i64, Vec<u8>), Exists(usize), Remove(usize) }
+
+    const NAMES: [&str; 3] = ["a.bin", "b.txt", "c"];
+
+    pub fn op() -> impl Strategy<Value = Op> {
+        let fd = -1i64..5;
+        prop_oneof![
+            3 => (0..3usize, 0i64..32).prop_map(|(p, f)| Op::Open(p, f)),
+            1 => fd.clone().prop_map(Op::Close),
+            2 => (fd.clone(), -1i64..4, -12i64..24).prop_map(|(d, w, o)| Op::Seek(d, w, o)),
+            3 => (fd.clone(), 0usize..16).prop_map(|(d, n)| Op::Read(d, n)),
+            3 => (fd.clone(), proptest::collection::vec(any::<u8>(), 0..10)).prop_map(|(d, b)| Op::Write(d, b)),
+            1 => (0..3usize).prop_map(Op::Exists),
+            1 => (0..3usize).prop_map(Op::Remove),
+        ]
+    }
+
+    pub fn replay(s: &dyn Storage, ops: &[Op]) -> Result<(), String> {
+        let mut m = Model::default();
+        for (i, o) in ops.iter().enumerate() {
+            let (got, want) = match o {
+                Op::Open(p, f) => (s.open(NAMES[*p], *f).to_string(), m.open(NAMES[*p], *f).to_string()),
+                Op::Close(d) => (s.close(*d).to_string(), m.close(*d).to_string()),
+                Op::Seek(d, w, off) => (s.seek(*d, *w, *off).to_string(), m.seek(*d, *w, *off).to_string()),
+                Op::Read(d, n) => (format!("{:?}", s.read(*d, *n)), format!("{:?}", m.read(*d, *n))),
+                Op::Write(d, b) => (format!("{:?}", s.write(*d, b)), format!("{:?}", m.write(*d, b))),
+                Op::Exists(p) => (s.exists(NAMES[*p]).to_string(), m.exists(NAMES[*p]).to_string()),
+                Op::Remove(p) => (s.remove(NAMES[*p]).to_string(), m.remove(NAMES[*p]).to_string()),
+            };
+            if got != want { return Err(format!("op {i} {o:?}: got {got}, want {want}")); }
+            let names: Vec<String> = s.list("").into_iter().filter(|n| NAMES.contains(&n.as_str())).collect();
+            if names != m.list() { return Err(format!("op {i} {o:?}: list {names:?}, want {:?}", m.list())); }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "storage-disk")]
+    fn scratch_dir() -> std::path::PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("posara_fs_model_{}_{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    proptest! {
+        #[test]
+        fn memory_files_behave_like_posix_files(ops in proptest::collection::vec(op(), 0..40)) {
+            let r = replay(&posara::fs::MemStorage::new(), &ops);
+            prop_assert!(r.is_ok(), "{}", r.unwrap_err());
+        }
+
+        #[cfg(feature = "storage-disk")]
+        #[test]
+        fn disk_files_behave_like_posix_files(ops in proptest::collection::vec(op(), 0..40)) {
+            let dir = scratch_dir();
+            let r = replay(&posara::backend::DiskStorage::new(dir.clone()), &ops);
+            let _ = std::fs::remove_dir_all(&dir);
+            prop_assert!(r.is_ok(), "{}", r.unwrap_err());
+        }
+
+        #[test]
+        fn uploads_stay_within_the_quotas(files in proptest::collection::vec((0usize..24, 0usize..(1 << 21)), 0..30)) {
+            use posara::fs::storage::{MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES};
+            let s = posara::fs::MemStorage::new();
+            let mut model: BTreeMap<String, usize> = BTreeMap::new();
+            for (k, len) in files {
+                let name = format!("f{k}");
+                let others: usize = model.iter().filter(|(n, _)| **n != name).map(|(_, l)| *l).sum();
+                let ok = len <= MAX_FILE_BYTES && (model.contains_key(&name) || model.len() < MAX_FILES) && others + len <= MAX_TOTAL_BYTES;
+                prop_assert_eq!(s.add_file(&name, vec![7; len]).is_ok(), ok);
+                if ok { model.insert(name, len); }
+            }
+            prop_assert_eq!(s.file_names(), model.keys().cloned().collect::<Vec<_>>());
+        }
+    }
 }
 
-// End-to-end for the converged Bytes API: a `b"\xNN"` byte-string literal as a
-// static 1bpp sprite, blit via &Bytes. Confirms the literal parses, statics of
-// type Bytes work, and gfx_blitg renders from packed bytes at runtime.
+#[cfg(feature = "gfx")]
+mod natives {
+    use proptest::prelude::*;
+
+    fn run(src: &str) -> Result<Vec<u16>, String> {
+        use posara::runner::{compile_source, Stepper};
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("posara_fs_native_{}_{n}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let host = posara::Host::new_with(root.clone(), true, true).unwrap();
+        let r = compile_source(src, &host).unwrap_or_else(|e| panic!("{e}\n{src}"));
+        let out = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).map(|_| host.gfx.fb.borrow().buf.clone());
+        std::fs::remove_dir_all(&root).ok();
+        out
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: ProptestConfig::default().cases.min(48), ..ProptestConfig::default() })]
+
+        #[test]
+        fn fs_read_returns_what_fs_write_put_there_zero_padded(off in 0usize..12, data in proptest::collection::vec(any::<u8>(), 1..16), n in 1usize..40) {
+            let bytes = data.iter().map(|b| format!("\\x{b:02x}")).collect::<String>();
+            let src = format!("@cart\nfn main() -> <frame, Graphics, IO> Unit {{\n  \
+                let w = fs_open(\"p.bin\", 22);\n  let _ = fs_seek(w, {off}, 0);\n  let _ = fs_write(w, b\"{bytes}\");\n  let _ = fs_close(w);\n  \
+                let r = fs_open(\"p.bin\", 1);\n  let d: Bytes = match fs_read(r, {n}) {{ Ok(value) => value, Err(_) => b\"\", _ => b\"\" }};\n  let _ = fs_close(r);\n  \
+                gfx_screen({n}, 1);\n  for i in 0..{n} {{ gfx_pset(i, 0, d.byte_at(i)) }};\n  gfx_commit();\n  loop {{ frame.present() }}\n}}\n");
+            let mut file = vec![0u8; off];
+            file.extend(&data);
+            let want: Vec<u16> = (0..n).map(|i| file.get(i).copied().unwrap_or(0) as u16).collect();
+            prop_assert_eq!(run(&src).unwrap(), want);
+        }
+    }
+
+    #[test]
+    fn an_absurd_read_size_is_catchable_without_aborting_the_cart() {
+        let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n let color=match fs_read(-1,1099511627776) {Ok(_)=>0,Err(_)=>77,_=>0};\n gfx_screen(1,1);gfx_pset(0,0,color);loop {frame.present()}\n}\n";
+        assert_eq!(run(src).unwrap(), vec![77]);
+    }
+}
+
+
+mod read_contract {
+use posara::{Host, runner::{compile_source, Stepper}};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+fn run(body: &str) -> i64 {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!("posara_read_contract_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir(&root).unwrap();
+    let result = {
+        let host = Host::new_with(root.clone(), true, true).unwrap();
+        let source = format!("@cart\nfn main() -> <frame, IO> Unit {{\n frame.present();\n {body}\n loop {{ frame.present() }}\n}}\n");
+        let result = compile_source(&source, &host).unwrap_or_else(|e|panic!("{e}"));
+        let mut step = Stepper::start(result.module, Vec::new(), &host).unwrap();
+        step.frame().unwrap();
+        step.exit_code()
+    };
+    std::fs::remove_dir_all(root).unwrap();
+    result
+}
+
 #[test]
-fn byte_literal_sprite_renders() {
-    use std::io::Write;
-    use posara::Host;
-    use posara::runner::{compile_abe, Stepper};
+fn failed_reads_are_caught_and_the_cart_continues() {
+    for operation in ["fs_read", "fs_reads"] {
+        assert_eq!(run(&format!("let result = match {operation}(-1, 1) {{ Ok(data) => 0, Err(message) => {{let text:String=message;text.len()}}, _ => 0 }}; halt(result);")), format!("{operation}: failed to read fd -1").len() as i64);
+    }
+}
 
-    let root = std::env::temp_dir().join("posara_byte_lit");
-    std::fs::create_dir_all(&root).unwrap();
-    let cart = root.join("bl.abe");
-    // b"\xff" = 8 set bits → an 8×1 solid 1bpp row.
-    let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  \
-        let spr = b\"\\xff\";\n  \
-        gfx_screen(8, 1);\n  \
-        loop { gfx_cls(0x0000); gfx_blitg(&spr, 0, 0, 0, 8, 1, 0x1234, 0); gfx_commit(); frame.present() }\n}\n";
-    std::fs::File::create(&cart).unwrap().write_all(src.as_bytes()).unwrap();
+#[test]
+fn empty_files_and_eof_keep_their_declared_types_and_padding() {
+    for (operation, length) in [("fs_read", 4), ("fs_reads", 0)] {
+        let ty=if operation=="fs_read"{"Bytes"}else{"String"};
+        assert_eq!(run(&format!("let fd=fs_open(\"empty\",23); let n=match {operation}(fd,4) {{Ok(data)=>{{let value:{ty}=data;value.len()}},Err(_)=>-1,_=>-2}}; let _=fs_close(fd); halt(n);")),length);
+    }
+}
 
-    let host = Host::new_with(root.clone(), true, true).unwrap();
-    let r = compile_abe(&cart, &host).unwrap_or_else(|e| panic!("compile:\n{e}"));
-    let mut step = Stepper::start_named(r.module, r.static_names, r.fn_names, &host).unwrap();
-    step.frame().unwrap();
+#[test]
+fn byte_writes_and_reads_preserve_non_utf8_and_embedded_zeros() {
+    assert_eq!(run("let fd=fs_open(\"binary\",23); let count=fs_write(fd,b\"\\x00\\xff\\x80A\"); let _=fs_seek(fd,0,0); let total=match fs_read(fd,4) {Ok(data)=>{let value:Bytes=data;value.len()+value.byte_at(1)+value.byte_at(2)},Err(_)=>-1,_=>-2}; let _=fs_close(fd); halt(count+total);"),4+4+255+128);
+}
 
-    assert!(host.gfx.fb.borrow().buf.iter().all(|&c| c == 0x1234), "byte-literal sprite did not render");
-    std::fs::remove_dir_all(&root).ok();
+#[test]
+fn unhandled_read_errors_are_rejected_by_the_compiler() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let error=compile_source("@cart\nfn main()-><frame,IO> Unit {let data=fs_read(-1,1);loop {frame.present()}}",&host).err().expect("fallible reads require a handler or propagation");
+    assert!(error.contains("fallible call"),"{error}");
+}
+
+#[test]
+fn repeated_caught_reads_release_result_and_payload_handles() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let source="@cart\nfn main()-><frame,IO> Unit {loop {let data:Bytes=match fs_read(-1,1) {Ok(value)=>value,Err(_)=>b\"\",_=>b\"\"};let text:String=match fs_reads(-1,1) {Ok(value)=>value,Err(_)=>\"\",_=>\"\"};assert(data.len()+text.len()==0,\"caught read\");frame.present()}}";
+    let result=compile_source(source,&host).unwrap();
+    host.load(&result.module);
+    let mut vm=posara::VirtualMachine::new();
+    vm.install_device(myriad::devices::SYSTEM_ID,Box::new(myriad::devices::SystemDevice::new()));
+    host.install(&mut vm);
+    let mut step=posara_core::stepper::Stepper::start(vm,result.module).unwrap();
+    step.frame().unwrap();let live=step.vm().heap_live_count();
+    for _ in 0..512 {assert!(step.frame().unwrap());}
+    assert_eq!(step.vm().heap_live_count(),live);
+}
+
+#[test]
+fn question_propagates_read_errors_without_changing_the_return_type() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let source="fn load()-><IO,exn<String>> Bytes {let data=fs_read(-1,1)?;data}\n@cart\nfn main()-><frame,IO> Unit {frame.present();let data:Bytes=match load(){Ok(value)=>value,Err(_)=>b\"fallback\",_=>b\"\"};halt(data.len());loop{frame.present()}}";
+    let result=compile_source(source,&host).unwrap_or_else(|e|panic!("{e}"));
+    let mut step=Stepper::start(result.module,Vec::new(),&host).unwrap();step.frame().unwrap();assert_eq!(step.exit_code(),8);
+}
+
+#[test]
+fn exception_propagation_and_handlers_use_the_language_result_layout() {
+    assert_eq!(run("let code=handle fs_reads(-1,1) {return data=>0,exn message=>{let text:String=message;text.len()}};halt(code);"),"fs_reads: failed to read fd -1".len() as i64);
+    assert_eq!(run("let fd=fs_open(\"text\",23);let _=fs_writes(fd,\"ok\");let _=fs_seek(fd,0,0);let n=match fs_reads(fd,2) {Ok(s)=>{let text:String=s;text.len()},Err(_)=>-1,_=>-2};let _=fs_close(fd);halt(n);"),2);
+}
 }

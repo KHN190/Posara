@@ -35,4 +35,4 @@ posara-sfx track  <in.mid> <out.trk> [opts]          # midi → packed events
 `track` opts: `--voices N` (1..4) · `--project voice|pitch` · `--transpose N` ·
 `--res N` · `--tempo BPM`.
 
-Cart loads: `snd_sample(&s, rate, vol)` · `snd_track(&t, ms_per_tick)`.
+Cart loads: `snd_sample(s, rate, vol)` · `snd_seq(t, ms_per_tick)`.

@@ -55,6 +55,7 @@ impl Framebuffer {
     pub fn configure(&mut self, w: usize, h: usize, format: u8) -> Result<(), String> {
         if format != 1 { return Err(format!("Screen: format {} unsupported (only 1=RGB565)", format)); }
         if w == 0 || h == 0 { return Err(format!("Screen: invalid size {}x{}", w, h)); }
+        if w * h > MAX_PIXELS { return Err(format!("Screen: {}x{} is too large", w, h)); }
         if w > self.max_dim || h > self.max_dim { return Err(format!("Screen: {}x{} exceeds web {}x{} budget", w, h, self.max_dim, self.max_dim)); }
         if !self.buf.is_empty() {
             if self.w != w || self.h != h {
@@ -113,9 +114,11 @@ impl Framebuffer {
         }
         let dw = (w * pct / 100).max(1);
         let dh = (h * pct / 100).max(1);
-        for dy in 0..dh {
+        for y in span(y0, dh, self.h) {
+            let dy = y as i64 - y0;
             let sy = dy * 100 / pct;
-            for dx in 0..dw {
+            for x in span(x0, dw, self.w) {
+                let dx = x as i64 - x0;
                 let sx = dx * 100 / pct;
                 let n = off + (sy * w + sx) as usize;
                 let byte = get(n / 2);
@@ -155,12 +158,9 @@ impl Framebuffer {
     pub fn rect_mix(&mut self, x0: i64, y0: i64, w: i64, h: i64, c: u16, a: i64) {
         let a = a.clamp(0, 256) as u32;
         if a == 0 { return; }
-        for dy in 0..h {
-            for dx in 0..w {
-                let (x, y) = (x0 + dx, y0 + dy);
-                if x < 0 || y < 0 { continue; }
-                let (x, y) = (x as usize, y as usize);
-                if x >= self.w || y >= self.h { continue; }
+        let (ys, xs) = (span(y0, h, self.h), span(x0, w, self.w));
+        for y in ys {
+            for x in xs.clone() {
                 let idx = y * self.w + x;
                 self.buf[idx] = blend565(self.buf[idx], c, a);
             }
@@ -208,6 +208,15 @@ impl Framebuffer {
         }
         Ok(())
     }
+}
+
+pub const MAX_PIXELS: usize = 1 << 24;
+
+// Screen columns or rows covered by [start, start + len).
+pub fn span(start: i64, len: i64, size: usize) -> core::ops::Range<usize> {
+    let lo = start.max(0);
+    let hi = (start + len.max(0)).min(size as i64);
+    if lo >= hi { 0..0 } else { lo as usize..hi as usize }
 }
 
 // canvas little-endian 0xAABBGGRR

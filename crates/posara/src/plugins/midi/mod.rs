@@ -46,13 +46,9 @@ impl Device for MidiDevice {
         match port {
             PORT_SEND => {
                 let w = val.as_int();
-                let status = (w & 0xFF) as u8;
-                let d1 = ((w >> 8) & 0xFF) as u8;
-                let d2 = ((w >> 16) & 0xFF) as u8;
-                let msg: &[u8] = match status & 0xF0 {
-                    0xC0 | 0xD0 => &[status, d1],
-                    _ => &[status, d1, d2],
-                };
+                let (bytes, len) = posara_core::midi::message(w as u32);
+                if len == 0 { return Ok(()); }
+                let msg = &bytes[..len];
                 // The virtual source carries every send; wires decide who listens.
                 if let Some(v) = &self.virt {
                     send_one(v, msg)?;

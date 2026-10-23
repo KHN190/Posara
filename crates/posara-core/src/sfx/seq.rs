@@ -1,6 +1,4 @@
 use alloc::vec::Vec;
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use crate::math;
 
 #[derive(Clone, Copy)]
@@ -76,4 +74,21 @@ pub fn unpack(word: i64) -> Event {
         vel: ((w >> 27) & 0x7F) as f32 / 100.0,
         dur: ((w >> 34) & 0xFFFF) as u32,
     }
+}
+
+pub const EVENT_BYTES: usize = 8;
+
+pub fn pack(tick: i64, channel: i64, note: i64, volume: i64, duration: i64) -> i64 {
+    (tick & 0xffff) | ((channel & 7) << 16) | ((note & 0xff) << 19)
+        | ((volume & 0x7f) << 27) | ((duration & 0xffff) << 34)
+}
+
+pub fn decode(bytes: &[u8]) -> Vec<Event> {
+    let events = bytes.chunks(EVENT_BYTES).filter_map(|chunk| {
+        let mut word = [0; EVENT_BYTES];
+        word[..chunk.len()].copy_from_slice(chunk);
+        let word = i64::from_le_bytes(word);
+        (word != 0).then(|| unpack(word))
+    }).collect();
+    by_tick(events)
 }

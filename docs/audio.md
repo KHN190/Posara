@@ -63,34 +63,26 @@ snd_on(1, 45, 90, 130);                 // play MIDI 45
 
 ## Step sequencer
 
-Queue events once; the audio thread fires them on a grid. Pack each event into one
-integer by bit-shifting its fields into place:
+`snd_seq(data: Bytes, ms_per_tick)` queues `.trk` events; the audio thread fires them on a grid. The format is independent of the cart's integer width.
 
 ```rust
-fn ev(tick, ch, note, vol, dur) -> Int {
-  tick | (ch << 16) | (note << 19) | (vol << 27) | (dur << 34)
-}
-snd_seq([ ev(0, 0, 36, 90, 2), ev(4, 0, 36, 90, 2) ], 120);
+let events = b"\x00\x00\xe0\xd1\x0a\x00\x00\x00\x04\x00\xe0\xd1\x0a\x00\x00\x00";
+snd_seq(events, 120);   // two notes, ticks 0 and 4
 ```
 
-Field layout — `offset · width`: `tick` 0·16 · `ch` 16·3 · `note` 19·8 ·
-`vol` 27·7 · `dur` 34·hi.
+Each event is 8 little-endian bytes: tick bits 0–15, channel 16–18, note 19–26, volume 27–33, duration 34–49. Volume is 0..100; duration is in ticks. Use channels 0..3. All-zero events are padding; a partial final event is zero-padded. Events are sorted by tick, preserving order at the same tick.
 
-- `snd_seq(events: Array<Int>, ms_per_tick)` — queue packed events on the grid.
-- `snd_seqstop()` — stop the sequencer.
-- `snd_track(data: Array<Int>, ms_per_tick)` — play a `posara-sfx track` output (see
-  [midi.md](midi.md)).
-
-### Samples
-
-- `snd_sample(pcm: Array<Int>, rate_hz, vol)` — play a PCM buffer.
+- `snd_seqstop()` — stop sequencing. Empty sequence data also stops it.
+- `snd_sample(data: Bytes, bit_rate_hz, vol)` — play MSB-first 1-bit delta-sigma `.sample` data; volume 0..100.
 - `snd_samplestop()` — stop sample playback.
+
+Generate `.trk` and `.sample` files with [posara-sfx](tools.md).
 
 ## Master bus
 
 Global, applied to all patches.
 
-- `snd_bus_delay(time_ms, feedback, mix)` — delay; `time_ms` tap time (up to 2000 on desktop and web, shorter on small devices), `feedback`/`mix` 0..100.
+- `snd_bus_delay(time_ms, feedback, mix)` — delay; `time_ms` tap time (up to 2000 on desktop and web), `feedback`/`mix` 0..100.
 - `snd_bus_reverb(size, damp, mix)` — reverb; `size` room, `damp` high-freq damping, `mix` wet, all 0..100.
 - `snd_bus_record_start(path: String) -> Int` — start WAV capture (needs `fs`).
 - `snd_bus_record_stop() -> Int` — stop capture.

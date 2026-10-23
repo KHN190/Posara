@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use posara::backend::{Backend, QueueMidi};
 use posara::runner::{compile_source, compile_source_multi, read_pk_bytes, Stepper};
 use posara::Host;
 use wasm_bindgen::prelude::*;
@@ -14,15 +15,24 @@ pub fn init() {
 pub struct Posara {
     stepper: Option<Stepper<'static>>,
     host: Box<Host>,
+    midi: QueueMidi,
 }
 
 #[wasm_bindgen]
 impl Posara {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<Posara, JsValue> {
-        let host = Host::new_with(PathBuf::from("."), false, false).map_err(js)?;
-        Ok(Posara { stepper: None, host: Box::new(host) })
+        let midi = QueueMidi::default();
+        let mut backend = Backend::new(PathBuf::from("."));
+        backend.midi = Some(std::rc::Rc::new(std::cell::RefCell::new(Box::new(midi.clone()))));
+        let host = Host::with_backend(PathBuf::from("."), backend, false, false).map_err(js)?;
+        Ok(Posara { stepper: None, host: Box::new(host), midi })
     }
+
+    // status | d1 << 8 | d2 << 16, from a Web MIDI input message
+    pub fn midi_in(&self, word: u32) { self.midi.push(word); }
+
+    pub fn midi_out(&self) -> Vec<u8> { self.midi.take_bytes() }
 
     pub fn load_src(&mut self, src: &str) -> Result<(), JsValue> {
         let r = compile_source(src, &self.host).map_err(js)?;

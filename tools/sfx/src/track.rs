@@ -1,10 +1,11 @@
 // `posara-sfx track` — .mid -> .trk packed events.
-//   cart: let t = fs_read(fd, N); snd_track(&t, ms_per_tick)
+//   cart: let t: Bytes = match fs_read(fd, N) { Ok(data) => data, Err(_) => b"", _ => b"" }; snd_seq(t, ms_per_tick)
 // each event = one i64: tick(16) | ch(3) | note(8) | vol(7) | dur(16).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use posara_core::sfx::seq::pack;
 use midly::{MetaMessage, MidiMessage, Smf, Timing, TrackEventKind};
 
 fn usage() -> ExitCode {
@@ -197,7 +198,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         return ExitCode::from(1);
     }
     eprintln!(
-        "wrote {} ({} events, {} voices, {} bytes; cart: let t = fs_read(fd, {}); snd_track(&t, {}))",
+        "wrote {} ({} events, {} voices, {} bytes; cart: read {} bytes and call snd_seq(data, {}))",
         out.display(), events.len(), used, events.len() * 8, events.len() * 8, our_ms_per_tick
     );
     if preempted > 0 {
@@ -218,10 +219,6 @@ fn cc_at(timeline: &[(u64, u8)], tick: u64) -> u8 {
         Err(0) => 127,
         Err(i) => timeline[i - 1].1,
     }
-}
-
-fn pack(tick: i64, ch: i64, note: i64, vol: i64, dur: i64) -> i64 {
-    (tick & 0xFFFF) | ((ch & 0x7) << 16) | ((note & 0xFF) << 19) | ((vol & 0x7F) << 27) | ((dur & 0xFFFF) << 34)
 }
 
 #[cfg(test)]

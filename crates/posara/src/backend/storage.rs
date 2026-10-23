@@ -92,8 +92,9 @@ mod disk {
         fn read(&self, fd: i64, n: usize) -> Option<Vec<u8>> {
             let mut t = self.fds.borrow_mut();
             let f = t.get(fd)?;
+            if n == 0 { return Some(Vec::new()); }
             let mut buf = vec![0u8; n];
-            let got = f.read(&mut buf).unwrap_or(0);
+            let got = f.read(&mut buf).ok()?;
             buf.truncate(got);
             Some(buf)
         }

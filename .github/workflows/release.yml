@@ -31,10 +31,15 @@ jobs:
             libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 
       - name: Tests
-        run: cargo test -p posara
+        run: |
+          python3 scripts/check-contract.py
+          cargo test -p posara
+          cargo test -p posara --no-default-features --features web,test
 
       - name: Build posara (desktop)
         run: cargo build --release -p posara
@@ -48,3 +53,30 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: target/release/posara-${{ matrix.name }}.tar.gz
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Web execution contracts
+        run: bash scripts/check-wasm.sh
+      - name: Build web bundle
+        run: |
+          wasm-pack build crates/posara-web --release --no-opt --target web --out-dir pkg
+          mkdir -p target/web
+          cp -R crates/posara-web/www/. target/web/
+          cp -R crates/posara-web/pkg target/web/pkg
+          tar -czf target/posara-web.tar.gz -C target/web .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: posara-web
+          path: target/posara-web.tar.gz
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: target/posara-web.tar.gz

@@ -1,9 +1,9 @@
 basic/hello.abe gfx=cbf29ce484222325 sfx=a597c823b2576c85
-basic/sprite.abe gfx=ffe3dd823de5e325 sfx=3eec405aaa5807a5
-basic/text.abe gfx=0ae04c7c179d8025 sfx=3eec405aaa5807a5
+basic/sprite.abe gfx=bba518ba97951cb3 sfx=3eec405aaa5807a5
+basic/text.abe gfx=1c8366f603c75825 sfx=3eec405aaa5807a5
 games/fuji.abe gfx=a763f40d7ebe1af3 sfx=3eec405aaa5807a5
-games/invader.abe gfx=ad1c582cc80d35ad sfx=d42dd510d953f839
-games/invader.pk gfx=ad1c582cc80d35ad sfx=d42dd510d953f839
+games/invader.abe gfx=90e900a4816fb174 sfx=d42dd510d953f839
+games/invader.pk gfx=90e900a4816fb174 sfx=d42dd510d953f839
 music/acid.abe gfx=cbf29ce484222325 sfx=2627c31090c8ec11
 music/ambient.abe gfx=cbf29ce484222325 sfx=f47c6f77e60b266d
 music/cover/vol1.abe err Screen: 800x800 exceeds web 480x480 budget
@@ -13,10 +13,10 @@ music/dub.abe gfx=cbf29ce484222325 sfx=b952c1ba72600755
 music/electro.abe gfx=cbf29ce484222325 sfx=ff9b838d65a14945
 music/fh.abe gfx=cbf29ce484222325 sfx=e91fefbc8f2f9b85
 music/fmajor.abe gfx=3c8d75bd4c89c325 sfx=e9488e918c221875
-music/sequencer.abe err   --> /../../carts/music/sequencer.abe
+music/sequencer.abe gfx=b260ffab6efab468 sfx=ba2a2990e74a7122
 music/song.abe gfx=3c8d75bd4c89c325 sfx=5f67cbbd7ebebf09
-music/tracker.abe err   --> /../../carts/music/tracker.abe
+music/tracker.abe gfx=0bab597414fbc95d sfx=21ac3cfb4833f9a9
 tests.abe gfx=cbf29ce484222325 sfx=a597c823b2576c85
 vis/acid.abe gfx=34feacceeab531dd sfx=4323e89aeff47bbd
-vis/kg.abe gfx=982ea56bf75f2325 sfx=3eec405aaa5807a5
-vis/micro.abe gfx=dc2441ff2f066c71 sfx=3eec405aaa5807a5
+vis/kg.abe gfx=741a570c4d4709ef sfx=3eec405aaa5807a5
+vis/micro.abe gfx=f94ca6d0ce8d25cb sfx=3eec405aaa5807a5

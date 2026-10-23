@@ -1,5 +1,3 @@
-#[cfg(not(feature = "std"))]
-use crate::math::F32Ext;
 use crate::math;
 
 pub const LFO_PITCH: u8 = 0;

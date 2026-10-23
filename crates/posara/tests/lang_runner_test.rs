@@ -156,3 +156,196 @@ fn f32_cart_reads_rand_in_unit_range() {
     assert_eq!(run_int32("rand", body), 64);
 }
 
+
+mod any_native_arguments {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use myriad::devices::{SystemDevice, SYSTEM_ID};
+    use myriad::VirtualMachine;
+    use posara_core::abi::{stub_all, Ty, NATIVES};
+    use posara_core::stepper::Stepper;
+    use proptest::prelude::*;
+
+    const WATCHDOG: Duration = Duration::from_secs(10);
+
+    fn int() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("(0 - 9223372036854775807 - 1)".to_string()), Just("9223372036854775807".into()), Just("0".into()),
+            Just("(0 - 1)".into()), Just("1099511627776".into()), (-300i64..300).prop_map(|n| format!("({n})")), any::<i64>().prop_map(|n| format!("({n})")),
+        ]
+    }
+
+    fn text() -> impl Strategy<Value = String> {
+        prop_oneof![Just(String::new()), "[a-z./]{0,12}", Just("../../x".into()), Just("é".repeat(20000))]
+            .prop_map(|s| format!("{s:?}"))
+    }
+
+    fn bytes() -> impl Strategy<Value = String> {
+        prop_oneof![proptest::collection::vec(any::<u8>(), 0..48), Just(vec![0xFF; 1 << 15])]
+            .prop_map(|b| format!("b\"{}\"", b.iter().map(|x| format!("\\x{x:02x}")).collect::<String>()))
+    }
+
+    fn ints() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("[0; 0]".to_string()), Just("[9223372036854775807; 4096]".into()),
+            proptest::collection::vec(prop_oneof![any::<i64>(), -2i64..300], 1..40)
+                .prop_map(|v| format!("[{}]", v.iter().map(|n| format!("({n})")).collect::<Vec<_>>().join(", "))),
+        ]
+    }
+
+    fn arg(t: Ty) -> BoxedStrategy<String> {
+        match t {
+            Ty::Int | Ty::Float => int().boxed(),
+            Ty::Bool => prop_oneof![Just("true".to_string()), Just("false".into())].boxed(),
+            Ty::Unit => Just("()".to_string()).boxed(),
+            Ty::Str => text().boxed(),
+            Ty::Bytes | Ty::RefBytes => bytes().boxed(),
+            Ty::ArrInt | Ty::RefArrInt => ints().boxed(),
+        }
+    }
+
+    pub fn cart() -> impl Strategy<Value = (usize, String)> {
+        (0..NATIVES.len()).prop_flat_map(|i| {
+            let s = &NATIVES[i];
+            (Just(i), s.params.iter().map(|&t| arg(t)).collect::<Vec<_>>())
+        }).prop_map(|(i, args)| {
+            let s = &NATIVES[i];
+            let mut lets = String::new();
+            let call: Vec<String> = s.params.iter().zip(&args).enumerate().map(|(k, (t, a))| match t {
+                Ty::RefBytes | Ty::RefArrInt => { lets += &format!("  let a{k} = {a};\n"); format!("&a{k}") }
+                Ty::Bytes | Ty::ArrInt | Ty::Str => { lets += &format!("    let a{k} = {a};\n"); format!("a{k}") }
+                _ => a.clone(),
+            }).collect();
+            let (outer, inner): (Vec<&str>, Vec<&str>) = lets.lines().partition(|l| !l.starts_with("    "));
+            let invocation=format!("{}({})",s.name,call.join(", "));
+            let invoke=if s.eff==posara_core::abi::Eff::IOExnString {
+                format!("match {invocation} {{ Ok(_) => (), Err(_) => (), _ => () }}")
+            } else {invocation};
+            (i, format!("@cart\nfn main() -> <frame, Graphics, IO, nondet, net> Unit {{\n{}\n  loop {{\n{}\n    let _ = {};\n    frame.present()\n  }}\n}}\n",
+                outer.join("\n"), inner.join("\n"), invoke))
+        })
+    }
+
+    fn live_after_frames(mut step: Stepper) -> Result<(), String> {
+        let counts: Vec<usize> = (0..3).map(|_| { let _ = step.frame(); step.vm().heap_live_count() }).collect();
+        if counts[2] > counts[0] { return Err(format!("live cells grow per call: {counts:?}")); }
+        Ok(())
+    }
+
+    fn boot(module: polka::Module, install: impl FnOnce(&mut VirtualMachine)) -> Result<(), String> {
+        let mut vm = VirtualMachine::new();
+        vm.install_device(SYSTEM_ID, Box::new(SystemDevice::new()));
+        install(&mut vm);
+        match Stepper::start(vm, module) {
+            Ok(step) => live_after_frames(step),
+            Err(_) => Ok(()),
+        }
+    }
+
+    fn guarded(name: &'static str, src: String) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let root = std::env::temp_dir().join(format!("posara_fuzz_{}_{name}", std::process::id()));
+            std::fs::create_dir_all(&root).unwrap();
+            let host = posara::Host::with_backend(root.clone(), posara::backend::Backend::null(root.clone()), true, true).unwrap();
+            let module = || posara::runner::compile_source(&src, &host).map(|r| r.module).map_err(|e| format!("compile:\n{e}\n{src}"));
+            let r = (|| {
+                let m = module()?;
+                host.load(&m);
+                boot(m, |vm| host.install(vm)).map_err(|e| format!("desktop/web host: {e}"))?;
+                let core = posara_core::host::Host::new(posara_core::host::Drivers::null());
+                boot(module()?, |vm| core.install(vm)).map_err(|e| format!("core host: {e}"))?;
+                boot(module()?, stub_all).map_err(|e| format!("stubs: {e}"))
+            })();
+            std::fs::remove_dir_all(&root).ok();
+            let _ = tx.send(r);
+        });
+        match rx.recv_timeout(WATCHDOG) {
+            Ok(r) => r,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(format!("{name} hung over {WATCHDOG:?}")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!("{name} panicked")),
+        }
+    }
+
+    fn frame_with(body: &str) -> Result<(), String> {
+        guarded("regression", format!("@cart\nfn main() -> <frame, Graphics, IO> Unit {{\n  {body};\n  loop {{ frame.present() }}\n}}\n"))
+    }
+
+    #[test]
+    fn a_screen_too_big_for_memory_is_refused() {
+        frame_with("gfx_screen(1099511627776, 1099511627776)").unwrap();
+    }
+
+    #[test]
+    fn extreme_drawing_arguments_neither_hang_nor_overflow() {
+        frame_with("gfx_screen(8, 8);\n  let b = b\"\\x00\";\n  gfx_blitg(&b, 0, 0, 0, 0 - 1, 9223372036854775807, 1, 0);\n  \
+            gfx_line(0 - 9223372036854775807 - 1, 0, 3, 3, 1);\n  gfx_linew(0, 0, 7, 7, 9223372036854775807, 1);\n  \
+            gfx_circb(0 - 9223372036854775807 - 1, 0, 3, 1);\n  gfx_rect(0 - 9223372036854775807, 0, 9223372036854775807, 9223372036854775807, 1)").unwrap();
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: ProptestConfig::default().cases.min(16), ..ProptestConfig::default() })]
+
+        #[test]
+        fn every_native_survives_any_arguments((i, src) in cart()) {
+            let r = guarded(NATIVES[i].name, src.clone());
+            prop_assert!(r.is_ok(), "{}\n{}", r.unwrap_err(), src);
+        }
+    }
+}
+
+
+#[cfg(feature = "sfx")]
+mod sequence_contract {
+use posara::{Host, runner::{compile_abe_with, read_pk_bytes, write_pk_bytes, Stepper}};
+use posara_core::sfx::{mixer::Cmd, seq::{decode, pack}};
+
+fn run(tag: &str, body: &str, int32: bool) -> Option<Cmd> {
+    let path = std::env::temp_dir().join(format!("posara_sequence_{tag}_{}.abe", std::process::id()));
+    std::fs::write(&path, format!("@cart\nfn main() -> <frame, IO> Unit {{\n frame.present();\n {body};\n loop {{ frame.present() }}\n}}\n")).unwrap();
+    let host = Host::new_with(std::env::temp_dir(), true, true).unwrap();
+    let result = compile_abe_with(&path, &host, int32);
+    std::fs::remove_file(&path).unwrap();
+    let result = result.unwrap_or_else(|error| panic!("{error}"));
+    let module = read_pk_bytes(&write_pk_bytes(&result.module).unwrap()).unwrap();
+    let mut step = Stepper::start(module, Vec::new(), &host).unwrap();
+    step.frame().unwrap();
+    host.sfx.audio.cmds.try_pop()
+}
+
+#[test]
+fn byte_sequences_preserve_every_field_in_both_integer_modes() {
+    let word=pack(65535,3,127,100,65535);
+    let bytes:String=word.to_le_bytes().iter().map(|b|format!("\\x{b:02x}")).collect();
+    for int32 in [false,true] {
+        let Some(Cmd::Seq(events,ms))=run(if int32{"i32"}else{"i64"},&format!("snd_seq(b\"{bytes}\",120)"),int32) else{panic!("expected sequence")};
+        assert_eq!(ms,120);assert_eq!(events.len(),1);
+        let e=events[0];assert_eq!((e.tick,e.ch,e.note,e.dur),(65535,3,127,65535));assert_eq!(e.vel,1.0);
+    }
+}
+
+#[test]
+fn legacy_track_layout_keeps_padding_partial_words_and_stable_tick_order() {
+    let mut bytes=Vec::new();
+    for (tick,note) in [(4,60),(0,61),(4,62)]{bytes.extend(pack(tick,0,note,80,1).to_le_bytes());}
+    bytes.extend([0;8]);bytes.push(1);
+    let events=decode(&bytes);
+    assert_eq!(events.iter().map(|e|(e.tick,e.note)).collect::<Vec<_>>(),vec![(0,61),(1,0),(4,60),(4,62)]);
+}
+
+#[test]
+fn empty_sequences_stop_without_an_integer_width_restriction() {
+    for int32 in [false,true]{
+        assert!(matches!(run(if int32{"empty32"}else{"empty64"},"snd_seq(b\"\",120)",int32),Some(Cmd::Seq(events,120)) if events.is_empty()));
+    }
+}
+
+#[test]
+fn sequence_data_is_bytes_and_the_redundant_native_is_not_registered() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    for call in ["snd_seq([1],120)","snd_track(b\"\",120)"] {
+        assert!(posara::runner::compile_source(&format!("@cart\nfn main()-><frame,IO> Unit {{{call};loop{{frame.present()}}}}"),&host).is_err());
+    }
+}
+}

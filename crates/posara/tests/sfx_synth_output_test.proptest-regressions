@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ccbcca856963bf6ba3b26c559e8e9b0d7b452d2435563c569a614a06f1794e93 # shrinks to wave = 3, depth = 0.674676, rate = 1
+cc bb28ce14332045b81c5fdad4eecca6d4c9a9cc9a37a83730ff02f2837293b19f # shrinks to kind = 1, amt = 0.7554858, param = 0.0, xs = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.94240755]
+cc 2be51fd8e3b302a84d7cc6947d778f56590a34bf7d9d7195f105e9a659982b37 # shrinks to ops = [(SynOsc(14, 1, 1, 0, 853803.4, 0.9916148), 0), (SynFilter(14, 1, 0.0, 0.0), 0), (SynOn(14, 0, 0.0, 0), 1)], stereo = false

@@ -7,11 +7,11 @@ use myriad::VirtualMachine;
 use posara_core::host::Drivers;
 
 use crate::backend::Backend;
-#[cfg(any(feature = "sfx", feature = "midi"))]
+#[cfg(any(feature = "sfx", feature = "midi-desktop"))]
 use crate::plugin::Plugin;
 #[cfg(feature = "sfx")]
 use crate::plugins::SfxPlugin;
-#[cfg(feature = "midi")]
+#[cfg(feature = "midi-desktop")]
 use crate::plugins::MidiPlugin;
 
 // Desktop/web host: the portable core plus what needs std (audio device,
@@ -23,7 +23,7 @@ pub struct Host {
     pub root: PathBuf,
     #[cfg(feature = "sfx")]
     pub sfx: SfxPlugin,
-    #[cfg(feature = "midi")]
+    #[cfg(feature = "midi-desktop")]
     midi_io: Option<MidiPlugin>,
 }
 
@@ -32,9 +32,9 @@ impl Deref for Host {
     fn deref(&self) -> &Self::Target { &self.core }
 }
 
-#[cfg(feature = "midi")]
+#[cfg(feature = "midi-desktop")]
 type MidiIo = Option<MidiPlugin>;
-#[cfg(not(feature = "midi"))]
+#[cfg(not(feature = "midi-desktop"))]
 type MidiIo = ();
 
 impl Host {
@@ -42,14 +42,14 @@ impl Host {
 
     pub fn new_with(root: PathBuf, headless: bool, muted: bool) -> Result<Self, String> {
         Self::build(root.clone(), Backend::new(root), headless, muted, |_root| {
-            #[cfg(feature = "midi")]
+            #[cfg(feature = "midi-desktop")]
             return Some(MidiPlugin::new());
         })
     }
 
     pub fn with_backend(root: PathBuf, backend: Backend, headless: bool, muted: bool) -> Result<Self, String> {
         Self::build(root, backend, headless, muted, |_root| {
-            #[cfg(feature = "midi")]
+            #[cfg(feature = "midi-desktop")]
             return None;
         })
     }
@@ -58,10 +58,10 @@ impl Host {
     // designs/midi.md). Without a config this is `new_with`. muted = no audio
     // device (silent run, like --headless for sound).
     pub fn new_cart(root: PathBuf, headless: bool, muted: bool, entry: &std::path::Path) -> Result<Self, String> {
-        #[cfg(not(feature = "midi"))]
+        #[cfg(not(feature = "midi-desktop"))]
         let _ = entry;
         Self::build(root.clone(), Backend::new(root), headless, muted, |_root| {
-            #[cfg(feature = "midi")]
+            #[cfg(feature = "midi-desktop")]
             return Some(MidiPlugin::new_routed(_root, entry));
         })
     }
@@ -71,9 +71,9 @@ impl Host {
         let _ = headless;
         #[cfg(not(feature = "sfx"))]
         let _ = muted;
-        #[cfg(feature = "midi")]
+        #[cfg(feature = "midi-desktop")]
         let midi_io = if backend.midi.is_some() { None } else { midi(&root) };
-        #[cfg(not(feature = "midi"))]
+        #[cfg(not(feature = "midi-desktop"))]
         midi(&root);
         #[cfg(feature = "sfx")]
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
@@ -104,7 +104,7 @@ impl Host {
             root,
             #[cfg(feature = "sfx")]
             sfx,
-            #[cfg(feature = "midi")]
+            #[cfg(feature = "midi-desktop")]
             midi_io,
         })
     }
@@ -115,7 +115,7 @@ impl Host {
         self.sfx.install(vm);
         #[cfg(all(feature = "gfx", feature = "fs"))]
         crate::gfx::register_io_natives(vm, Rc::clone(&self.gfx.fb), self.root.clone());
-        #[cfg(feature = "midi")]
+        #[cfg(feature = "midi-desktop")]
         if let Some(m) = &self.midi_io { m.install(vm); }
     }
 
@@ -159,6 +159,10 @@ impl Host {
                 Eff::Pure => return vec![],
                 Eff::Graphics => "Graphics",
                 Eff::IO => "IO",
+                Eff::IOExnString => return vec![
+                    EffectItem { name: vec!["IO".into()], arg: None },
+                    EffectItem { name: vec!["exn".into()], arg: Some(Box::new(abrase::ast::Type::Named("String".into()))) },
+                ],
                 Eff::Network => "net",
                 Eff::Nondet => "nondet",
             };
