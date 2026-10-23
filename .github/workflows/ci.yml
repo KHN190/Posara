@@ -49,3 +49,13 @@ jobs:
 
       - name: Build binary
         run: cargo build --release -p posara
+
+  ci:
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both platform checks
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: test "$TEST_RESULT" = success
