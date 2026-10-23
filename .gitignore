@@ -3,6 +3,9 @@ designs/
 workspace/
 scripts/deploy-web.sh
 .claude/
-CLAUDE.md
-Cargo.lock
 .DS_Store
+.worktrees/
+
+CLAUDE.md
+AGENTS.md
+Cargo.lock

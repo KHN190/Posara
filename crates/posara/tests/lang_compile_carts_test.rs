@@ -148,3 +148,26 @@ mod recorded_output {
         }
     }
 }
+
+#[test]
+fn workspace_cart_sources_compile_when_present() {
+    use posara::backend::Backend;
+    use posara::runner::{compile_abe, default_root};
+    use std::path::Path;
+    let workspace=Path::new(concat!(env!("CARGO_MANIFEST_DIR"),"/../../workspace"));
+    if !workspace.is_dir(){return;}
+    fn visit(dir:&Path,errors:&mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path=entry.path();
+            if path.is_dir(){if !matches!(path.file_name().and_then(|n|n.to_str()),Some("lib"|"target"|".git")){visit(&path,errors);}continue;}
+            if path.extension().is_none_or(|e|e!="abe"){continue;}
+            let source=std::fs::read_to_string(&path).unwrap();
+            if !source.contains("fn main("){continue;}
+            let root=default_root(&path);
+            let host=Host::with_backend(root.clone(),Backend::null(root),true,true).unwrap();
+            if let Err(error)=compile_abe(&path,&host){errors.push(format!("{}: {error}",path.display()));}
+        }
+    }
+    let mut errors=Vec::new();visit(workspace,&mut errors);
+    assert!(errors.is_empty(),"workspace cart compilation failed:\n{}",errors.join("\n"));
+}

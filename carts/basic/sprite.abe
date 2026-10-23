@@ -2,7 +2,7 @@
 
 fn load_spr() -> <IO> Bytes {
   let fd = fs_open("assets/mountain64.spr", 1);
-  let d = fs_read(fd, 512);
+  let d: Bytes = match fs_read(fd, 512) { Ok(value) => value, Err(message) => { println(message); b"" }, _ => b"" };
   let _ = fs_close(fd);
   d
 }

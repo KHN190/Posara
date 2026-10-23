@@ -17,8 +17,8 @@ fn ret_int(n: i64) -> Result<(Value, bool), String> { Ok((Value::from_int(n), fa
 
 const MAX_READ: usize = 1 << 26;
 
-fn read_len(a: &[Value]) -> Result<usize, String> {
-    Args(a).count(1, MAX_READ).map_err(|e| format!("fs_read: {e} bytes"))
+fn read_len(a: &[Value], operation: &str) -> Result<usize, String> {
+    Args(a).count(1, MAX_READ).map_err(|e| format!("{operation}: {e} bytes"))
 }
 
 pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
@@ -55,28 +55,24 @@ pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
         ret_int(s.seek(a.word(0), a.word(2), a.offset(1)))
     }));
 
-    // Read up to `n` bytes into a packed Bytes value, zero-padded past EOF.
-    let s = Rc::clone(&storage);
-    vm.register_native("fs_read", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let (fd, n) = (Args(a).word(0), read_len(a)?);
-        let Some(mut buf) = s.read(fd, n) else { return ret_int(-1); };
-        buf.resize(n, 0);
-        Ok((alloc_bytes(ctx.heap, &buf)?, true))
-    }));
-    let s = Rc::clone(&storage);
-    vm.register_native("fs_reads", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let (fd, n) = (Args(a).word(0), read_len(a)?);
-        let Some(buf) = s.read(fd, n) else { return ret_int(-1); };
-        Ok((alloc_string(ctx.heap, &String::from_utf8_lossy(&buf))?, true))
-    }));
+    for (name, text) in [("fs_read", false), ("fs_reads", true)] {
+        let storage = Rc::clone(&storage);
+        vm.register_native(name, Rc::new(move |ctx: &mut NativeCtx, args: &[Value]| {
+            let result = (|| {
+                let fd = Args(args).word(0);
+                let n = read_len(args, name)?;
+                let mut bytes = storage.read(fd, n).ok_or_else(|| format!("{name}: failed to read fd {fd}"))?;
+                if text { alloc_string(ctx.heap, &String::from_utf8_lossy(&bytes)) }
+                else { bytes.resize(n, 0); alloc_bytes(ctx.heap, &bytes) }
+            })();
+            crate::abi::read_result(ctx, result)
+        }));
+    }
 
     let s = Rc::clone(&storage);
     vm.register_native("fs_write", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let fd = Args(a).word(0);
-        let data = Args(a).handle(1);
-        if data.is_handle_none() { return ret_int(-1); }
-        let (slot, gen_) = data.as_handle();
-        let bytes: Vec<u8> = ctx.heap.cell_data(slot, gen_)?.iter().map(|&w| w as u8).collect();
+        let Some(bytes) = myriad::read_bytes(ctx.heap, Args(a).handle(1)) else { return ret_int(-1); };
         ret_int(s.write(fd, &bytes).map(|w| w as i64).unwrap_or(-1))
     }));
     let s = Rc::clone(&storage);

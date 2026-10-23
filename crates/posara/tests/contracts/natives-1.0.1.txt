@@ -1,0 +1,70 @@
+gfx_screen(Int, Int) -> Unit Graphics Gfx
+gfx_screen_off() -> Unit Graphics Gfx
+gfx_commit() -> Unit Graphics Gfx
+gfx_cls(Int) -> Unit Graphics Gfx
+gfx_win_pos(Int, Int) -> Unit Graphics Gfx
+gfx_pset(Int, Int, Int) -> Unit Graphics Gfx
+gfx_rect(Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_rectb(Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_rectmix(Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_dither(Int, Int) -> Unit Graphics Gfx
+gfx_line(Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_linew(Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_circ(Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_circb(Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_tri(Int, Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_trib(Int, Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_pal(Int, Int) -> Unit Graphics Gfx
+gfx_blitg(RefBytes, Int, Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_blitr(RefBytes, Int, Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_sprite(RefBytes, Int, Int, Int, Int, Int, Int, Int) -> Unit Graphics Gfx
+gfx_save_png(Int, Int, Int, Int, Str) -> Int IO GfxFs
+in_buttons() -> Int IO Input
+in_key() -> Int IO Input
+snd_bus_delay(Int, Int, Int) -> Unit IO Sfx
+snd_bus_reverb(Int, Int, Int) -> Unit IO Sfx
+snd_seq(ArrInt, Int) -> Unit IO Sfx
+snd_track(Bytes, Int) -> Unit IO Sfx
+snd_sample(Bytes, Int, Int) -> Unit IO Sfx
+snd_samplestop() -> Unit IO Sfx
+snd_seqstop() -> Unit IO Sfx
+snd_bus_record_start(Str) -> Int IO SfxFs
+snd_bus_record_stop() -> Int IO SfxFs
+snd_osc(Int, Int, Int, Int, Int, Int) -> Unit IO Synth
+snd_filter(Int, Int, Int, Int) -> Unit IO Synth
+snd_env(Int, Int, Int, Int, Int, Int, Int, Int) -> Unit IO Synth
+snd_lfo(Int, Int, Int, Int, Int) -> Unit IO Synth
+snd_pan(Int, Int) -> Unit IO Synth
+snd_unison(Int, Int, Int) -> Unit IO Synth
+snd_fx(Int, Int, Int, Int) -> Unit IO Synth
+snd_voices(Int) -> Unit IO Synth
+snd_on(Int, Int, Int, Int) -> Unit IO Synth
+snd_off(Int, Int) -> Unit IO Synth
+snd_stop(Int) -> Unit IO Synth
+snd_panic() -> Unit IO Synth
+fs_exists(Str) -> Int IO Fs
+fs_mkdir(Str) -> Int IO Fs
+fs_remove(Str) -> Int IO Fs
+fs_list(Str) -> Str IO Fs
+fs_open(Str, Int) -> Int IO Fs
+fs_close(Int) -> Int IO Fs
+fs_seek(Int, Int, Int) -> Int IO Fs
+fs_read(Int, Int) -> Bytes IO Fs
+fs_reads(Int, Int) -> Str IO Fs
+fs_write(Int, ArrInt) -> Int IO Fs
+fs_writes(Int, Str) -> Int IO Fs
+midi_poll() -> Int IO Midi
+midi_count() -> Int IO Midi
+midi_send(Int) -> Unit IO Midi
+udp_bind(Int) -> Int Network Net
+udp_addr(Int) -> Str Network Net
+udp_recv(Int) -> Bytes Network Net
+udp_from(Int) -> Str Network Net
+udp_send(Int, Str, RefArrInt) -> Unit Network Net
+udp_broadcast(Int, Bool) -> Unit Network Net
+udp_close(Int) -> Unit Network Net
+imu_accel(Int) -> Int IO Imu
+now() -> Int IO Core
+rand() -> Float Nondet Core
+srand(Int) -> Unit Nondet Core
+assert(Bool, Str) -> Unit Pure Core

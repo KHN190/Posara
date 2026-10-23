@@ -159,6 +159,10 @@ impl Host {
                 Eff::Pure => return vec![],
                 Eff::Graphics => "Graphics",
                 Eff::IO => "IO",
+                Eff::IOExnString => return vec![
+                    EffectItem { name: vec!["IO".into()], arg: None },
+                    EffectItem { name: vec!["exn".into()], arg: Some(Box::new(abrase::ast::Type::Named("String".into()))) },
+                ],
                 Eff::Network => "net",
                 Eff::Nondet => "nondet",
             };

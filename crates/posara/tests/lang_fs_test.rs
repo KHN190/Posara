@@ -38,7 +38,7 @@ fn fs_write_read_roundtrip() {
         gfx_screen(4, 4);\n  \
         loop {\n    \
         let r = fs_open(\"out.bin\", 1);\n    \
-        let s = fs_reads(r, 1);\n    \
+        let s: String = match fs_reads(r, 1) { Ok(value) => value, Err(_) => \"\", _ => \"\" };\n    \
         let _ = fs_close(r);\n    \
         gfx_cls(s.byte_at(0));\n    \
         gfx_commit();\n    frame.present()\n  }\n}\n";
@@ -101,7 +101,7 @@ mod posix_model {
         }
         fn read(&mut self, fd: i64, n: usize) -> Option<Vec<u8>> {
             let f = self.fd(fd)?;
-            if !f.read { return Some(vec![]); }
+            if !f.read && n > 0 { return None; }
             let data = f.file.borrow();
             let start = f.pos.min(data.len());
             let end = (start + n).min(data.len());
@@ -230,10 +230,10 @@ mod natives {
 
         #[test]
         fn fs_read_returns_what_fs_write_put_there_zero_padded(off in 0usize..12, data in proptest::collection::vec(any::<u8>(), 1..16), n in 1usize..40) {
-            let list = data.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
+            let bytes = data.iter().map(|b| format!("\\x{b:02x}")).collect::<String>();
             let src = format!("@cart\nfn main() -> <frame, Graphics, IO> Unit {{\n  \
-                let w = fs_open(\"p.bin\", 22);\n  let _ = fs_seek(w, {off}, 0);\n  let _ = fs_write(w, [{list}]);\n  let _ = fs_close(w);\n  \
-                let r = fs_open(\"p.bin\", 1);\n  let d = fs_read(r, {n});\n  let _ = fs_close(r);\n  \
+                let w = fs_open(\"p.bin\", 22);\n  let _ = fs_seek(w, {off}, 0);\n  let _ = fs_write(w, b\"{bytes}\");\n  let _ = fs_close(w);\n  \
+                let r = fs_open(\"p.bin\", 1);\n  let d: Bytes = match fs_read(r, {n}) {{ Ok(value) => value, Err(_) => b\"\", _ => b\"\" }};\n  let _ = fs_close(r);\n  \
                 gfx_screen({n}, 1);\n  for i in 0..{n} {{ gfx_pset(i, 0, d.byte_at(i)) }};\n  gfx_commit();\n  loop {{ frame.present() }}\n}}\n");
             let mut file = vec![0u8; off];
             file.extend(&data);
@@ -243,8 +243,86 @@ mod natives {
     }
 
     #[test]
-    fn an_absurd_read_size_is_a_runtime_error_not_an_abort() {
-        let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  let w = fs_open(\"p.bin\", 22);\n  let d = fs_read(w, 1099511627776);\n  gfx_screen(1, 1);\n  gfx_pset(0, 0, d.byte_at(0));\n  loop { frame.present() }\n}\n";
-        assert!(run(src).unwrap_err().contains("fs_read"));
+    fn an_absurd_read_size_is_catchable_without_aborting_the_cart() {
+        let src = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n let color=match fs_read(-1,1099511627776) {Ok(_)=>0,Err(_)=>77,_=>0};\n gfx_screen(1,1);gfx_pset(0,0,color);loop {frame.present()}\n}\n";
+        assert_eq!(run(src).unwrap(), vec![77]);
     }
+}
+
+
+mod read_contract {
+use posara::{Host, runner::{compile_source, Stepper}};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+fn run(body: &str) -> i64 {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!("posara_read_contract_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir(&root).unwrap();
+    let result = {
+        let host = Host::new_with(root.clone(), true, true).unwrap();
+        let source = format!("@cart\nfn main() -> <frame, IO> Unit {{\n frame.present();\n {body}\n loop {{ frame.present() }}\n}}\n");
+        let result = compile_source(&source, &host).unwrap_or_else(|e|panic!("{e}"));
+        let mut step = Stepper::start(result.module, Vec::new(), &host).unwrap();
+        step.frame().unwrap();
+        step.exit_code()
+    };
+    std::fs::remove_dir_all(root).unwrap();
+    result
+}
+
+#[test]
+fn failed_reads_are_caught_and_the_cart_continues() {
+    for operation in ["fs_read", "fs_reads"] {
+        assert_eq!(run(&format!("let result = match {operation}(-1, 1) {{ Ok(data) => 0, Err(message) => {{let text:String=message;text.len()}}, _ => 0 }}; halt(result);")), format!("{operation}: failed to read fd -1").len() as i64);
+    }
+}
+
+#[test]
+fn empty_files_and_eof_keep_their_declared_types_and_padding() {
+    for (operation, length) in [("fs_read", 4), ("fs_reads", 0)] {
+        let ty=if operation=="fs_read"{"Bytes"}else{"String"};
+        assert_eq!(run(&format!("let fd=fs_open(\"empty\",23); let n=match {operation}(fd,4) {{Ok(data)=>{{let value:{ty}=data;value.len()}},Err(_)=>-1,_=>-2}}; let _=fs_close(fd); halt(n);")),length);
+    }
+}
+
+#[test]
+fn byte_writes_and_reads_preserve_non_utf8_and_embedded_zeros() {
+    assert_eq!(run("let fd=fs_open(\"binary\",23); let count=fs_write(fd,b\"\\x00\\xff\\x80A\"); let _=fs_seek(fd,0,0); let total=match fs_read(fd,4) {Ok(data)=>{let value:Bytes=data;value.len()+value.byte_at(1)+value.byte_at(2)},Err(_)=>-1,_=>-2}; let _=fs_close(fd); halt(count+total);"),4+4+255+128);
+}
+
+#[test]
+fn unhandled_read_errors_are_rejected_by_the_compiler() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let error=compile_source("@cart\nfn main()-><frame,IO> Unit {let data=fs_read(-1,1);loop {frame.present()}}",&host).err().expect("fallible reads require a handler or propagation");
+    assert!(error.contains("fallible call"),"{error}");
+}
+
+#[test]
+fn repeated_caught_reads_release_result_and_payload_handles() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let source="@cart\nfn main()-><frame,IO> Unit {loop {let data:Bytes=match fs_read(-1,1) {Ok(value)=>value,Err(_)=>b\"\",_=>b\"\"};let text:String=match fs_reads(-1,1) {Ok(value)=>value,Err(_)=>\"\",_=>\"\"};assert(data.len()+text.len()==0,\"caught read\");frame.present()}}";
+    let result=compile_source(source,&host).unwrap();
+    host.load(&result.module);
+    let mut vm=posara::VirtualMachine::new();
+    vm.install_device(myriad::devices::SYSTEM_ID,Box::new(myriad::devices::SystemDevice::new()));
+    host.install(&mut vm);
+    let mut step=posara_core::stepper::Stepper::start(vm,result.module).unwrap();
+    step.frame().unwrap();let live=step.vm().heap_live_count();
+    for _ in 0..512 {assert!(step.frame().unwrap());}
+    assert_eq!(step.vm().heap_live_count(),live);
+}
+
+#[test]
+fn question_propagates_read_errors_without_changing_the_return_type() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    let source="fn load()-><IO,exn<String>> Bytes {let data=fs_read(-1,1)?;data}\n@cart\nfn main()-><frame,IO> Unit {frame.present();let data:Bytes=match load(){Ok(value)=>value,Err(_)=>b\"fallback\",_=>b\"\"};halt(data.len());loop{frame.present()}}";
+    let result=compile_source(source,&host).unwrap_or_else(|e|panic!("{e}"));
+    let mut step=Stepper::start(result.module,Vec::new(),&host).unwrap();step.frame().unwrap();assert_eq!(step.exit_code(),8);
+}
+
+#[test]
+fn exception_propagation_and_handlers_use_the_language_result_layout() {
+    assert_eq!(run("let code=handle fs_reads(-1,1) {return data=>0,exn message=>{let text:String=message;text.len()}};halt(code);"),"fs_reads: failed to read fd -1".len() as i64);
+    assert_eq!(run("let fd=fs_open(\"text\",23);let _=fs_writes(fd,\"ok\");let _=fs_seek(fd,0,0);let n=match fs_reads(fd,2) {Ok(s)=>{let text:String=s;text.len()},Err(_)=>-1,_=>-2};let _=fs_close(fd);halt(n);"),2);
+}
 }

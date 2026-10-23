@@ -218,8 +218,12 @@ mod any_native_arguments {
                 _ => a.clone(),
             }).collect();
             let (outer, inner): (Vec<&str>, Vec<&str>) = lets.lines().partition(|l| !l.starts_with("    "));
-            (i, format!("@cart\nfn main() -> <frame, Graphics, IO, nondet, net> Unit {{\n{}\n  loop {{\n{}\n    let _ = {}({});\n    frame.present()\n  }}\n}}\n",
-                outer.join("\n"), inner.join("\n"), s.name, call.join(", ")))
+            let invocation=format!("{}({})",s.name,call.join(", "));
+            let invoke=if s.eff==posara_core::abi::Eff::IOExnString {
+                format!("match {invocation} {{ Ok(_) => (), Err(_) => (), _ => () }}")
+            } else {invocation};
+            (i, format!("@cart\nfn main() -> <frame, Graphics, IO, nondet, net> Unit {{\n{}\n  loop {{\n{}\n    let _ = {};\n    frame.present()\n  }}\n}}\n",
+                outer.join("\n"), inner.join("\n"), invoke))
         })
     }
 
@@ -289,4 +293,59 @@ mod any_native_arguments {
             prop_assert!(r.is_ok(), "{}\n{}", r.unwrap_err(), src);
         }
     }
+}
+
+
+#[cfg(feature = "sfx")]
+mod sequence_contract {
+use posara::{Host, runner::{compile_abe_with, read_pk_bytes, write_pk_bytes, Stepper}};
+use posara_core::sfx::{mixer::Cmd, seq::{decode, pack}};
+
+fn run(tag: &str, body: &str, int32: bool) -> Option<Cmd> {
+    let path = std::env::temp_dir().join(format!("posara_sequence_{tag}_{}.abe", std::process::id()));
+    std::fs::write(&path, format!("@cart\nfn main() -> <frame, IO> Unit {{\n frame.present();\n {body};\n loop {{ frame.present() }}\n}}\n")).unwrap();
+    let host = Host::new_with(std::env::temp_dir(), true, true).unwrap();
+    let result = compile_abe_with(&path, &host, int32);
+    std::fs::remove_file(&path).unwrap();
+    let result = result.unwrap_or_else(|error| panic!("{error}"));
+    let module = read_pk_bytes(&write_pk_bytes(&result.module).unwrap()).unwrap();
+    let mut step = Stepper::start(module, Vec::new(), &host).unwrap();
+    step.frame().unwrap();
+    host.sfx.audio.cmds.try_pop()
+}
+
+#[test]
+fn byte_sequences_preserve_every_field_in_both_integer_modes() {
+    let word=pack(65535,3,127,100,65535);
+    let bytes:String=word.to_le_bytes().iter().map(|b|format!("\\x{b:02x}")).collect();
+    for int32 in [false,true] {
+        let Some(Cmd::Seq(events,ms))=run(if int32{"i32"}else{"i64"},&format!("snd_seq(b\"{bytes}\",120)"),int32) else{panic!("expected sequence")};
+        assert_eq!(ms,120);assert_eq!(events.len(),1);
+        let e=events[0];assert_eq!((e.tick,e.ch,e.note,e.dur),(65535,3,127,65535));assert_eq!(e.vel,1.0);
+    }
+}
+
+#[test]
+fn legacy_track_layout_keeps_padding_partial_words_and_stable_tick_order() {
+    let mut bytes=Vec::new();
+    for (tick,note) in [(4,60),(0,61),(4,62)]{bytes.extend(pack(tick,0,note,80,1).to_le_bytes());}
+    bytes.extend([0;8]);bytes.push(1);
+    let events=decode(&bytes);
+    assert_eq!(events.iter().map(|e|(e.tick,e.note)).collect::<Vec<_>>(),vec![(0,61),(1,0),(4,60),(4,62)]);
+}
+
+#[test]
+fn empty_sequences_stop_without_an_integer_width_restriction() {
+    for int32 in [false,true]{
+        assert!(matches!(run(if int32{"empty32"}else{"empty64"},"snd_seq(b\"\",120)",int32),Some(Cmd::Seq(events,120)) if events.is_empty()));
+    }
+}
+
+#[test]
+fn sequence_data_is_bytes_and_the_redundant_native_is_not_registered() {
+    let host=Host::new_with(std::env::temp_dir(),true,true).unwrap();
+    for call in ["snd_seq([1],120)","snd_track(b\"\",120)"] {
+        assert!(posara::runner::compile_source(&format!("@cart\nfn main()-><frame,IO> Unit {{{call};loop{{frame.present()}}}}"),&host).is_err());
+    }
+}
 }

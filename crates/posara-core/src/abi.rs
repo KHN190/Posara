@@ -7,7 +7,7 @@ use myriad::{alloc_bytes, alloc_string, NativeCtx, Value, VirtualMachine};
 pub enum Ty { Int, Float, Bool, Str, Unit, Bytes, RefBytes, ArrInt, RefArrInt }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Eff { Pure, Graphics, IO, Network, Nondet }
+pub enum Eff { Pure, Graphics, IO, IOExnString, Network, Nondet }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Cap { Core, Gfx, GfxFs, Input, Sfx, SfxFs, Synth, Fs, Midi, Net, Imu }
@@ -54,8 +54,7 @@ pub static NATIVES: &[Sig] = &[
     sig("in_key", &[], Int, IO, Input),
     sig("snd_bus_delay", &[Int, Int, Int], Unit, IO, Sfx),
     sig("snd_bus_reverb", &[Int, Int, Int], Unit, IO, Sfx),
-    sig("snd_seq", &[ArrInt, Int], Unit, IO, Sfx),
-    sig("snd_track", &[Bytes, Int], Unit, IO, Sfx),
+    sig("snd_seq", &[Bytes, Int], Unit, IO, Sfx),
     sig("snd_sample", &[Bytes, Int, Int], Unit, IO, Sfx),
     sig("snd_samplestop", &[], Unit, IO, Sfx),
     sig("snd_seqstop", &[], Unit, IO, Sfx),
@@ -80,9 +79,9 @@ pub static NATIVES: &[Sig] = &[
     sig("fs_open", &[Str, Int], Int, IO, Fs),
     sig("fs_close", &[Int], Int, IO, Fs),
     sig("fs_seek", &[Int, Int, Int], Int, IO, Fs),
-    sig("fs_read", &[Int, Int], Bytes, IO, Fs),
-    sig("fs_reads", &[Int, Int], Str, IO, Fs),
-    sig("fs_write", &[Int, ArrInt], Int, IO, Fs),
+    sig("fs_read", &[Int, Int], Bytes, IOExnString, Fs),
+    sig("fs_reads", &[Int, Int], Str, IOExnString, Fs),
+    sig("fs_write", &[Int, Bytes], Int, IO, Fs),
     sig("fs_writes", &[Int, Str], Int, IO, Fs),
     sig("midi_poll", &[], Int, IO, Midi),
     sig("midi_count", &[], Int, IO, Midi),
@@ -109,11 +108,15 @@ pub fn names(cap: Cap) -> impl Iterator<Item = &'static str> {
 pub fn stub_all(vm: &mut VirtualMachine) {
     for s in NATIVES {
         let ret = s.ret;
-        vm.register_native(s.name, Rc::new(move |ctx: &mut NativeCtx, _: &[Value]| match ret {
-            Unit => Ok((Value::UNIT, false)),
-            Str => Ok((alloc_string(ctx.heap, "")?, true)),
-            Bytes => Ok((alloc_bytes(ctx.heap, &[])?, true)),
-            _ => Ok((Value::ZERO, false)),
+        let fallible = s.eff == Eff::IOExnString;
+        vm.register_native(s.name, Rc::new(move |ctx: &mut NativeCtx, _: &[Value]| {
+            let value = match ret {
+                Unit => (Value::UNIT, false),
+                Str => (alloc_string(ctx.heap, "")?, true),
+                Bytes => (alloc_bytes(ctx.heap, &[])?, true),
+                _ => (Value::ZERO, false),
+            };
+            if fallible { read_result(ctx, Ok(value.0)) } else { Ok(value) }
         }));
     }
 }
@@ -149,4 +152,16 @@ impl Args<'_> {
         if n > max as u64 { return Err(alloc::format!("{n} is over the {max} limit")); }
         Ok(n as usize)
     }
+}
+
+// Abrase <exn<String>> lowers to a two-slot Ok/Err variant. The payload is owned.
+pub(crate) fn read_result(ctx: &mut NativeCtx, result: Result<Value, String>) -> Result<(Value, bool), String> {
+    let (tag, payload) = match result {
+        Ok(value) => (0, value),
+        Err(message) => (1, alloc_string(ctx.heap, &message)?),
+    };
+    let (slot, generation) = ctx.heap.alloc(2);
+    ctx.heap.st(slot, generation, 0, tag, false)?;
+    ctx.heap.st(slot, generation, 1, payload.raw(), true)?;
+    Ok((Value::from_handle(slot, generation), true))
 }

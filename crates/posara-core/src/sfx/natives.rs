@@ -70,38 +70,17 @@ pub fn register(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
     let mut names = Vec::new();
     control(vm, &mut names, &cmds, &["snd_bus_delay", "snd_bus_reverb", "snd_seqstop", "snd_samplestop"]);
 
-    let p = Arc::clone(&cmds);
-    vm.register_native("snd_seq", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        let a = Args(a);
-        let pattern = a.handle(0);
-        let ms_per_tick = a.ms(1).max(1);
-        if pattern.is_handle_none() { return ret_unit(); }
-        let (slot, gen_) = pattern.as_handle();
-        let cells = ctx.heap.cell_data(slot, gen_)?;
-        let events: Vec<seq::Event> = cells.iter().map(|&w| seq::unpack(w as i64)).collect();
-        push(&p, Cmd::Seq(seq::by_tick(events), ms_per_tick));
-        ret_unit()
-    }));
-    names.push("snd_seq");
     // .trk layout: 8 LE bytes per event, all-zero words are padding.
     let p = Arc::clone(&cmds);
-    vm.register_native("snd_track", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
+    vm.register_native("snd_seq", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let a = Args(a);
         let data = a.handle(0);
         let ms_per_tick = a.ms(1).max(1);
         let Some(bytes) = myriad::read_bytes(ctx.heap, data) else { return ret_unit(); };
-        let mut events: Vec<seq::Event> = Vec::with_capacity(bytes.len() / 8);
-        for chunk in bytes.chunks(8) {
-            let mut word: u64 = 0;
-            for (b, &c) in chunk.iter().enumerate() {
-                word |= (c as u64) << (8 * b);
-            }
-            if word != 0 { events.push(seq::unpack(word as i64)); }
-        }
-        push(&p, Cmd::Seq(seq::by_tick(events), ms_per_tick));
+        push(&p, Cmd::Seq(seq::decode(&bytes), ms_per_tick));
         ret_unit()
     }));
-    names.push("snd_track");
+    names.push("snd_seq");
 
     let p = Arc::clone(&cmds);
     vm.register_native("snd_sample", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {

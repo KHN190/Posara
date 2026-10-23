@@ -37,7 +37,7 @@ fn idx(p: Int, r: Int, c: Int) -> Int { (p * NR + r) * NC + c }
 
 fn load_font() -> <IO> Bytes {
   let fd = fs_open("assets/mono8x16.fnt", 1);
-  let data = fs_read(fd, 1520);
+  let data: Bytes = match fs_read(fd, 1520) { Ok(value) => value, Err(message) => { println(message); b"" }, _ => b"" };
   let _ = fs_close(fd);
   data
 }

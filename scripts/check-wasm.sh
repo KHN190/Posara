@@ -29,7 +29,7 @@ fn main() -> <frame, Graphics, IO, nondet> Unit {
 const CART_ASSET = `@cart
 fn main() -> <frame, Graphics, IO> Unit {
   let fd = fs_open("data.spr", 1);
-  let b = fs_read(fd, 2);
+  let b: Bytes = match fs_read(fd, 2) { Ok(value) => value, Err(_) => b"", _ => b"" };
   let _ = fs_close(fd);
   gfx_screen(8, 8);
   loop { gfx_cls(b.byte_at(0) * 256 + b.byte_at(1)); gfx_commit(); frame.present() }
@@ -37,6 +37,7 @@ fn main() -> <frame, Graphics, IO> Unit {
 
 const p = new Posara();
 ok(p.sample_rate() === 44100, "sample_rate");
+ok(p.version() === "1.1.0", "runtime version");
 
 // 1. code mode
 p.load_src(CART128);
@@ -107,7 +108,7 @@ ok(D.decode(p.read_file("save.dat")) === "42", "save content wrong");
 p.load_src(`@cart
 fn main() -> <frame, Graphics, IO> Unit {
   let fd = fs_open("save.dat", 1);
-  let b = fs_read(fd, 2);
+  let b: Bytes = match fs_read(fd, 2) { Ok(value) => value, Err(_) => b"", _ => b"" };
   let _ = fs_close(fd);
   gfx_screen(b.byte_at(0), b.byte_at(1));
   loop { gfx_cls(0); gfx_commit(); frame.present() }
@@ -115,6 +116,23 @@ fn main() -> <frame, Graphics, IO> Unit {
 p.frame();
 ok(p.width() === 52 && p.height() === 50, `save not read back (${p.width()}x${p.height()})`);
 console.log("game save/load ok (write → persist → read across runs)");
+
+// 1.1 byte writes and catchable native read errors through real wasm entry points.
+p.load_src(`@cart
+fn main()-><frame,Graphics,IO> Unit {
+  let fd=fs_open("binary.dat",23);
+  let count=fs_write(fd,b"\\x00\\xff\\x80");
+  let _=fs_seek(fd,0,0);
+  let data:Bytes=match fs_read(fd,3){Ok(value)=>value,Err(_)=>b"",_=>b""};
+  let _=fs_close(fd);
+  let caught=match fs_reads(-1,1){Ok(_)=>0,Err(_)=>1,_=>0};
+  gfx_screen(4,4);
+  loop {gfx_cls(count+data.byte_at(1)+caught);gfx_commit();frame.present()}
+}`);
+p.frame();
+ok(p.read_file('binary.dat').join(',') === '0,255,128', 'byte write changed binary data');
+ok(p.framebuffer().some(b=>b!==0), 'caught file error stopped rendering');
+console.log('byte writes + recoverable file errors ok');
 
 console.log("ALL WASM CHECKS PASSED");
 EOF

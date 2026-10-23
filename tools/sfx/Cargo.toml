@@ -12,5 +12,6 @@ name = "posara-sfx"
 path = "src/main.rs"
 
 [dependencies]
+posara-core = { path = "../../crates/posara-core", features = ["sfx"] }
 symphonia = { version = "0.5", default-features = false, features = ["mp3"] }
 midly = "0.5"

@@ -100,3 +100,31 @@ mod argument_domains {
         assert!(a.handle(2).is_handle_none());
     }
 }
+
+#[test]
+fn native_names_order_arguments_results_effects_and_capabilities_are_frozen() {
+    let actual: String = NATIVES.iter().map(|s| {
+        let args = s.params.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>().join(", ");
+        format!("{}({args}) -> {:?} {:?} {:?}\n", s.name, s.ret, s.eff, s.cap)
+    }).collect();
+    assert_eq!(actual, include_str!("../../posara/tests/contracts/natives.txt"),
+        "Public API changed. Adding, removing or changing a native requires explicit user approval; do not regenerate this baseline.");
+}
+
+#[test]
+fn only_the_approved_110_native_contracts_differ_from_101() {
+    use std::collections::BTreeMap;
+    let index=|source:&str|->BTreeMap<String,String>{source.lines().map(|line|(line.split('(').next().unwrap().into(),line.into())).collect()};
+    let old=index(include_str!("../../posara/tests/contracts/natives-1.0.1.txt"));let new=index(include_str!("../../posara/tests/contracts/natives.txt"));
+    let changed:Vec<_>=old.iter().filter(|(name,sig)|new.get(*name)!=Some(*sig)).map(|(name,_)|name.as_str()).collect();
+    assert_eq!(changed,vec!["fs_read","fs_reads","fs_write","snd_seq","snd_track"]);
+    assert!(new.keys().all(|name|old.contains_key(name)),"1.1 must not introduce unapproved natives");
+}
+
+#[test]
+fn contract_snapshots_and_cart_output_oracles_are_unchanged() {
+    let status = std::process::Command::new("python3")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/check-contract.py"))
+        .status().expect("python3 is required by the compatibility harness");
+    assert!(status.success(), "Native snapshots or cart output oracles changed.");
+}

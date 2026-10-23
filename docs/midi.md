@@ -74,7 +74,7 @@ Start order free (missing ends retry every 2s). Undeclared carts fall back to fi
 
 ## Tools
 
-`posara-sfx track <in.mid> <out.trk>` converts a standard MIDI file into a packed `.trk`; a cart loads it with `fs_read` + `snd_track`. Live examples: `carts/music/sequencer.abe`, `carts/music/tracker.abe`.
+`posara-sfx track <in.mid> <out.trk>` converts a standard MIDI file into a packed `.trk`; a cart loads it with a handled `fs_read` + `snd_seq`. Event layout: [Audio](audio.md).
 
 ## API
 

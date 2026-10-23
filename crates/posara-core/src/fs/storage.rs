@@ -87,7 +87,7 @@ mod mem {
         fn read(&self, fd: i64, n: usize) -> Option<Vec<u8>> {
             let mut o = self.open.borrow_mut();
             let of = o.get_mut(usize::try_from(fd).ok()?)?.as_mut()?;
-            if !of.read { return Some(Vec::new()); }
+            if !of.read && n > 0 { return None; }
             let data = of.file.borrow();
             let start = of.cursor.min(data.len());
             let end = start + n.min(data.len() - start);
