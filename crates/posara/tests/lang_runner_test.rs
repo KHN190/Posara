@@ -349,3 +349,59 @@ fn sequence_data_is_bytes_and_the_redundant_native_is_not_registered() {
     }
 }
 }
+
+#[test]
+fn dual_width_carts_invalid_carts_and_reload_after_failure() {
+    let host = Host::new_with(std::path::PathBuf::from("."), true, true).unwrap();
+
+    let path32 = std::env::temp_dir().join(format!("posara_dw32_{}.abe", std::process::id()));
+    let src32 = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  gfx_screen(8, 8);\n  let mut x = 0;\n  while x < 4 {\n    gfx_rect(x, x, 2, 2, 0x1234);\n    x = x + 1;\n  }\n  loop { gfx_commit(); frame.present() }\n}\n";
+    std::fs::write(&path32, src32).unwrap();
+    let r32 = posara::runner::compile_abe_with(&path32, &host, true).unwrap();
+    std::fs::remove_file(&path32).ok();
+    assert_ne!(r32.module.flags & polka::CART_FLAG_INT32_SAFE, 0);
+    let bytes32 = posara::runner::write_pk_bytes(&r32.module).unwrap();
+
+    let src64 = "@cart\nfn main() -> <frame, Graphics, IO> Unit {\n  gfx_screen(16, 16);\n  gfx_rect(2, 2, 4, 4, 0x5678);\n  loop { gfx_commit(); frame.present() }\n}\n";
+    let r64 = posara::runner::compile_source(src64, &host).unwrap();
+    assert_eq!(r64.module.flags & polka::CART_FLAG_INT32_SAFE, 0);
+    let bytes64 = posara::runner::write_pk_bytes(&r64.module).unwrap();
+
+    let corrupt_bytes = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+    assert!(posara::runner::read_pk_bytes(&corrupt_bytes).is_err());
+    assert!(posara::runner::read_pk_bytes(&[]).is_err());
+    assert!(posara::runner::read_pk_bytes(&bytes32[..bytes32.len().min(10)]).is_err());
+
+    let mod32 = posara::runner::read_pk_bytes(&bytes32).unwrap();
+    assert_ne!(mod32.flags & polka::CART_FLAG_INT32_SAFE, 0);
+    {
+        host.gfx.fb.borrow_mut().reset();
+        let mut step = Stepper::start_named(mod32, Vec::new(), Vec::new(), &host).unwrap();
+        assert!(step.frame().unwrap());
+        assert_eq!((host.gfx.fb.borrow().w, host.gfx.fb.borrow().h), (8, 8));
+        assert!(host.gfx.fb.borrow().commits >= 1);
+    }
+
+    assert!(posara::runner::read_pk_bytes(&corrupt_bytes).is_err());
+
+    let mod64 = posara::runner::read_pk_bytes(&bytes64).unwrap();
+    assert_eq!(mod64.flags & polka::CART_FLAG_INT32_SAFE, 0);
+    {
+        host.gfx.fb.borrow_mut().reset();
+        let mut step = Stepper::start_named(mod64, Vec::new(), Vec::new(), &host).unwrap();
+        assert!(step.frame().unwrap());
+        assert_eq!((host.gfx.fb.borrow().w, host.gfx.fb.borrow().h), (16, 16));
+        assert!(host.gfx.fb.borrow().commits >= 1);
+    }
+
+    assert!(posara::runner::read_pk_bytes(&[0xFF; 20]).is_err());
+
+    let mod32_again = posara::runner::read_pk_bytes(&bytes32).unwrap();
+    {
+        host.gfx.fb.borrow_mut().reset();
+        let mut step = Stepper::start_named(mod32_again, Vec::new(), Vec::new(), &host).unwrap();
+        assert!(step.frame().unwrap());
+        assert_eq!((host.gfx.fb.borrow().w, host.gfx.fb.borrow().h), (8, 8));
+        assert!(host.gfx.fb.borrow().commits >= 1);
+    }
+}

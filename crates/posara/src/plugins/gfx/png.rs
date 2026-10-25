@@ -1,21 +1,21 @@
 use std::path::Path;
 
-use super::Framebuffer;
+use super::{Framebuffer, Int};
 
 pub trait SavePng {
-    fn save_region_png(&self, x: i64, y: i64, w: i64, h: i64, path: &Path) -> Result<(), String>;
+    fn save_region_png(&self, x: Int, y: Int, w: Int, h: Int, path: &Path) -> Result<(), String>;
 }
 
 impl SavePng for Framebuffer {
     // RGB565 region → 8-bit RGB PNG. Out-of-bounds region is clamped to the
     // framebuffer rect with a stderr warning; if the clamp leaves zero area
     // returns Err. `image` crate is already a dep (used by png2abe).
-    fn save_region_png(&self, x: i64, y: i64, w: i64, h: i64, path: &Path) -> Result<(), String> {
+    fn save_region_png(&self, x: Int, y: Int, w: Int, h: Int, path: &Path) -> Result<(), String> {
         if self.w == 0 || self.h == 0 {
             return Err("framebuffer not configured (call screen() first)".into());
         }
-        let fb_w = self.w as i64;
-        let fb_h = self.h as i64;
+        let fb_w = self.w as Int;
+        let fb_h = self.h as Int;
         let x0 = x.max(0).min(fb_w);
         let y0 = y.max(0).min(fb_h);
         let x1 = (x + w).max(0).min(fb_w);

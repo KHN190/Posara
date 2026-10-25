@@ -62,10 +62,42 @@ pub fn sink(trace: bool, handlers: bool) -> DebugSink {
                 }
             }
         }
-        DebugEvent::HandlePush { effect_id, suspend_pc, dest, depth, .. } if handlers => {
-            eprintln!("  [handle] push effect_id={effect_id} suspend_pc={suspend_pc} dest=r{dest} depth={depth}");
+        DebugEvent::HandlePush { effect_id, depth, .. } if handlers => {
+            eprintln!("  [handle] push effect_id={effect_id} depth={depth}");
         }
         DebugEvent::Resume { saved_pc, val, alive, depth, .. } if handlers => {
+            eprintln!("  [resume] saved_pc={saved_pc} val={val:?} alive={alive:?} depth={depth}");
+        }
+        _ => {}
+    })
+}
+
+pub fn sink32(trace: bool, handlers: bool) -> myriad::word32::DebugSink {
+    let break_at = break_at_spec();
+    Box::new(move |event, names| match event {
+        myriad::word32::DebugEvent::Trace { func, pc, op, base_reg, window, handle_mask, file, line } => {
+            if trace {
+                if *line > 0 {
+                    eprintln!("[{}:{} {}:{}] {:?}", render_fn_label(*func, names), pc, file, line, op);
+                } else {
+                    eprintln!("[{}:{}] {:?}", render_fn_label(*func, names), pc, op);
+                }
+            }
+            if let Some((fn_part, want_pc)) = &break_at {
+                if break_matches(fn_part, *want_pc, *func, *pc, names) {
+                    eprintln!("[break {}:{}] {:?} (base r{})", render_fn_label(*func, names), pc, op, base_reg);
+                    for (i, raw) in window.iter().enumerate() {
+                        let is_h = i < 128 && (handle_mask[i / 32] & (1u32 << (i % 32))) != 0;
+                        if *raw == polka::word32::HANDLE_NONE && !is_h { continue; }
+                        eprintln!("    r{i:<3} = {raw:#010x}{}", if is_h { "  (handle)" } else { "" });
+                    }
+                }
+            }
+        }
+        myriad::word32::DebugEvent::HandlePush { effect_id, depth, .. } if handlers => {
+            eprintln!("  [handle] push effect_id={effect_id} depth={depth}");
+        }
+        myriad::word32::DebugEvent::Resume { saved_pc, val, alive, depth, .. } if handlers => {
             eprintln!("  [resume] saved_pc={saved_pc} val={val:?} alive={alive:?} depth={depth}");
         }
         _ => {}

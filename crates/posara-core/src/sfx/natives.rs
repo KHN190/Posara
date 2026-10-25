@@ -2,7 +2,9 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use super::runtime::{self, NativeCtx, Value, VirtualMachine, Int};
+use super::runtime::{self, NativeCtx, Value, VirtualMachine};
+#[cfg(feature = "synth")]
+use super::runtime::Int;
 
 use crate::sfx::mixer::Cmd;
 use crate::sfx::seq;

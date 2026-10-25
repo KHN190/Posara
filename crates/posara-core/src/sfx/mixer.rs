@@ -9,11 +9,20 @@ use crate::sfx::seq::{note_to_freq, Event, Sequencer};
 use crate::sfx::voice::{Voice, WAVE_NOISE, WAVE_SQUARE};
 
 #[inline]
-fn limit_sample(x: f32) -> f32 {
+#[cfg(any(test, all(target_os = "none", target_pointer_width = "32")))]
+fn approximate_limit_sample(x: f32) -> f32 {
     if x.abs() > 1.0 || !x.is_finite() { return math::tanh(x); }
     let z = x * x;
     x * (135135.0 + z * (17325.0 + z * (378.0 + z)))
         / (135135.0 + z * (62370.0 + z * (3150.0 + z * 28.0)))
+}
+
+#[inline]
+fn limit_sample(x: f32) -> f32 {
+    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    { approximate_limit_sample(x) }
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    { math::tanh(x) }
 }
 
 fn limit_stereo(l: f32, r: f32) -> (f32, f32) {
@@ -343,20 +352,34 @@ mod duration_tests {
 mod limiter_tests {
     use super::*;
 
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[test]
+    fn host_limiter_preserves_the_recorded_tanh_bits() {
+        let mut bits = 0x12345678u32;
+        for _ in 0..100_000 {
+            bits = bits.wrapping_mul(1664525).wrapping_add(1013904223);
+            let x = f32::from_bits(bits);
+            let expected = math::tanh(x);
+            let actual = limit_sample(x);
+            if expected.is_nan() { assert!(actual.is_nan()); }
+            else { assert_eq!(actual.to_bits(), expected.to_bits(), "x={x:?}"); }
+        }
+    }
+
     #[test]
     fn limiter_curve_stays_below_one_tenth_of_a_pcm16_step() {
         let mut previous = -1.0;
         for i in 0..=600_000 {
             let x = -3.0 + i as f32 * 0.00001;
-            let value = limit_sample(x);
+            let value = approximate_limit_sample(x);
             assert!((value - math::tanh(x)).abs() < 0.000002);
             assert!(value >= previous);
             assert!(value.abs() <= 1.0);
-            assert_eq!(limit_sample(-x).to_bits(), (-value).to_bits());
+            assert_eq!(approximate_limit_sample(-x).to_bits(), (-value).to_bits());
             previous = value;
         }
         for x in [-0.0, 0.0, -3.00001, -3.0, 3.0, 3.00001] {
-            assert!((limit_sample(x) - math::tanh(x)).abs() < 0.000002);
+            assert!((approximate_limit_sample(x) - math::tanh(x)).abs() < 0.000002);
         }
     }
 

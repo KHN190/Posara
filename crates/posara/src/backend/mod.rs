@@ -100,3 +100,6 @@ impl MidiPort for QueueMidi {
         Ok(())
     }
 }
+
+#[cfg(feature="net")]
+impl Backend { pub fn sockets(&self)->Box<dyn posara_core::net::Sockets> {Box::new(crate::plugins::net::SocketTable::new())} }
