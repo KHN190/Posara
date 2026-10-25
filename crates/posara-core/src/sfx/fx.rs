@@ -17,6 +17,13 @@ pub struct Fx {
     hold_n: u32,
     lp: f32,
     ring_phase: f32,
+    cached_amt: f32,
+    cached_levels: f32,
+    cached_decim: u32,
+    cached_param: f32,
+    cached_sr: f32,
+    cached_alpha: f32,
+    filter_cache_valid: bool,
 }
 
 impl Fx {
@@ -24,13 +31,33 @@ impl Fx {
         self.kind = kind; self.amt = amt.clamp(0.0, 1.0); self.param = param;
     }
 
+    fn update_filter_alpha(&mut self, sr: f32) -> f32 {
+        if !self.filter_cache_valid || self.param.to_bits() != self.cached_param.to_bits() || sr.to_bits() != self.cached_sr.to_bits() {
+            let cut = self.param.max(20.0);
+            self.cached_alpha = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
+            self.cached_param = self.param;
+            self.cached_sr = sr;
+            self.filter_cache_valid = true;
+        }
+        self.cached_alpha
+    }
+
     pub fn process(&mut self, x: f32, sr: f32) -> f32 {
+        if self.amt <= 0.0 {
+            self.hold_n = 0;
+            return x;
+        }
         match self.kind {
             FX_BITCRUSH => {
-                let levels = math::powf(2.0f32, 1.0 + (1.0 - self.amt) * 11.0); // amt↑ → fewer bits
+                if self.amt != self.cached_amt || self.cached_levels == 0.0 {
+                    self.cached_levels = math::powf(2.0f32, 1.0 + (1.0 - self.amt) * 11.0); // amt↑ → fewer bits
+                    self.cached_decim = 1 + (self.amt * 16.0) as u32; // amt↑ → coarser sample-hold
+                    self.cached_amt = self.amt;
+                }
+                let levels = self.cached_levels;
                 let q = (x * 0.5 + 0.5) * levels;
                 let crushed = ((q.round() / levels) * 2.0 - 1.0).clamp(-1.0, 1.0);
-                let decim = 1 + (self.amt * 16.0) as u32; // amt↑ → coarser sample-hold
+                let decim = self.cached_decim;
                 if self.hold_n == 0 { self.hold = crushed; self.hold_n = decim; }
                 self.hold_n -= 1;
                 self.hold
@@ -40,19 +67,17 @@ impl Fx {
                 math::tanh(x * g)
             }
             FX_LOPASS => {
-                let cut = self.param.max(20.0);
-                let a = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
+                let a = self.update_filter_alpha(sr);
                 self.lp += a * (x - self.lp);
                 self.lp
             }
             FX_HIPASS => {
-                let cut = self.param.max(20.0);
-                let a = (1.0 - math::exp(-core::f32::consts::TAU * cut / sr)).clamp(0.0, 1.0);
+                let a = self.update_filter_alpha(sr);
                 self.lp += a * (x - self.lp);
                 x - self.lp
             }
             FX_RING => {
-                self.ring_phase = (self.ring_phase + self.param.max(0.0) / sr) % 1.0;
+                self.ring_phase = math::unit_remainder(self.ring_phase + self.param.max(0.0) / sr);
                 let m = math::sin(self.ring_phase * core::f32::consts::TAU);
                 x * (1.0 - self.amt + self.amt * m)
             }

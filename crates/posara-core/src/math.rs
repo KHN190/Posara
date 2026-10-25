@@ -1,3 +1,20 @@
+#[inline]
+pub(crate) fn unit_remainder(x: f32) -> f32 {
+    let bits = x.to_bits();
+    let magnitude = bits & 0x7fffffff;
+    if magnitude < 0x3f800000 { return x; }
+    if magnitude >= 0x7f800000 { return x % 1.0; }
+    if magnitude >= 0x4b000000 { return f32::from_bits(bits & 0x80000000); }
+    let positive = f32::from_bits(magnitude);
+    (positive - (positive as u32) as f32).copysign(x)
+}
+
+#[inline]
+pub(crate) fn unit_euclid(x: f32) -> f32 {
+    let remainder = unit_remainder(x);
+    if remainder < 0.0 { remainder + 1.0 } else { remainder }
+}
+
 pub fn sin(x: f32) -> f32 { myriad::word32::fmath::sin(x) }
 pub fn cos(x: f32) -> f32 { myriad::word32::fmath::cos(x) }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
@@ -51,3 +68,37 @@ impl F32Ext for f32 {
     }
 }
 
+
+#[cfg(test)]
+mod phase_tests {
+    use super::*;
+
+    fn check(x: f32) {
+        let expected = x % 1.0;
+        let actual = unit_remainder(x);
+        if expected.is_nan() { assert!(actual.is_nan()); }
+        else { assert_eq!(actual.to_bits(), expected.to_bits(), "x={x:?}"); }
+        let expected = x.rem_euclid(1.0);
+        let actual = unit_euclid(x);
+        if expected.is_nan() { assert!(actual.is_nan()); }
+        else { assert_eq!(actual.to_bits(), expected.to_bits(), "x={x:?}"); }
+    }
+
+    #[test]
+    fn phase_reduction_matches_float_remainder_at_wraps_and_special_values() {
+        for bits in [0, 0x80000000, 1, 0x80000001, 0x3f7fffff, 0x3f800000,
+                     0x3f800001, 0xbf7fffff, 0xbf800000, 0xbf800001,
+                     0x7f7fffff, 0xff7fffff, 0x7f800000, 0xff800000, 0x7fc01234] {
+            check(f32::from_bits(bits));
+        }
+    }
+
+    #[test]
+    fn phase_reduction_matches_a_million_float_bit_patterns() {
+        let mut bits = 0x12345678u32;
+        for _ in 0..1_000_000 {
+            bits = bits.wrapping_mul(1664525).wrapping_add(1013904223);
+            check(f32::from_bits(bits));
+        }
+    }
+}

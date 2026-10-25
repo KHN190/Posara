@@ -8,6 +8,20 @@ use crate::sfx::sample::SamplePlayer;
 use crate::sfx::seq::{note_to_freq, Event, Sequencer};
 use crate::sfx::voice::{Voice, WAVE_NOISE, WAVE_SQUARE};
 
+#[inline]
+fn limit_sample(x: f32) -> f32 {
+    if x.abs() > 1.0 || !x.is_finite() { return math::tanh(x); }
+    let z = x * x;
+    x * (135135.0 + z * (17325.0 + z * (378.0 + z)))
+        / (135135.0 + z * (62370.0 + z * (3150.0 + z * 28.0)))
+}
+
+fn limit_stereo(l: f32, r: f32) -> (f32, f32) {
+    let left = limit_sample(l * 0.8);
+    let right = if l.to_bits() == r.to_bits() { left } else { limit_sample(r * 0.8) };
+    (left, right)
+}
+
 // VM thread → audio thread commands, carried over a lock-free SPSC ring
 pub enum Cmd {
     Inst(usize, u8, u32, u32, f32, u32),
@@ -218,21 +232,30 @@ impl Mixer {
     fn advance_seq(&mut self) {
         if !self.seq.playing { return; }
         self.seq.tick();
-        let ms_per_tick = self.seq.spt * 1000.0 / self.sample_rate as f32;
         while let Some(ev) = self.seq.next_due() {
+            let ms_per_tick = self.seq.spt * 1000.0 / self.sample_rate as f32;
             self.play(ev.ch, note_to_freq(ev.note), ev.vel, (ev.dur as f32 * ms_per_tick) as u32);
         }
     }
 
+    #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
+    #[cfg_attr(all(target_arch = "arm", target_os = "none"), inline(never))]
     pub fn mix(&mut self, out: &mut [f32]) {
         let nc = self.out_channels.max(1);
         let sr = self.sample_rate as f32;
         let mut out_peak = 0.0f32;
         let mut ch_peak = [0.0f32; 4];
+        #[cfg(feature = "audio-profile")]
+        let mut limit_cycles = 0u32;
         for frame in out.chunks_mut(nc) {
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::Sequence);
             self.advance_seq();
             let (mut l, mut r) = (0.0f32, 0.0f32);
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::LegacyVoices);
             for (i, v) in self.voices.iter_mut().enumerate() {
+                if !v.active() { continue; }
                 let (vl, vr) = v.tick(sr);
                 l += vl; r += vr;
                 let a = vl.abs().max(vr.abs());
@@ -243,16 +266,23 @@ impl Mixer {
                 let (sl, sr2) = self.synth.tick(sr);
                 l += sl; r += sr2;
             }
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::Sample);
             let s = self.sample.tick(sr) * 0.8;
             l += s; r += s;
             // master bus: stereo delay, then mono-fed reverb summed to both.
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::MasterFx);
             let (dl, dr) = self.delay.process(l, r);
             l = dl; r = dr;
             let rv = self.reverb.process((l + r) * 0.5);
             l += rv; r += rv;
             // default amp without hard-clipping dense chords.
-            l = math::tanh(l * 0.8);
-            r = math::tanh(r * 0.8);
+            #[cfg(feature = "audio-profile")]
+            let limit_start = super::profiling::cycles();
+            (l, r) = limit_stereo(l, r);
+            #[cfg(feature = "audio-profile")]
+            { limit_cycles = limit_cycles.wrapping_add(super::profiling::cycles().wrapping_sub(limit_start)); }
             if l.abs() > out_peak { out_peak = l.abs(); }
             match nc {
                 1 => frame[0] = (l + r) * 0.5,
@@ -277,6 +307,8 @@ impl Mixer {
             let sv = self.synth.pid_voices();
             for i in 0..4 { ch_peak[i] += sp[i] * 0.4; chv[i] += sv[i]; }
         }
+        #[cfg(feature = "audio-profile")]
+        super::profiling::set_limiter_cycles(limit_cycles);
         self.meter.set_out(out_peak);
         self.meter.set_channels(ch_peak, chv);
     }
@@ -299,6 +331,44 @@ mod duration_tests {
             bits=bits.wrapping_mul(1664525).wrapping_add(1013904223); let sr=bits;
             let expected=((ms as u64*sr as u64)/1000).min(u32::MAX as u64) as u32;
             assert_eq!(duration_samples(ms,sr),expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod limiter_tests {
+    use super::*;
+
+    #[test]
+    fn limiter_curve_stays_below_one_tenth_of_a_pcm16_step() {
+        let mut previous = -1.0;
+        for i in 0..=600_000 {
+            let x = -3.0 + i as f32 * 0.00001;
+            let value = limit_sample(x);
+            assert!((value - math::tanh(x)).abs() < 0.000002);
+            assert!(value >= previous);
+            assert!(value.abs() <= 1.0);
+            assert_eq!(limit_sample(-x).to_bits(), (-value).to_bits());
+            previous = value;
+        }
+        for x in [-0.0, 0.0, -3.00001, -3.0, 3.0, 3.00001] {
+            assert!((limit_sample(x) - math::tanh(x)).abs() < 0.000002);
+        }
+    }
+
+    #[test]
+    fn stereo_limiter_preserves_equal_opposite_and_special_inputs() {
+        let cases = [0.0, -0.0, 0.01, -0.01, 1.0, -1.0, 100.0, f32::INFINITY, f32::NEG_INFINITY, f32::from_bits(0x7fc01234)];
+        for l in cases {
+            for r in cases {
+                let (a, b) = limit_stereo(l, r);
+                for (actual, input) in [(a, l), (b, r)] {
+                    let expected = math::tanh(input * 0.8);
+                    if input.is_nan() { assert!(actual.is_nan()); }
+                    else { assert!((actual - expected).abs() <= 0.000002); }
+                }
+                if l.to_bits() == r.to_bits() { assert_eq!(a.to_bits(), b.to_bits()); }
+            }
         }
     }
 }
