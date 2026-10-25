@@ -3,32 +3,32 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use myriad::VirtualMachine;
-use posara_core::host::Drivers;
+use super::runtime::VirtualMachine;
+use super::profile_core::host::Drivers;
 
-use crate::backend::Backend;
+use super::backend::Backend;
 #[cfg(any(feature = "sfx", feature = "midi-desktop"))]
-use crate::plugin::Plugin;
+use super::profile_core::plugin::Plugin;
 #[cfg(feature = "sfx")]
-use crate::plugins::SfxPlugin;
+use super::sfx_plugin::SfxPlugin;
 #[cfg(feature = "midi-desktop")]
-use crate::plugins::MidiPlugin;
+use super::midi_plugin::MidiPlugin;
 
 // Desktop/web host: the portable core plus what needs std (audio device,
 // recorder, PNG, midir routing). Deref exposes the core's plugins.
 pub struct Host {
-    core: posara_core::host::Host,
+    pub(crate) core: super::profile_core::host::Host,
     // Cart stdout sink for the web console; the frontend drains it each frame.
     pub console_out: myriad::devices::console::SharedBuf,
     pub root: PathBuf,
     #[cfg(feature = "sfx")]
     pub sfx: SfxPlugin,
     #[cfg(feature = "midi-desktop")]
-    midi_io: Option<MidiPlugin>,
+    pub(crate) midi_io: Option<MidiPlugin>,
 }
 
 impl Deref for Host {
-    type Target = posara_core::host::Host;
+    type Target = super::profile_core::host::Host;
     fn deref(&self) -> &Self::Target { &self.core }
 }
 
@@ -77,7 +77,7 @@ impl Host {
         midi(&root);
         #[cfg(feature = "sfx")]
         let sfx = SfxPlugin::with_audio(root.clone(), muted)?;
-        let core = posara_core::host::Host::new(Drivers {
+        let core = super::profile_core::host::Host::new(Drivers {
             clock: Rc::clone(&backend.clock),
             #[cfg(feature = "gfx")]
             display: backend.presenter(headless),
@@ -85,9 +85,9 @@ impl Host {
             cmds: std::sync::Arc::clone(&sfx.audio.cmds),
             storage: Rc::clone(&backend.storage),
             #[cfg(feature = "midi")]
-            midi: backend.midi.clone().unwrap_or_else(|| Rc::new(RefCell::new(Box::new(posara_core::drivers::NullMidi)))),
+            midi: backend.midi.clone().unwrap_or_else(|| Rc::new(RefCell::new(Box::new(super::profile_core::drivers::NullMidi)))),
             #[cfg(feature = "net")]
-            sockets: Box::new(crate::plugins::net::SocketTable::new()),
+            sockets: backend.sockets(),
             #[cfg(feature = "imu")]
             imu: backend.imu,
         });
@@ -114,7 +114,7 @@ impl Host {
         #[cfg(feature = "sfx")]
         self.sfx.install(vm);
         #[cfg(all(feature = "gfx", feature = "fs"))]
-        crate::gfx::register_io_natives(vm, Rc::clone(&self.gfx.fb), self.root.clone());
+        super::gfx_glue::register_io_natives(vm, Rc::clone(&self.gfx.fb), self.root.clone());
         #[cfg(feature = "midi-desktop")]
         if let Some(m) = &self.midi_io { m.install(vm); }
     }

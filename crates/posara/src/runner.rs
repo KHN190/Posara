@@ -80,6 +80,57 @@ fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Ve
     Ok(vm)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+struct StdoutConsole32;
+#[cfg(not(target_arch = "wasm32"))]
+impl myriad::word32::devices::Console for StdoutConsole32 {
+    fn read_byte(&mut self) -> Result<Option<u8>, String> { Ok(None) }
+    fn write_stdout(&mut self, b: u8) -> Result<(), String> {
+        std::io::stdout().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn write_stderr(&mut self, b: u8) -> Result<(), String> {
+        std::io::stderr().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn flush(&mut self) -> Result<(), String> {
+        std::io::stdout().flush().map_err(|e| e.to_string())
+    }
+}
+
+fn make_vm32(
+    host32: &crate::word32::host::Host,
+    host: &Host,
+    module: &Module,
+    static_names: Vec<String>,
+    fn_names: Vec<String>,
+    dbg: DebugCfg,
+) -> Result<myriad::word32::VirtualMachine, String> {
+    host32.load(module)?;
+    let mut vm = myriad::word32::VirtualMachine::new()
+        .with_static_names(static_names)
+        .with_fn_names(fn_names)
+        .with_profile(std::env::var("PROFILE").as_deref() == Ok("1"));
+    if dbg.needs_sink() {
+        vm = vm.with_debug_sink(crate::debug::sink32(dbg.trace, dbg.handlers));
+    }
+    vm.install_device(SYSTEM_ID, Box::new(myriad::word32::devices::SystemDevice::new()));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let c: Box<dyn myriad::word32::devices::Console> = Box::new(StdoutConsole32);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+        let _ = &host.console_out;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut bc = myriad::word32::devices::BufferConsole::new();
+        bc.out_buf = std::rc::Rc::clone(&host.console_out);
+        bc.err_buf = std::rc::Rc::clone(&host.console_out);
+        let c: Box<dyn myriad::word32::devices::Console> = Box::new(bc);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+    }
+    host32.install(&mut vm);
+    Ok(vm)
+}
+
 pub struct LoadResult {
     pub module: Module,
     pub static_names: Vec<String>,
@@ -341,12 +392,18 @@ pub fn build_crate(_entry: &Path, _host: &Host, _out: &Path) -> Result<PathBuf, 
     Err("posara built without `compiler` feature".into())
 }
 
+enum StepperBackend {
+    Word64(posara_core::word64::stepper::Stepper),
+    Word32(posara_core::word32::stepper::Stepper),
+}
+
 // Drives a loaded module frame by frame, holding the live VM state. Tests use
 // it to inject input between frames; run_until_ms / run_module wrap it.
 pub struct Stepper<'a> {
-    inner: posara_core::stepper::Stepper,
+    inner: StepperBackend,
     #[cfg_attr(not(feature = "sfx"), allow(dead_code))]
     host: &'a Host,
+    _host32: Option<crate::word32::host::Host>,
 }
 
 impl<'a> Stepper<'a> {
@@ -363,21 +420,60 @@ impl<'a> Stepper<'a> {
     }
 
     fn start_inner<F: FnOnce(&mut VirtualMachine)>(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host, register_aot: F) -> Result<Self, String> {
-        let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default())?;
-        let inner = posara_core::stepper::Stepper::start_with(vm, module, register_aot)?;
-        Ok(Self { inner, host })
+        let is_int32 = (module.flags & polka::CART_FLAG_INT32_SAFE) != 0;
+        if is_int32 {
+            let host32 = crate::word32::host::Host::from_host64(host)?;
+            let vm = make_vm32(&host32, host, &module, static_names, fn_names, DebugCfg::default())?;
+            let inner = posara_core::word32::stepper::Stepper::start(vm, module)?;
+            Ok(Self { inner: StepperBackend::Word32(inner), host, _host32: Some(host32) })
+        } else {
+            let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default())?;
+            let inner = posara_core::word64::stepper::Stepper::start_with(vm, module, register_aot)?;
+            Ok(Self { inner: StepperBackend::Word64(inner), host, _host32: None })
+        }
     }
 
-    pub fn is_frame_loop(&self) -> bool { self.inner.is_frame_loop() }
-    pub fn steps(&self) -> u64 { self.inner.steps() }
-    pub fn exit_code(&self) -> i64 { self.inner.exit_code() }
+    pub fn is_frame_loop(&self) -> bool {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.is_frame_loop(),
+            StepperBackend::Word32(s) => s.is_frame_loop(),
+        }
+    }
+    pub fn steps(&self) -> u64 {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.steps(),
+            StepperBackend::Word32(s) => s.steps() as u64,
+        }
+    }
+    pub fn exit_code(&self) -> i64 {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.exit_code(),
+            StepperBackend::Word32(s) => s.exit_code() as i64,
+        }
+    }
     pub fn print_profile(&self) {
-        if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", self.inner.vm().profile_report()); }
+        if std::env::var("PROFILE").as_deref() == Ok("1") {
+            match &self.inner {
+                StepperBackend::Word64(s) => eprint!("{}", s.vm().profile_report()),
+                StepperBackend::Word32(s) => eprint!("{}", s.vm().profile_report()),
+            }
+        }
     }
 
     // Run one frame; returns false once the program is finished.
     pub fn frame(&mut self) -> Result<bool, String> {
-        let more = self.inner.frame()?;
+        #[cfg(feature = "gfx")]
+        if let Some(h32) = &self._host32 {
+            let c64 = self.host.input.controller.borrow();
+            let mut c32 = h32.input.controller.borrow_mut();
+            c32.buttons = c64.buttons;
+            c32.key = c64.key;
+        }
+
+        let more = match &mut self.inner {
+            StepperBackend::Word64(s) => s.frame()?,
+            StepperBackend::Word32(s) => s.frame()?,
+        };
         #[cfg(feature = "sfx")]
         self.host.sfx.drain_recorder();
         #[cfg(feature = "sfx")]
@@ -597,6 +693,23 @@ impl OverBudgetWarn {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
+    let is_int32 = (module.flags & polka::CART_FLAG_INT32_SAFE) != 0;
+    if is_int32 {
+        let cart = is_cart(&module);
+        let has_update = module.exports.iter().any(|e| e.name == "update");
+        if !cart && !has_update {
+            let host32 = crate::word32::host::Host::from_host64(host)?;
+            let mut vm = make_vm32(&host32, host, &module, static_names, fn_names, dbg)?;
+            let loaded = myriad::word32::loader::load(module)?;
+            let v = vm.run_module(&loaded.module)?;
+            return Ok(v.as_int() as i64);
+        }
+        let mut step = Stepper::start_named(module, static_names, fn_names, host)?;
+        drive_realtime(&mut step, host, |_, _| Ok(true))?;
+        step.print_profile();
+        return Ok(step.exit_code());
+    }
+
     let mut loaded = myriad::loader::load(module)?;
     let mut vm = make_vm(host, &loaded.module, static_names, fn_names, dbg)?;
 

@@ -43,3 +43,14 @@ pub use polka::Module;
 
 // single source for the version string (Cargo.toml).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub(crate) use myriad::word64 as runtime;
+pub(crate) use posara_core::word64 as profile_core;
+pub mod word32;
+
+#[cfg(feature="sfx")]
+pub(crate) use plugins::sfx as sfx_plugin;
+#[cfg(feature="gfx")]
+pub(crate) use plugins::gfx as gfx_glue;
+#[cfg(feature="midi-desktop")]
+pub(crate) use plugins::midi as midi_plugin;

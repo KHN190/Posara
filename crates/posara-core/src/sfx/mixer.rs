@@ -230,8 +230,12 @@ impl Mixer {
         let mut out_peak = 0.0f32;
         let mut ch_peak = [0.0f32; 4];
         for frame in out.chunks_mut(nc) {
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::Sequence);
             self.advance_seq();
             let (mut l, mut r) = (0.0f32, 0.0f32);
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::LegacyVoices);
             for (i, v) in self.voices.iter_mut().enumerate() {
                 let (vl, vr) = v.tick(sr);
                 l += vl; r += vr;
@@ -243,9 +247,13 @@ impl Mixer {
                 let (sl, sr2) = self.synth.tick(sr);
                 l += sl; r += sr2;
             }
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::Sample);
             let s = self.sample.tick(sr) * 0.8;
             l += s; r += s;
             // master bus: stereo delay, then mono-fed reverb summed to both.
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::MasterFx);
             let (dl, dr) = self.delay.process(l, r);
             l = dl; r = dr;
             let rv = self.reverb.process((l + r) * 0.5);
