@@ -4,16 +4,16 @@ pub use storage::{MemStorage, Storage};
 
 use crate::prelude::*;
 
-use myriad::{alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine};
+use super::runtime::{self, alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine, Int};
 
-use crate::abi::Args;
+use super::abi::Args;
 
 
 fn path_arg(ctx: &NativeCtx, args: &[Value], i: usize) -> Option<String> {
     read_string(ctx.heap, Args(args).handle(i))
 }
 
-fn ret_int(n: i64) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
+fn ret_int(n: Int) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
 
 const MAX_READ: usize = 1 << 26;
 
@@ -24,7 +24,7 @@ fn read_len(a: &[Value], operation: &str) -> Result<usize, String> {
 pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
     let s = Rc::clone(&storage);
     vm.register_native("fs_exists", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-        ret_int(path_arg(ctx, a, 0).map(|p| s.exists(&p)).unwrap_or(false) as i64)
+        ret_int(path_arg(ctx, a, 0).map(|p| s.exists(&p)).unwrap_or(false) as Int)
     }));
     let s = Rc::clone(&storage);
     vm.register_native("fs_mkdir", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
@@ -65,21 +65,21 @@ pub fn register_natives(vm: &mut VirtualMachine, storage: Rc<dyn Storage>) {
                 if text { alloc_string(ctx.heap, &String::from_utf8_lossy(&bytes)) }
                 else { bytes.resize(n, 0); alloc_bytes(ctx.heap, &bytes) }
             })();
-            crate::abi::read_result(ctx, result)
+            super::abi::read_result(ctx, result)
         }));
     }
 
     let s = Rc::clone(&storage);
     vm.register_native("fs_write", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let fd = Args(a).word(0);
-        let Some(bytes) = myriad::read_bytes(ctx.heap, Args(a).handle(1)) else { return ret_int(-1); };
-        ret_int(s.write(fd, &bytes).map(|w| w as i64).unwrap_or(-1))
+        let Some(bytes) = runtime::read_bytes(ctx.heap, Args(a).handle(1)) else { return ret_int(-1); };
+        ret_int(s.write(fd, &bytes).and_then(|w| Int::try_from(w).ok()).unwrap_or(-1))
     }));
     let s = Rc::clone(&storage);
     vm.register_native("fs_writes", Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
         let fd = Args(a).word(0);
         let Some(text) = read_string(ctx.heap, Args(a).handle(1)) else { return ret_int(-1); };
-        ret_int(s.write(fd, text.as_bytes()).map(|w| w as i64).unwrap_or(-1))
+        ret_int(s.write(fd, text.as_bytes()).and_then(|w| Int::try_from(w).ok()).unwrap_or(-1))
     }));
 }
 
@@ -93,7 +93,7 @@ impl FsPlugin {
     }
 }
 
-impl crate::plugin::Plugin for FsPlugin {
+impl super::plugin::Plugin for FsPlugin {
     fn install(&self, vm: &mut VirtualMachine) {
         register_natives(vm, Rc::clone(&self.storage));
     }

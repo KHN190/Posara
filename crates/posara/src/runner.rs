@@ -52,8 +52,8 @@ fn alive(_host: &Host) -> bool { true }
 
 pub use crate::debug::DebugCfg;
 
-fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Vec<String>, dbg: DebugCfg) -> VirtualMachine {
-    host.load(module);
+fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Vec<String>, dbg: DebugCfg) -> Result<VirtualMachine, String> {
+    host.load(module)?;
     let mut vm = VirtualMachine::new()
         .with_static_names(static_names)
         .with_fn_names(fn_names)
@@ -77,7 +77,7 @@ fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Ve
         vm.install_device(CONSOLE_ID, Box::new(c));
     }
     host.install(&mut vm);
-    vm
+    Ok(vm)
 }
 
 pub struct LoadResult {
@@ -363,7 +363,7 @@ impl<'a> Stepper<'a> {
     }
 
     fn start_inner<F: FnOnce(&mut VirtualMachine)>(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host, register_aot: F) -> Result<Self, String> {
-        let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default());
+        let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default())?;
         let inner = posara_core::stepper::Stepper::start_with(vm, module, register_aot)?;
         Ok(Self { inner, host })
     }
@@ -560,7 +560,7 @@ pub fn run_tests(module: Module, static_names: Vec<String>, fn_names: Vec<String
     if names.is_empty() { return Err("no `test_*` exports found".into()); }
     let mut failed = 0;
     for name in &names {
-        let mut vm = make_vm(host, &loaded.module, static_names.clone(), fn_names.clone(), DebugCfg::default());
+        let mut vm = make_vm(host, &loaded.module, static_names.clone(), fn_names.clone(), DebugCfg::default())?;
         match vm.call_export(&loaded.module, name, &[]) {
             Ok(_) => eprintln!("ok   {name}"),
             Err(e) => { eprintln!("FAIL {name}: {e}"); failed += 1; }
@@ -598,7 +598,7 @@ impl OverBudgetWarn {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
     let mut loaded = myriad::loader::load(module)?;
-    let mut vm = make_vm(host, &loaded.module, static_names, fn_names, dbg);
+    let mut vm = make_vm(host, &loaded.module, static_names, fn_names, dbg)?;
 
     let mut cart = is_cart(&loaded.module);
     let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
@@ -675,7 +675,7 @@ pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<Strin
                     match load_module(p, host).and_then(|r| myriad::loader::load(r.module).map(|l| (l, r.static_names, r.fn_names))) {
                         Ok((newl, new_static, new_fns)) => {
                             loaded = newl;
-                            vm = make_vm(host, &loaded.module, new_static, new_fns, dbg);
+                            vm = make_vm(host, &loaded.module, new_static, new_fns, dbg)?;
                             #[cfg(feature = "desktop")]
                             { last_steps = 0; }
                             cart = is_cart(&loaded.module);

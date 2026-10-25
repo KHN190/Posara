@@ -1,10 +1,11 @@
 use crate::prelude::*;
+use super::super::runtime::{Int, Word};
 
-pub const F_READ: i64 = 1;
-pub const F_WRITE: i64 = 2;
-pub const F_CREATE: i64 = 4;
-pub const F_APPEND: i64 = 8;
-pub const F_TRUNC: i64 = 16;
+pub const F_READ: Int = 1;
+pub const F_WRITE: Int = 2;
+pub const F_CREATE: Int = 4;
+pub const F_APPEND: Int = 8;
+pub const F_TRUNC: Int = 16;
 
 // web upload quotas (authoritative in Rust; JS mirrors errors for UX).
 pub const MAX_FILES: usize = 16;
@@ -12,16 +13,16 @@ pub const MAX_FILE_BYTES: usize = 1 << 20;      // 1 MiB per file
 pub const MAX_TOTAL_BYTES: usize = 8 << 20;     // 8 MiB total
 
 pub trait Storage {
-    fn open(&self, path: &str, flags: i64) -> i64;
-    fn close(&self, fd: i64) -> bool;
-    fn seek(&self, fd: i64, whence: i64, off: i64) -> i64;
-    fn read(&self, fd: i64, n: usize) -> Option<Vec<u8>>;
-    fn write(&self, fd: i64, data: &[u8]) -> Option<usize>;
+    fn open(&self, path: &str, flags: Int) -> Int;
+    fn close(&self, fd: Int) -> bool;
+    fn seek(&self, fd: Int, whence: Int, off: Int) -> Int;
+    fn read(&self, fd: Int, n: usize) -> Option<Vec<u8>>;
+    fn write(&self, fd: Int, data: &[u8]) -> Option<usize>;
     fn exists(&self, path: &str) -> bool;
     fn mkdir(&self, path: &str) -> bool;
     fn remove(&self, path: &str) -> bool;
     fn list(&self, path: &str) -> Vec<String>;
-    fn mtime(&self, path: &str) -> Option<u64>;
+    fn mtime(&self, path: &str) -> Option<Word>;
     // upload sandbox API (JS drop/editor → these; cart sees the same set).
     fn add_file(&self, name: &str, data: Vec<u8>) -> Result<(), String>;
     fn read_file(&self, name: &str) -> Option<Vec<u8>>;
@@ -53,7 +54,7 @@ mod mem {
     fn norm(p: &str) -> String { p.trim_start_matches("./").to_string() }
 
     impl Storage for MemStorage {
-        fn open(&self, path: &str, flags: i64) -> i64 {
+        fn open(&self, path: &str, flags: Int) -> Int {
             let (read, append) = (flags & F_READ != 0, flags & F_APPEND != 0);
             let write = flags & F_WRITE != 0 || append;
             let (create, trunc) = (flags & F_CREATE != 0, flags & F_TRUNC != 0 && !append);
@@ -68,23 +69,28 @@ mod mem {
             let of = OpenFile { file, cursor: 0, read, write, append };
             let mut o = self.open.borrow_mut();
             match o.iter().position(Option::is_none) {
-                Some(i) => { o[i] = Some(of); i as i64 }
-                None => { o.push(Some(of)); o.len() as i64 - 1 }
+                Some(i) => { let Ok(fd) = Int::try_from(i) else { return -1; }; o[i] = Some(of); fd }
+                None => { let Ok(fd) = Int::try_from(o.len()) else { return -1; }; o.push(Some(of)); fd }
             }
         }
-        fn close(&self, fd: i64) -> bool {
+        fn close(&self, fd: Int) -> bool {
             usize::try_from(fd).ok().and_then(|i| self.open.borrow_mut().get_mut(i).map(core::mem::take)).is_some_and(|f| f.is_some())
         }
-        fn seek(&self, fd: i64, whence: i64, off: i64) -> i64 {
+        fn seek(&self, fd: Int, whence: Int, off: Int) -> Int {
             let mut o = self.open.borrow_mut();
             let Some(Some(of)) = usize::try_from(fd).ok().and_then(|i| o.get_mut(i)) else { return -1; };
-            let len = of.file.borrow().len() as i64;
-            let pos = match whence { 0 => off.max(0), 1 => of.cursor as i64 + off, 2 => len + off, _ => return -1 };
+            let pos = match whence {
+                0 => Some(off.max(0)),
+                1 => Int::try_from(of.cursor).ok().and_then(|base| base.checked_add(off)),
+                2 => Int::try_from(of.file.borrow().len()).ok().and_then(|base| base.checked_add(off)),
+                _ => None,
+            };
+            let Some(pos) = pos else { return -1; };
             if pos < 0 { return -1; }
             of.cursor = pos as usize;
             pos
         }
-        fn read(&self, fd: i64, n: usize) -> Option<Vec<u8>> {
+        fn read(&self, fd: Int, n: usize) -> Option<Vec<u8>> {
             let mut o = self.open.borrow_mut();
             let of = o.get_mut(usize::try_from(fd).ok()?)?.as_mut()?;
             if !of.read && n > 0 { return None; }
@@ -96,16 +102,21 @@ mod mem {
             of.cursor = of.cursor.max(end);
             Some(out)
         }
-        fn write(&self, fd: i64, bytes: &[u8]) -> Option<usize> {
+        fn write(&self, fd: Int, bytes: &[u8]) -> Option<usize> {
             let mut o = self.open.borrow_mut();
             let of = o.get_mut(usize::try_from(fd).ok()?)?.as_mut()?;
             if !of.write { return None; }
             if bytes.is_empty() { return Some(0); }
             let mut data = of.file.borrow_mut();
-            if of.append { of.cursor = data.len(); }
-            let end = of.cursor + bytes.len();
-            if data.len() < end { data.resize(end, 0); }
-            data[of.cursor..end].copy_from_slice(bytes);
+            let start = if of.append { data.len() } else { of.cursor };
+            let end = start.checked_add(bytes.len())?;
+            Int::try_from(end).ok()?;
+            if data.len() < end {
+                let additional = end - data.len();
+                data.try_reserve(additional).ok()?;
+                data.resize(end, 0);
+            }
+            data[start..end].copy_from_slice(bytes);
             of.cursor = end;
             Some(bytes.len())
         }
@@ -113,7 +124,7 @@ mod mem {
         fn mkdir(&self, _path: &str) -> bool { true }
         fn remove(&self, path: &str) -> bool { self.files.borrow_mut().remove(&norm(path)).is_some() }
         fn list(&self, _path: &str) -> Vec<String> { self.file_names() }
-        fn mtime(&self, _path: &str) -> Option<u64> { None }
+        fn mtime(&self, _path: &str) -> Option<Word> { None }
 
         fn add_file(&self, name: &str, data: Vec<u8>) -> Result<(), String> {
             if data.len() > MAX_FILE_BYTES {

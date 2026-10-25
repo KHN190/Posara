@@ -9,6 +9,8 @@ pub mod plugin;
 pub mod plugins;
 pub mod debug;
 pub mod host;
+#[cfg(feature = "compiler")]
+pub mod schema;
 pub mod lint;
 #[cfg(feature = "gfx")]
 #[cfg(feature = "gfx-desktop")]

@@ -1,4 +1,5 @@
-use crate::drivers::Presenter;
+use super::super::drivers::Presenter;
+use super::super::runtime::{Int, Word};
 use crate::prelude::*;
 
 pub struct Framebuffer {
@@ -11,7 +12,7 @@ pub struct Framebuffer {
     pub alive: bool,
     pub headless: bool,
     pub palette: [u16; 16],
-    pub commits: u64,
+    pub commits: Word,
     pub max_dim: usize,
     // web reads `out` (RGBA of the last commit); others skip it.
     pub rgba: bool,
@@ -55,7 +56,7 @@ impl Framebuffer {
     pub fn configure(&mut self, w: usize, h: usize, format: u8) -> Result<(), String> {
         if format != 1 { return Err(format!("Screen: format {} unsupported (only 1=RGB565)", format)); }
         if w == 0 || h == 0 { return Err(format!("Screen: invalid size {}x{}", w, h)); }
-        if w * h > MAX_PIXELS { return Err(format!("Screen: {}x{} is too large", w, h)); }
+        if w.checked_mul(h).is_none_or(|pixels| pixels > MAX_PIXELS) { return Err(format!("Screen: {}x{} is too large", w, h)); }
         if w > self.max_dim || h > self.max_dim { return Err(format!("Screen: {}x{} exceeds web {}x{} budget", w, h, self.max_dim, self.max_dim)); }
         if !self.buf.is_empty() {
             if self.w != w || self.h != h {
@@ -77,7 +78,7 @@ impl Framebuffer {
     }
 
     // Alpha-blend a single RGB565 pixel over the existing one (a: 0..256).
-    pub fn pset_a(&mut self, x: i64, y: i64, c: u16, a: i64) {
+    pub fn pset_a(&mut self, x: Int, y: Int, c: u16, a: Int) {
         if x < 0 || y < 0 { return; }
         let (x, y) = (x as usize, y as usize);
         if x >= self.w || y >= self.h { return; }
@@ -86,18 +87,18 @@ impl Framebuffer {
         self.buf[i] = blend565(self.buf[i], c, a);
     }
 
-    pub fn win_pos(&mut self, x: i64, y: i64) {
+    pub fn win_pos(&mut self, x: Int, y: Int) {
         if let Some(p) = self.presenter.as_mut() { p.set_pos(x, y); }
     }
 
     pub fn blit_4bpp<F: Fn(usize) -> u8>(
-        &mut self, get: F, off: usize, x0: i64, y0: i64, w: i64, h: i64, pct: i64, alpha: i64,
+        &mut self, get: F, off: usize, x0: Int, y0: Int, w: Int, h: Int, pct: Int, alpha: Int,
     ) {
         if w <= 0 || h <= 0 { return; }
         let opaque = alpha >= 256;
         if pct == 100 && opaque
             && x0 >= 0 && y0 >= 0
-            && x0 + w <= self.w as i64 && y0 + h <= self.h as i64
+            && x0 + w <= self.w as Int && y0 + h <= self.h as Int
         {
             let (fw, pal) = (self.w, self.palette);
             let (bx, by) = (x0 as usize, y0 as usize);
@@ -105,22 +106,22 @@ impl Framebuffer {
                 let drow = (by + y) * fw + bx;
                 let srow = y * w as usize;
                 for x in 0..w as usize {
-                    let n = off + srow + x;
+                    let Some(n) = off.checked_add(srow).and_then(|n|n.checked_add(x)) else { continue; };
                     let idx = ((get(n / 2) >> (4 * (1 - (n & 1)))) & 0xF) as usize;
                     if idx != 0 { self.buf[drow + x] = pal[idx]; }
                 }
             }
             return;
         }
-        let dw = (w * pct / 100).max(1);
-        let dh = (h * pct / 100).max(1);
+        let dw = ((w / 100) * pct + (w % 100) * pct / 100).max(1);
+        let dh = ((h / 100) * pct + (h % 100) * pct / 100).max(1);
         for y in span(y0, dh, self.h) {
-            let dy = y as i64 - y0;
-            let sy = dy * 100 / pct;
+            let dy = y as Int - y0;
+            let sy = (dy / pct) * 100 + (dy % pct) * 100 / pct;
             for x in span(x0, dw, self.w) {
-                let dx = x as i64 - x0;
-                let sx = dx * 100 / pct;
-                let n = off + (sy * w + sx) as usize;
+                let dx = x as Int - x0;
+                let sx = (dx / pct) * 100 + (dx % pct) * 100 / pct;
+                let Some(n) = (sy as usize).checked_mul(w as usize).and_then(|n|n.checked_add(sx as usize)).and_then(|n|n.checked_add(off)) else { continue; };
                 let byte = get(n / 2);
                 let idx = ((byte >> (4 * (1 - (n & 1)))) & 0xF) as usize;
                 if idx == 0 { continue; }
@@ -131,7 +132,7 @@ impl Framebuffer {
         }
     }
 
-    pub fn pset(&mut self, x: i64, y: i64, c: u16) {
+    pub fn pset(&mut self, x: Int, y: Int, c: u16) {
         if x < 0 || y < 0 { return; }
         let (x, y) = (x as usize, y as usize);
         if x >= self.w || y >= self.h { return; }
@@ -140,7 +141,7 @@ impl Framebuffer {
 
     // Composite a pixel under a blit mode: 0 REPLACE, 1 XOR, 2 AND, 3 OR.
     // bit=0 source pixels never reach here (caller masks); this is the bit=1 op.
-    pub fn pset_op(&mut self, x: i64, y: i64, c: u16, mode: i64) {
+    pub fn pset_op(&mut self, x: Int, y: Int, c: u16, mode: Int) {
         if x < 0 || y < 0 { return; }
         let (x, y) = (x as usize, y as usize);
         if x >= self.w || y >= self.h { return; }
@@ -155,7 +156,7 @@ impl Framebuffer {
 
     // Alpha-blend `c` over existing pixels in the rect (a: 0..256). Reads the
     // framebuffer so overlays mix with whatever is already drawn underneath.
-    pub fn rect_mix(&mut self, x0: i64, y0: i64, w: i64, h: i64, c: u16, a: i64) {
+    pub fn rect_mix(&mut self, x0: Int, y0: Int, w: Int, h: Int, c: u16, a: Int) {
         let a = a.clamp(0, 256) as u32;
         if a == 0 { return; }
         let (ys, xs) = (span(y0, h, self.h), span(x0, w, self.w));
@@ -199,7 +200,7 @@ impl Framebuffer {
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
-        self.commits += 1;
+        self.commits = self.commits.wrapping_add(1);
         if self.rgba {
             for (o, &p) in self.out.iter_mut().zip(&self.buf) { *o = rgb565_to_rgba(p); }
         }
@@ -213,9 +214,9 @@ impl Framebuffer {
 pub const MAX_PIXELS: usize = 1 << 24;
 
 // Screen columns or rows covered by [start, start + len).
-pub fn span(start: i64, len: i64, size: usize) -> core::ops::Range<usize> {
+pub fn span(start: Int, len: Int, size: usize) -> core::ops::Range<usize> {
     let lo = start.max(0);
-    let hi = (start + len.max(0)).min(size as i64);
+    let hi = (start + len.max(0)).min(size as Int);
     if lo >= hi { 0..0 } else { lo as usize..hi as usize }
 }
 

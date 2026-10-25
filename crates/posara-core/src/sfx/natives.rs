@@ -2,14 +2,14 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use myriad::{NativeCtx, Value, VirtualMachine};
+use super::runtime::{self, NativeCtx, Value, VirtualMachine, Int};
 
-use super::mixer::Cmd;
-use super::seq;
-use super::spsc::Spsc;
+use crate::sfx::mixer::Cmd;
+use crate::sfx::seq;
+use crate::sfx::spsc::Spsc;
 #[cfg(feature = "synth")]
-use super::synth::{MAX_UNISON, MAX_VOICES};
-use crate::abi::Args;
+use crate::sfx::synth::{MAX_UNISON, MAX_VOICES};
+use super::abi::Args;
 
 pub type CmdProd = Arc<Spsc<Cmd>>;
 
@@ -24,7 +24,7 @@ pub fn command(name: &str, a: &Args) -> Option<Cmd> {
         "snd_seqstop" => Cmd::SeqStop,
         "snd_samplestop" => Cmd::SampleStop,
         #[cfg(feature = "synth")]
-        "snd_osc" => Cmd::SynOsc(a.index(0), a.index(1), a.within(2, 0, 5) as u8, a.semitones(3), a.cents(4), a.percent(5)),
+        "snd_osc" => Cmd::SynOsc(a.index(0), a.index(1), a.within(2, 0, 5) as u8, a.semitones(3) as i32, a.cents(4), a.percent(5)),
         #[cfg(feature = "synth")]
         "snd_filter" => Cmd::SynFilter(a.index(0), a.within(1, 0, 3) as u8, a.hz(2), a.within(3, 0, 100) as f32),
         #[cfg(feature = "synth")]
@@ -35,11 +35,11 @@ pub fn command(name: &str, a: &Args) -> Option<Cmd> {
         #[cfg(feature = "synth")]
         "snd_pan" => Cmd::SynPan(a.index(0), a.balance(1)),
         #[cfg(feature = "synth")]
-        "snd_unison" => Cmd::SynUnison(a.index(0), a.within(1, 1, MAX_UNISON as i64) as u8, a.cents(2)),
+        "snd_unison" => Cmd::SynUnison(a.index(0), a.within(1, 1, MAX_UNISON as Int) as u8, a.cents(2)),
         #[cfg(feature = "synth")]
         "snd_fx" => Cmd::SynFx(a.index(0), a.within(1, 0, 5) as u8, a.percent(2), a.amount(3)),
         #[cfg(feature = "synth")]
-        "snd_voices" => Cmd::SynVoices(a.within(0, 1, MAX_VOICES as i64) as usize),
+        "snd_voices" => Cmd::SynVoices(a.within(0, 1, MAX_VOICES as Int) as usize),
         #[cfg(feature = "synth")]
         "snd_on" => Cmd::SynOn(a.index(0), a.within(1, 0, 127) as u8, a.percent(2), a.ms(3)),
         #[cfg(feature = "synth")]
@@ -76,7 +76,7 @@ pub fn register(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
         let a = Args(a);
         let data = a.handle(0);
         let ms_per_tick = a.ms(1).max(1);
-        let Some(bytes) = myriad::read_bytes(ctx.heap, data) else { return ret_unit(); };
+        let Some(bytes) = runtime::read_bytes(ctx.heap, data) else { return ret_unit(); };
         push(&p, Cmd::Seq(seq::decode(&bytes), ms_per_tick));
         ret_unit()
     }));
@@ -88,7 +88,7 @@ pub fn register(vm: &mut VirtualMachine, cmds: CmdProd) -> Vec<&'static str> {
         let buf = a.handle(0);
         let rate = a.hz(1);
         let vol = a.percent(2);
-        let Some(bytes) = myriad::read_bytes(ctx.heap, buf) else { return ret_unit(); };
+        let Some(bytes) = runtime::read_bytes(ctx.heap, buf) else { return ret_unit(); };
         push(&p, Cmd::Sample(bytes, rate, vol));
         ret_unit()
     }));

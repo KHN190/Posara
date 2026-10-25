@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use alloc::string::String;
 
-use myriad::{alloc_bytes, alloc_string, NativeCtx, Value, VirtualMachine};
+use super::runtime::{alloc_bytes, alloc_string, NativeCtx, Value, VirtualMachine, Int};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ty { Int, Float, Bool, Str, Unit, Bytes, RefBytes, ArrInt, RefArrInt }
@@ -121,36 +121,39 @@ pub fn stub_all(vm: &mut VirtualMachine) {
     }
 }
 
-pub const COORD_LIM: i64 = 1 << 21;
-pub const MAX_MS: i64 = 3_600_000;
-pub const OFFSET_LIM: i64 = 1 << 40;
-const LEVEL_LIM: i64 = 10_000;
+pub const COORD_LIM: Int = 1 << 21;
+pub const MAX_MS: Int = 3_600_000;
+pub const OFFSET_LIM: Int = if Int::BITS == 32 { Int::MAX } else { (1 as Int).wrapping_shl(40) };
+pub const OFFSET_MIN: Int = if Int::BITS == 32 { Int::MIN } else { -OFFSET_LIM };
+const LEVEL_LIM: Int = 10_000;
 
 // Every native reads its arguments here, so each domain is bounded once at the boundary.
 pub struct Args<'a>(pub &'a [Value]);
 
 impl Args<'_> {
-    pub fn word(&self, i: usize) -> i64 { self.0.get(i).copied().unwrap_or(Value::ZERO).as_int() }
+    pub fn word(&self, i: usize) -> Int { self.0.get(i).copied().unwrap_or(Value::ZERO).as_int() }
     pub fn handle(&self, i: usize) -> Value { self.0.get(i).copied().unwrap_or(Value::NONE) }
     pub fn flag(&self, i: usize) -> bool { self.0.get(i).copied().unwrap_or(Value::FALSE).as_bool() }
-    pub fn within(&self, i: usize, lo: i64, hi: i64) -> i64 { self.word(i).clamp(lo, hi) }
-    pub fn coord(&self, i: usize) -> i64 { self.within(i, -COORD_LIM, COORD_LIM) }
+    pub fn within(&self, i: usize, lo: Int, hi: Int) -> Int { self.word(i).clamp(lo, hi) }
+    pub fn coord(&self, i: usize) -> Int { self.within(i, -COORD_LIM, COORD_LIM) }
     pub fn color(&self, i: usize) -> u16 { self.word(i) as u16 }
-    pub fn index(&self, i: usize) -> usize { self.within(i, 0, u32::MAX as i64) as usize }
-    pub fn offset(&self, i: usize) -> i64 { self.within(i, -OFFSET_LIM, OFFSET_LIM) }
+    pub fn index(&self, i: usize) -> usize { usize::try_from(self.word(i).max(0)).unwrap_or(usize::MAX).min(u32::MAX as usize) }
+    pub fn offset(&self, i: usize) -> Int { self.within(i, OFFSET_MIN, OFFSET_LIM) }
     pub fn ms(&self, i: usize) -> u32 { self.within(i, 0, MAX_MS) as u32 }
-    pub fn degrees(&self, i: usize) -> i64 { self.within(i, -OFFSET_LIM, OFFSET_LIM) }
+    pub fn degrees(&self, i: usize) -> Int { self.within(i, OFFSET_MIN, OFFSET_LIM) }
     pub fn percent(&self, i: usize) -> f32 { self.within(i, 0, 100) as f32 / 100.0 }
     pub fn balance(&self, i: usize) -> f32 { self.within(i, -100, 100) as f32 / 100.0 }
-    pub fn semitones(&self, i: usize) -> i64 { self.within(i, -128, 128) }
+    pub fn semitones(&self, i: usize) -> Int { self.within(i, -128, 128) }
     pub fn cents(&self, i: usize) -> f32 { self.within(i, -12_800, 12_800) as f32 }
     pub fn hz(&self, i: usize) -> f32 { self.within(i, 1, 96_000) as f32 }
     pub fn level(&self, i: usize) -> f32 { self.within(i, -LEVEL_LIM, LEVEL_LIM) as f32 }
     pub fn amount(&self, i: usize) -> f32 { self.within(i, 0, LEVEL_LIM) as f32 }
     pub fn count(&self, i: usize, max: usize) -> Result<usize, String> {
-        let n = self.word(i).max(0) as u64;
-        if n > max as u64 { return Err(alloc::format!("{n} is over the {max} limit")); }
-        Ok(n as usize)
+        let n = self.word(i).max(0);
+        match usize::try_from(n) {
+            Ok(n) if n <= max => Ok(n),
+            _ => Err(alloc::format!("{n} is over the {max} limit")),
+        }
     }
 }
 

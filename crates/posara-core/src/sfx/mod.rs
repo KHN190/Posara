@@ -4,7 +4,10 @@ pub mod fx;
 pub mod lfo;
 pub mod meter;
 pub mod mixer;
-pub mod natives;
+#[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+pub use crate::word64::sfx_natives as natives;
+#[cfg(all(target_os = "none", target_pointer_width = "32"))]
+pub use crate::word32::sfx_natives as natives;
 pub mod sample;
 pub mod seq;
 pub mod spsc;

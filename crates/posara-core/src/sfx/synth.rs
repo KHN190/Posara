@@ -93,7 +93,7 @@ struct Voice {
     active: bool,
     gate: bool,
     gate_samples: u32,
-    age: u64,
+    rank: u32,
     base_freq: f32,
     env: [Adsr; 2],
     lfo: Lfo,
@@ -116,7 +116,7 @@ impl Default for Voice {
             active: false,
             gate: false,
             gate_samples: 0,
-            age: 0,
+            rank: 0,
             base_freq: 0.0,
             env: [Adsr::default(); 2],
             lfo: Lfo::default(),
@@ -149,7 +149,7 @@ fn wave_sample(wave: u8, phase: f32, lfsr: &mut u32) -> f32 {
 }
 
 impl Voice {
-    fn start(&mut self, p: &Patch, pid: usize, note: u8, vel: f32, gate_samples: u32, age: u64) {
+    fn start(&mut self, p: &Patch, pid: usize, note: u8, vel: f32, gate_samples: u32, seed: u32) {
         self.cfg = *p;
         self.pid = pid;
         self.note = note;
@@ -158,7 +158,7 @@ impl Voice {
         self.active = true;
         self.gate = true;
         self.gate_samples = gate_samples;
-        self.age = age;
+        self.rank = 0;
         for i in 0..2 {
             self.env[i].set(p.env[i].atk, p.env[i].dec, p.env[i].sus, p.env[i].rel);
             self.env[i].gate_on();
@@ -173,7 +173,7 @@ impl Voice {
             self.uratio[u] = math::powf(2.0f32, spread * p.detune / 1200.0);
             self.phase[u] = [(u as f32 * 0.137) % 1.0, (u as f32 * 0.331) % 1.0];
         }
-        self.lfsr = 0x1234abcd ^ note as u32 ^ (age as u32).wrapping_mul(2654435761);
+        self.lfsr = 0x1234abcd ^ note as u32 ^ seed.wrapping_mul(2654435761);
         self.flp = 0.0;
         self.fbp = 0.0;
     }
@@ -279,7 +279,7 @@ pub struct Synth {
     patches: [Patch; MAX_PATCHES],
     voices: [Voice; MAX_VOICES],
     pool: usize,
-    age: u64,
+    serial: u32,
     pid_peak: [f32; 4],
 }
 
@@ -289,7 +289,7 @@ impl Synth {
             patches: [Patch::default(); MAX_PATCHES],
             voices: [Voice::default(); MAX_VOICES],
             pool: 8,
-            age: 0,
+            serial: 0,
             pid_peak: [0.0; 4],
         }
     }
@@ -298,7 +298,7 @@ impl Synth {
         self.patches.get_mut(pid)
     }
 
-    pub fn osc(&mut self, pid: usize, idx: usize, wave: u8, semi: i64, fine: f32, level: f32) {
+    pub fn osc(&mut self, pid: usize, idx: usize, wave: u8, semi: i32, fine: f32, level: f32) {
         if let Some(p) = self.patch(pid) {
             if idx < 2 {
                 p.osc[idx] = OscCfg {
@@ -354,7 +354,7 @@ impl Synth {
     }
 
     pub fn set_voices(&mut self, n: usize) {
-        self.pool = n;
+        self.pool = n.clamp(1, MAX_VOICES);
     }
 
     fn alloc(&self) -> usize {
@@ -362,19 +362,31 @@ impl Synth {
             if !self.voices[i].active { return i; }
         }
         let mut best = 0;
-        let mut best_age = u64::MAX;
+        let mut best_rank = 0;
         for i in 0..self.pool {
-            if self.voices[i].age < best_age { best_age = self.voices[i].age; best = i; }
+            if self.voices[i].rank >= best_rank { best_rank = self.voices[i].rank; best = i; }
         }
         best
     }
 
     pub fn note_on(&mut self, pid: usize, note: u8, vel: f32, gate_samples: u32) {
         if pid >= MAX_PATCHES { return; }
-        self.age += 1;
+        self.serial = self.serial.wrapping_add(1);
+        let ranks = core::array::from_fn::<_, MAX_VOICES, _>(|i| self.voices[i].rank);
+        let active = core::array::from_fn::<_, MAX_VOICES, _>(|i| self.voices[i].active);
+        for voice in &mut self.voices {
+            if voice.active {
+                voice.rank = ranks.iter().zip(active).filter(|(rank, live)| *live && **rank < voice.rank).count() as u32;
+            }
+        }
         let slot = self.alloc();
+        let replaced = if self.voices[slot].active { self.voices[slot].rank } else { u32::MAX };
+        for (i, voice) in self.voices.iter_mut().enumerate() {
+            if i != slot && voice.active && voice.rank < replaced { voice.rank += 1; }
+        }
         let p = self.patches[pid];
-        self.voices[slot].start(&p, pid, note, vel, gate_samples, self.age);
+        self.voices[slot].start(&p, pid, note, vel, gate_samples, self.serial);
+
     }
 
     pub fn note_off(&mut self, pid: usize, note: u8) {
@@ -427,5 +439,24 @@ impl Synth {
             if voice.active && voice.pid < 4 { v[voice.pid] += 1; }
         }
         v
+    }
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+    #[test]
+    fn sustained_voice_stays_oldest_after_finished_voice_reuse() {
+        let mut synth = Synth::new(); synth.set_voices(2);
+        synth.note_on(0, 60, 1.0, 0);
+        for _ in 0..10000 {
+            synth.note_on(0, 61, 1.0, 0);
+            assert!(synth.voices.iter().filter(|v| v.active).all(|v| v.rank < MAX_VOICES as u32));
+            synth.voices[1].active = false;
+        }
+        synth.note_on(0, 62, 1.0, 0);
+        synth.note_on(0, 63, 1.0, 0);
+        assert_eq!(synth.voices[0].note, 63);
+        assert_eq!(synth.voices[1].note, 62);
     }
 }

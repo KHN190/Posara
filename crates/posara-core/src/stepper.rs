@@ -1,5 +1,4 @@
-use myriad::loader::LoadedModule;
-use myriad::{Value, VirtualMachine};
+use super::runtime::{self, loader::LoadedModule, Value, VirtualMachine, Word, Int};
 use polka::Module;
 
 use crate::prelude::*;
@@ -27,7 +26,7 @@ impl Stepper {
     }
 
     pub fn start_with<F: FnOnce(&mut VirtualMachine)>(mut vm: VirtualMachine, module: Module, prepare: F) -> Result<Self, String> {
-        let loaded = myriad::loader::load(module)?;
+        let loaded = runtime::loader::load(module)?;
         prepare(&mut vm);
         let cart = is_cart(&loaded.module);
         if cart {
@@ -41,8 +40,8 @@ impl Stepper {
 
     pub fn is_frame_loop(&self) -> bool { self.cart || self.has_update }
     pub fn vm(&self) -> &VirtualMachine { &self.vm }
-    pub fn steps(&self) -> u64 { self.vm.steps() }
-    pub fn exit_code(&self) -> i64 { self.vm.exit_code().unwrap_or(0) }
+    pub fn steps(&self) -> Word { self.vm.steps() }
+    pub fn exit_code(&self) -> Int { self.vm.exit_code().unwrap_or(0) }
 
     // One frame; false once the program is finished.
     pub fn frame(&mut self) -> Result<bool, String> {

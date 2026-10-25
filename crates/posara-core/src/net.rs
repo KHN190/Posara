@@ -1,8 +1,8 @@
 use core::cell::RefCell;
 
-use myriad::{alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine};
+use super::runtime::{alloc_bytes, alloc_string, read_string, NativeCtx, Value, VirtualMachine, Int};
 
-use crate::abi::Args;
+use super::abi::Args;
 use crate::prelude::*;
 
 pub const MAX_SOCKETS: usize = 8;
@@ -16,26 +16,38 @@ pub type Net = Rc<RefCell<Box<dyn Sockets>>>;
 // buffer and returns its length (Some(0) = no packet, a normal poll); recv_buf()
 // then reads it — no per-call return allocation, the native copies to the heap.
 pub trait Sockets {
-    fn bind(&mut self, port: u16) -> i64;
-    fn addr(&self, id: i64) -> Option<String>;
-    fn recv(&mut self, id: i64) -> Option<usize>;
+    fn bind(&mut self, port: u16) -> Int;
+    fn addr(&self, id: Int) -> Option<String>;
+    fn recv(&mut self, id: Int) -> Option<usize>;
     fn recv_buf(&self) -> &[u8];
-    fn from(&self, id: i64) -> Option<String>;
-    fn send(&self, id: i64, addr: &str, data: &[u8]) -> Option<()>;
-    fn broadcast(&self, id: i64, on: bool) -> Option<()>;
-    fn close(&mut self, id: i64);          // tolerant: closing an invalid id is a no-op
+    fn from(&self, id: Int) -> Option<String>;
+    fn send(&self, id: Int, addr: &str, data: &[u8]) -> Option<()>;
+    fn broadcast(&self, id: Int, on: bool) -> Option<()>;
+    fn close(&mut self, id: Int);          // tolerant: closing an invalid id is a no-op
     fn sweep(&mut self);
     fn live(&self) -> usize;
 }
 
-fn ret_int(n: i64) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
+fn ret_int(n: Int) -> Result<(Value, bool), String> { Ok((Value::from_int(n), false)) }
 fn ret_unit() -> Result<(Value, bool), String> { Ok((Value::UNIT, false)) }
-fn bad_sock(id: i64) -> String { format!("udp: invalid socket {id} (stale, unbound, or bind failed)") }
+fn bad_sock(id: Int) -> String { format!("udp: invalid socket {id} (stale, unbound, or bind failed)") }
 
-pub struct NullSockets { next: i64 }
+pub struct NullSockets { next: Option<Int> }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn null_socket_ids_retire_at_the_profile_limit() {
+        let mut sockets = NullSockets { next: Some(Int::MAX) };
+        assert_eq!(sockets.bind(0), Int::MAX);
+        assert_eq!(sockets.bind(0), -1);
+        assert_eq!(sockets.bind(0), -1);
+    }
+}
 
 impl NullSockets {
-    pub fn new() -> Self { Self { next: 0 } }
+    pub fn new() -> Self { Self { next: Some(0) } }
 }
 
 impl Default for NullSockets {
@@ -45,14 +57,14 @@ impl Default for NullSockets {
 // Every op succeeds inertly — a cart runs without net, never erroring.
 impl Sockets for NullSockets {
     fn live(&self) -> usize { 0 }
-    fn bind(&mut self, _port: u16) -> i64 { let id = self.next; self.next += 1; id }
-    fn addr(&self, _id: i64) -> Option<String> { Some(String::new()) }
-    fn recv(&mut self, _id: i64) -> Option<usize> { Some(0) }
+    fn bind(&mut self, _port: u16) -> Int { let Some(id) = self.next else { return -1; }; self.next = id.checked_add(1); id }
+    fn addr(&self, _id: Int) -> Option<String> { Some(String::new()) }
+    fn recv(&mut self, _id: Int) -> Option<usize> { Some(0) }
     fn recv_buf(&self) -> &[u8] { &[] }
-    fn from(&self, _id: i64) -> Option<String> { Some(String::new()) }
-    fn send(&self, _id: i64, _addr: &str, _data: &[u8]) -> Option<()> { Some(()) }
-    fn broadcast(&self, _id: i64, _on: bool) -> Option<()> { Some(()) }
-    fn close(&mut self, _id: i64) {}
+    fn from(&self, _id: Int) -> Option<String> { Some(String::new()) }
+    fn send(&self, _id: Int, _addr: &str, _data: &[u8]) -> Option<()> { Some(()) }
+    fn broadcast(&self, _id: Int, _on: bool) -> Option<()> { Some(()) }
+    fn close(&mut self, _id: Int) {}
     fn sweep(&mut self) {}
 }
 
@@ -118,7 +130,7 @@ impl NetPlugin {
     pub fn sweep(&self) { self.net.borrow_mut().sweep(); }
 }
 
-impl crate::plugin::Plugin for NetPlugin {
+impl super::plugin::Plugin for NetPlugin {
     fn install(&self, vm: &mut VirtualMachine) {
         register_natives(vm, Rc::clone(&self.net));
     }

@@ -23,7 +23,7 @@ fn rgba_snapshot_follows_each_commit() {
 mod rotation {
     use std::collections::{HashMap, HashSet};
 
-    use posara_core::gfx::{blitr_map, circle_span, SIN_Q16};
+    use posara_core::gfx::{blitr_map, circle_span, sin_q16};
     use proptest::prelude::*;
 
     fn map(w: i64, h: i64, deg: i64) -> HashMap<(i64, i64), (i64, i64)> {
@@ -41,7 +41,7 @@ mod rotation {
     fn the_sine_table_rounds_each_degree_to_q16() {
         for d in 0..360 {
             let want = ((d as f64).to_radians().sin() * 65536.0).round() as i32;
-            assert_eq!(SIN_Q16[d], want, "{d}°");
+            assert_eq!(sin_q16(d), want, "{d}°");
         }
     }
 
