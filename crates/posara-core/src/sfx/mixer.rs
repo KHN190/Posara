@@ -82,13 +82,17 @@ pub struct Mixer {
     meter: Meter,
     retired: Arc<Spsc<Retired>>,
     delay: super::bus::Delay,
-    reverb: super::bus::Reverb,
+    reverb: Option<super::bus::Reverb>,
     #[cfg(feature = "synth")]
     synth: super::synth::Synth,
 }
 
 impl Mixer {
     pub fn new(sample_rate: u32, out_channels: usize, meter: Meter, delay_cap_ms: u32) -> Self {
+        Self::new_with_reverb(sample_rate, out_channels, meter, delay_cap_ms, true)
+    }
+
+    pub fn new_with_reverb(sample_rate: u32, out_channels: usize, meter: Meter, delay_cap_ms: u32, reverb: bool) -> Self {
         let cap = duration_samples(delay_cap_ms, sample_rate) as usize;
         Self {
             voices: [Voice::new(); 4],
@@ -99,7 +103,7 @@ impl Mixer {
             meter,
             retired: Arc::new(Spsc::new(RETIRE_CAP)),
             delay: super::bus::Delay::new(cap, out_channels != 1),
-            reverb: super::bus::Reverb::new(sample_rate as f32),
+            reverb: reverb.then(|| super::bus::Reverb::new(sample_rate as f32)),
             #[cfg(feature = "synth")]
             synth: super::synth::Synth::new(),
         }
@@ -134,7 +138,7 @@ impl Mixer {
             Cmd::Sample(b, rate, v) => self.play_sample(b, rate, v),
             Cmd::SampleStop => self.sample.stop(),
             Cmd::BusDelay(ms, fb, mix) => self.delay.set(ms, fb, mix, self.sample_rate as f32),
-            Cmd::BusReverb(room, damp, mix) => self.reverb.set(room, damp, mix),
+            Cmd::BusReverb(room, damp, mix) => { if let Some(reverb) = &mut self.reverb { reverb.set(room, damp, mix); } },
             #[cfg(feature = "synth")]
             Cmd::SynOsc(pid, idx, w, semi, fine, lvl) => self.synth.osc(pid, idx, w, semi, fine, lvl),
             #[cfg(feature = "synth")]
@@ -275,7 +279,7 @@ impl Mixer {
             super::profiling::mark(super::profiling::Stage::MasterFx);
             let (dl, dr) = self.delay.process(l, r);
             l = dl; r = dr;
-            let rv = self.reverb.process((l + r) * 0.5);
+            let rv = self.reverb.as_mut().map_or(0.0, |reverb| reverb.process((l + r) * 0.5));
             l += rv; r += rv;
             // default amp without hard-clipping dense chords.
             #[cfg(feature = "audio-profile")]
