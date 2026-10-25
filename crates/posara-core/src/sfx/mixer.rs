@@ -15,7 +15,7 @@ pub enum Cmd {
     Fx(usize, u8, f32, f32),
     Lfo(usize, u8, u8, f32, f32),
     Play(usize, f32, f32, u32),
-    PlayMidi(usize, i64, f32, u32),
+    PlayMidi(usize, i32, f32, u32),
     Off(usize),
     Tone(f32, u32, f32, u32),
     Noise(u32, f32, u32),
@@ -27,7 +27,7 @@ pub enum Cmd {
     BusDelay(u32, f32, f32),
     BusReverb(f32, f32, f32),
     #[cfg(feature = "synth")]
-    SynOsc(usize, usize, u8, i64, f32, f32),
+    SynOsc(usize, usize, u8, i32, f32, f32),
     #[cfg(feature = "synth")]
     SynFilter(usize, u8, f32, f32),
     #[cfg(feature = "synth")]
@@ -75,7 +75,7 @@ pub struct Mixer {
 
 impl Mixer {
     pub fn new(sample_rate: u32, out_channels: usize, meter: Meter, delay_cap_ms: u32) -> Self {
-        let cap = (delay_cap_ms as u64 * sample_rate as u64 / 1000) as usize;
+        let cap = duration_samples(delay_cap_ms, sample_rate) as usize;
         Self {
             voices: [Voice::new(); 4],
             seq: Sequencer::empty(),
@@ -153,7 +153,7 @@ impl Mixer {
     }
 
     fn ms_to_samples(&self, ms: u32) -> u32 {
-        ((ms as u64) * (self.sample_rate as u64) / 1000) as u32
+        duration_samples(ms, self.sample_rate)
     }
 
     pub fn inst(&mut self, ch: usize, wave: u8, atk: u32, dec: u32, sus: f32, rel: u32) {
@@ -179,7 +179,7 @@ impl Mixer {
         if let Some(v) = self.voices.get_mut(ch) { v.play(freq, vel, gate); }
     }
 
-    pub fn play_midi(&mut self, ch: usize, note: i64, vel: f32, dur_ms: u32) {
+    pub fn play_midi(&mut self, ch: usize, note: i32, vel: f32, dur_ms: u32) {
         self.play(ch, note_to_freq(note.clamp(0, 127) as u8), vel, dur_ms);
     }
 
@@ -279,5 +279,26 @@ impl Mixer {
         }
         self.meter.set_out(out_peak);
         self.meter.set_channels(ch_peak, chv);
+    }
+}
+
+fn duration_samples(ms: u32, sr: u32) -> u32 {
+    (ms / 1000).saturating_mul(sr)
+        .saturating_add((ms % 1000) * (sr / 1000))
+        .saturating_add((ms % 1000) * (sr % 1000) / 1000)
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+    #[test]
+    fn milliseconds_match_wide_oracle_without_runtime_wide_arithmetic() {
+        let mut bits=0x12345678u32;
+        for _ in 0..100000 {
+            bits=bits.wrapping_mul(1664525).wrapping_add(1013904223); let ms=bits;
+            bits=bits.wrapping_mul(1664525).wrapping_add(1013904223); let sr=bits;
+            let expected=((ms as u64*sr as u64)/1000).min(u32::MAX as u64) as u32;
+            assert_eq!(duration_samples(ms,sr),expected);
+        }
     }
 }

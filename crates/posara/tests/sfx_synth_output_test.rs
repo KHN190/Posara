@@ -4,7 +4,7 @@ use posara::sfx::synth::Synth;
 
 #[test]
 fn patches_stay_finite_and_bounded() {
-    let cfgs: [(u8, i64, f32, f32, u8, f32, f32); 4] = [
+    let cfgs: [(u8, i32, f32, f32, u8, f32, f32); 4] = [
         // wave, semi, fine, level, filt_kind, cutoff, env-cutoff-depth (or pitch)
         (1, 0, 0.0, 1.0, 0, 1400.0, 28.0),  // pid0 kick (slot1=pitch)
         (3, 0, 0.0, 1.0, 0, 380.0, 70.0),   // pid1 bass
@@ -217,7 +217,7 @@ mod engine_props {
                     m.apply(Cmd::SynOn(ch, note, 0.8, gate_ms));
                 } else {
                     m.apply(Cmd::Inst(ch, 3, (atk * 1000.0) as u32, 50, 0.6, (rel * 1000.0) as u32));
-                    m.apply(Cmd::PlayMidi(ch, note as i64, 0.8, gate_ms));
+                    m.apply(Cmd::PlayMidi(ch, note as i32, 0.8, gate_ms));
                 }
                 let gate = gate_ms as usize * SR as usize / 1000;
                 let tail = (rel.max(0.05) as f64 * SR as f64).ceil() as usize;
@@ -241,7 +241,7 @@ mod engine_props {
                 m.apply(Cmd::SynOn(0, note, 1.0, 0));
             } else {
                 m.apply(Cmd::Inst(0, 1, 0, 0, 1.0, 0));
-                m.apply(Cmd::PlayMidi(0, note as i64, 1.0, 0));
+                m.apply(Cmd::PlayMidi(0, note as i32, 1.0, 0));
             }
             let mut x = vec![0f32; SR as usize];
             m.mix(&mut x);
@@ -250,7 +250,7 @@ mod engine_props {
         }
 
         #[test]
-        fn fm_stays_bounded_at_any_depth_and_ratio(semi in -24i64..36, depth in 0.0f32..4.0, note in 24u8..110) {
+        fn fm_stays_bounded_at_any_depth_and_ratio(semi in -24i32..36, depth in 0.0f32..4.0, note in 24u8..110) {
             let mut s = posara::sfx::synth::Synth::new();
             s.osc(0, 0, 1, 0, 0.0, 1.0);
             s.osc(0, 1, 5, semi, 0.0, depth);

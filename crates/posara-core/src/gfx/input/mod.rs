@@ -7,10 +7,10 @@ pub use device::{ControllerDevice, CONTROLLER_ID};
 use core::cell::RefCell;
 use alloc::rc::Rc;
 
-use myriad::{NativeCtx, Value, VirtualMachine};
+use super::runtime::{NativeCtx, Value, VirtualMachine, Int};
 
-use crate::gfx::Framebuffer;
-use crate::plugin::Plugin;
+use super::Framebuffer;
+use super::super::plugin::Plugin;
 use crate::prelude::*;
 
 // Controller device + in_buttons/in_key natives. Shares the gfx framebuffer's
@@ -47,12 +47,12 @@ pub fn register_input_natives(
     let (c, f) = (Rc::clone(&controller), Rc::clone(&fb));
     vm.register_native("in_buttons", Rc::new(move |_: &mut NativeCtx, _a: &[Value]| {
         poll_controller(&c, &f);
-        Ok((Value::from_int(c.borrow().buttons as i64), false))
+        Ok((Value::from_int(c.borrow().buttons as Int), false))
     }));
     let (c, f) = (controller, fb);
     vm.register_native("in_key", Rc::new(move |_: &mut NativeCtx, _a: &[Value]| {
         poll_controller(&c, &f);
-        Ok((Value::from_int(c.borrow().key as i64), false))
+        Ok((Value::from_int(c.borrow().key as Int), false))
     }));
     vec!["in_buttons", "in_key"]
 }

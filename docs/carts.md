@@ -58,3 +58,10 @@ use lib::state::{ st_new, SNOW }     // → <root>/lib/state.abe
 
 - `gfx_screen(w, h)` — set the canvas size.
 - `gfx_commit()` — push the frame to the window (end every `update()` with it).
+
+Raw Screen device writes (`DEO`, device `0x20`) follow the cartridge profile:
+
+- `INT32_SAFE`: port `0x2000` packs width in bits 0–15 and height in bits 16–31. Format defaults to `1` (RGB565); port `0x2002` explicitly selects it. Unsupported formats fail before configuration.
+- 64-bit: port `0x2000` keeps the existing width16/height16/format8 layout; format occupies bits 32–39. Port `0x2002` is unsupported.
+
+Port `0x2001` commits in both profiles. The opcode and cartridge wire formats are unchanged.

@@ -1,12 +1,11 @@
 use core::cell::RefCell;
 use alloc::rc::Rc;
 
-use myriad::Device;
+use super::super::runtime::Device;
 use crate::prelude::*;
-use myriad::memory::Heap;
-use myriad::Value;
+use super::super::runtime::{Heap, Value, Int};
 
-use crate::gfx::Framebuffer;
+use super::super::Framebuffer;
 use super::Controller;
 
 pub const CONTROLLER_ID: u8 = crate::devices::CONTROLLER;
@@ -32,8 +31,8 @@ impl Device for ControllerDevice {
     fn read(&mut self, port: u8) -> Result<(Value, bool), String> {
         self.refresh();
         match port {
-            PORT_BUTTONS => Ok((Value::from_int(self.controller.borrow().buttons as i64), false)),
-            PORT_KEY     => Ok((Value::from_int(self.controller.borrow().key as i64), false)),
+            PORT_BUTTONS => Ok((Value::from_int(self.controller.borrow().buttons as Int), false)),
+            PORT_KEY     => Ok((Value::from_int(self.controller.borrow().key as Int), false)),
             _ => Err(format!("Controller: read port {:#04x} unsupported", port)),
         }
     }

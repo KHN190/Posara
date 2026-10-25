@@ -1,26 +1,26 @@
 use core::cell::{Cell, RefCell};
 
-use myriad::{read_string, NativeCtx, Value, VirtualMachine};
+use super::runtime::{self, read_string, NativeCtx, Value, VirtualMachine, Int, Word};
 
-use crate::abi::Args;
-use crate::drivers::{Clock, NullClock};
-use crate::plugin::Plugin;
+use super::abi::Args;
+use super::drivers::{Clock, NullClock};
+use super::plugin::Plugin;
 use crate::prelude::*;
 
 #[cfg(feature = "gfx")]
-use crate::drivers::Presenter;
+use super::drivers::Presenter;
 #[cfg(feature = "gfx")]
-use crate::gfx::{input::InputPlugin, GfxPlugin};
+use super::gfx::{input::InputPlugin, GfxPlugin};
 #[cfg(feature = "sfx")]
-use crate::sfx::natives::{self, CmdProd};
+use super::sfx_natives::{self as natives, CmdProd};
 #[cfg(feature = "fs")]
-use crate::fs::{FsPlugin, MemStorage, Storage};
+use super::fs::{FsPlugin, MemStorage, Storage};
 #[cfg(feature = "midi")]
-use crate::midi::{MidiPlugin, SharedMidi};
+use super::midi::{MidiPlugin, SharedMidi};
 #[cfg(feature = "net")]
-use crate::net::{NetPlugin, NullSockets, Sockets};
+use super::net::{NetPlugin, NullSockets, Sockets};
 #[cfg(feature = "imu")]
-use crate::imu::{ImuPlugin, SharedImu};
+use super::imu::{ImuPlugin, SharedImu};
 
 pub struct Drivers {
     pub clock: Rc<dyn Clock>,
@@ -61,10 +61,8 @@ impl Drivers {
 pub struct Host {
     pub clock_src: Rc<dyn Clock>,
     // Some(ms) = virtual time for offline, deterministic runs.
-    pub clock: Rc<Cell<Option<u64>>>,
+    pub clock: Rc<Cell<Option<Word>>>,
     pub rng: Rc<RefCell<u32>>,
-    // INT32_SAFE cart: Float values travel as f32 bits.
-    pub float32: Rc<Cell<bool>>,
     #[cfg(feature = "gfx")]
     pub gfx: GfxPlugin,
     #[cfg(feature = "gfx")]
@@ -89,7 +87,6 @@ impl Host {
             clock_src: d.clock,
             clock: Rc::new(Cell::new(None)),
             rng: Rc::new(RefCell::new(0x9e3779b9)),
-            float32: Rc::new(Cell::new(false)),
             #[cfg(feature = "gfx")]
             input: InputPlugin::new(Rc::clone(&gfx.fb)),
             #[cfg(feature = "gfx")]
@@ -107,13 +104,14 @@ impl Host {
         }
     }
 
-    pub fn load(&self, module: &polka::Module) {
-        self.float32.set(module.flags & polka::CART_FLAG_INT32_SAFE != 0);
+    pub fn load(&self, module: &polka::Module) -> Result<(), String> {
+        runtime::loader::validate(module)?;
         #[cfg(feature = "net")]
         self.net.sweep();
+        Ok(())
     }
 
-    pub fn now_ms(&self) -> u64 {
+    pub fn now_ms(&self) -> Word {
         self.clock.get().unwrap_or_else(|| self.clock_src.now_ms())
     }
 
@@ -136,7 +134,7 @@ impl Host {
     }
 
     pub fn install(&self, vm: &mut VirtualMachine) {
-        crate::abi::stub_all(vm);
+        super::abi::stub_all(vm);
         #[cfg(not(feature = "gfx"))]
         {
             vm.install_device(crate::devices::SCREEN, Box::new(StubDevice::new("Screen", "gfx")));
@@ -161,16 +159,15 @@ impl Host {
         let (clock, src) = (Rc::clone(&self.clock), Rc::clone(&self.clock_src));
         vm.register_native("now", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
             let ms = clock.get().unwrap_or_else(|| src.now_ms());
-            Ok((Value::from_int(ms as i64), false))
+            Ok((Value::from_int(ms as Int), false))
         }));
-        let (r, f32_bits) = (Rc::clone(&self.rng), Rc::clone(&self.float32));
+        let r = Rc::clone(&self.rng);
         vm.register_native("rand", Rc::new(move |_: &mut NativeCtx, _: &[Value]| {
             let mut s = r.borrow_mut();
             let mut x = if *s == 0 { 0x9e3779b9 } else { *s };
             x ^= x << 13; x ^= x >> 17; x ^= x << 5;
             *s = x;
-            let f = (x as f64) / (u32::MAX as f64);
-            Ok((Value::from_raw(myriad::encode_float(f, f32_bits.get())), false))
+            Ok((Value::from_raw(super::random_float(x).to_bits()), false))
         }));
         let r = Rc::clone(&self.rng);
         vm.register_native("srand", Rc::new(move |_: &mut NativeCtx, a: &[Value]| {
@@ -210,13 +207,13 @@ impl StubDevice {
 }
 
 #[cfg(any(not(feature = "midi"), not(feature = "gfx")))]
-impl myriad::Device for StubDevice {
+impl runtime::Device for StubDevice {
     fn read(&mut self, _port: u8) -> Result<(Value, bool), String> {
         self.warn();
         Ok((Value::ZERO, false))
     }
 
-    fn write(&mut self, _port: u8, _val: Value, _is_handle: bool, _heap: &mut myriad::Heap) -> Result<(), String> {
+    fn write(&mut self, _port: u8, _val: Value, _is_handle: bool, _heap: &mut runtime::Heap) -> Result<(), String> {
         self.warn();
         Ok(())
     }

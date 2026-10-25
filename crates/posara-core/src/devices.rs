@@ -18,4 +18,4 @@ pub const KNOWN_IDS: &[u8] =
     &[CONSOLE, SYSTEM, SCREEN, CONTROLLER, MIDI, IMU, SYSTEM_E0, SYSTEM_E1, SYSTEM_E2];
 
 // 16-bit address a cart writes: high byte = device id, low byte = port.
-pub const fn port(id: u8, port: u8) -> u64 { ((id as u64) << 8) | port as u64 }
+pub const fn port(id: u8, port: u8) -> u16 { ((id as u16) << 8) | port as u16 }

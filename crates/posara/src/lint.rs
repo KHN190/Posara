@@ -34,8 +34,8 @@ pub fn from_abrase_lint(w: &abrase::lint::Lint) -> PosaraLint {
     p
 }
 
-const SCREEN_CONFIG_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x00);
-const SCREEN_COMMIT_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x01);
+const SCREEN_CONFIG_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x00) as u64;
+const SCREEN_COMMIT_PORT: u64 = crate::devices::port(crate::devices::SCREEN, 0x01) as u64;
 
 const DRAW_NATIVES: &[&str] = &[
     "cls", "pset", "rect", "rectb", "rectmix", "dither", "line", "linew",

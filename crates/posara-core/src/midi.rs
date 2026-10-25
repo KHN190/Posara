@@ -5,11 +5,11 @@ use alloc::rc::Rc;
 use alloc::string::String;
 use core::cell::RefCell;
 
-use myriad::{Device, Heap, NativeCtx, Value, VirtualMachine};
+use super::runtime::{Device, Heap, NativeCtx, Value, VirtualMachine, Int};
 
 use crate::devices::MIDI;
 use crate::drivers::MidiPort;
-use crate::plugin::Plugin;
+use super::plugin::Plugin;
 
 pub const PORT_EVENT: u8 = 0x00;
 pub const PORT_COUNT: u8 = 0x01;
@@ -46,8 +46,8 @@ impl Device for PortDevice {
     fn read(&mut self, port: u8) -> Result<(Value, bool), String> {
         self.pump();
         match port {
-            PORT_EVENT => Ok((Value::from_int(self.queue.pop_front().unwrap_or(0) as i64), false)),
-            PORT_COUNT => Ok((Value::from_int(self.queue.len() as i64), false)),
+            PORT_EVENT => Ok((Value::from_raw(self.queue.pop_front().unwrap_or(0) as super::Word), false)),
+            PORT_COUNT => Ok((Value::from_int(Int::try_from(self.queue.len()).map_err(|_| String::from("MIDI event count exceeds Int"))?), false)),
             _ => Err(format!("MIDI: read port {:#04x} unsupported", port)),
         }
     }
@@ -74,7 +74,7 @@ pub fn register_natives(vm: &mut VirtualMachine) {
         }
     }));
     vm.register_native("midi_send", Rc::new(|ctx: &mut NativeCtx, a: &[Value]| {
-        let w = Value::from_int(crate::abi::Args(a).word(0));
+        let w = Value::from_int(super::abi::Args(a).word(0));
         if let Some(d) = ctx.devices.get_mut(MIDI) {
             d.write(PORT_SEND, w, false, ctx.heap)?;
         }
