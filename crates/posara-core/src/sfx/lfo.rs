@@ -24,7 +24,7 @@ impl Lfo {
     }
 
     pub fn tick(&mut self, sr: f32) -> f32 {
-        self.phase = (self.phase + self.rate / sr) % 1.0;
+        self.phase = math::unit_remainder(self.phase + self.rate / sr);
         let p = self.phase;
         let s = match self.wave {
             1 => if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p },

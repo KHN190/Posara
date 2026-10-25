@@ -64,7 +64,7 @@ impl Voice {
             self.lfsr = x;
             return ((x & 0xFF) as f32 / 128.0) - 1.0;
         }
-        self.phase = (self.phase + freq / sr) % 1.0;
+        self.phase = math::unit_remainder(self.phase + freq / sr);
         let p = self.phase;
         match self.wave {
             WAVE_SINE => math::sin(p * core::f32::consts::TAU),
