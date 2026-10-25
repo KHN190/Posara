@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use midir::{Ignore, MidiInput, MidiInputConnection, MidiOutput, MidiOutputConnection};
 use midir::os::unix::VirtualOutput;
-use myriad::{Device, VirtualMachine};
-use myriad::memory::Heap;
-use polka::Value;
+use super::runtime::{Device, VirtualMachine, Value, Int};
+use super::runtime::memory::Heap;
 
-use posara_core::plugin::Plugin;
+
+use super::profile_core::plugin::Plugin;
 pub mod router;
 
 use router::{self as midi_router, Dest, NodeKind, RoutePlan};
@@ -36,8 +36,8 @@ impl Device for MidiDevice {
     fn read(&mut self, port: u8) -> Result<(Value, bool), String> {
         let mut q = self.queue.lock().map_err(|_| "MIDI: queue poisoned")?;
         match port {
-            PORT_EVENT => Ok((Value::from_int(q.pop_front().unwrap_or(0) as i64), false)),
-            PORT_COUNT => Ok((Value::from_int(q.len() as i64), false)),
+            PORT_EVENT => Ok((Value::from_int(q.pop_front().unwrap_or(0) as Int), false)),
+            PORT_COUNT => Ok((Value::from_int(q.len() as Int), false)),
             _ => Err(format!("MIDI: read port {:#04x} unsupported", port)),
         }
     }
@@ -54,7 +54,7 @@ impl Device for MidiDevice {
                     send_one(v, msg)?;
                 }
                 let outs = self.outs.lock().map_err(|_| "MIDI: outs poisoned")?;
-                match midi_router::dest_of(w) {
+                match midi_router::dest_of(w as i64) {
                     Dest::Broadcast => {
                         for out in outs.iter().flatten() {
                             send_one(out, msg)?;
@@ -210,6 +210,20 @@ fn spawn_reconnect(queue: MidiQueue, outs: Outs, mut p_in: Vec<PendingIn>, mut p
 }
 
 impl MidiPlugin {
+    #[allow(dead_code)] // This source also builds the word64 plugin.
+    pub(crate) fn from_shared(queue: MidiQueue, outs: Outs, virt: Option<MidiOut>) -> Self {
+        Self { eager: Some(EagerMidi { queue, outs, virt, _ins: Vec::new() }) }
+    }
+
+    #[allow(dead_code)] // This source also builds the word32 plugin.
+    pub(crate) fn share32(&self) -> crate::word32::midi_plugin::MidiPlugin {
+        match &self.eager {
+            Some(e) => crate::word32::midi_plugin::MidiPlugin::from_shared(
+                Arc::clone(&e.queue), Arc::clone(&e.outs), e.virt.clone()),
+            None => crate::word32::midi_plugin::MidiPlugin::new(),
+        }
+    }
+
     pub fn new() -> Self {
         Self { eager: None }
     }

@@ -1,3 +1,4 @@
+#[cfg(any(feature = "sfx", test))]
 #[inline]
 pub(crate) fn unit_remainder(x: f32) -> f32 {
     let bits = x.to_bits();
@@ -9,21 +10,54 @@ pub(crate) fn unit_remainder(x: f32) -> f32 {
     (positive - (positive as u32) as f32).copysign(x)
 }
 
+#[cfg(any(feature = "synth", test))]
 #[inline]
 pub(crate) fn unit_euclid(x: f32) -> f32 {
     let remainder = unit_remainder(x);
     if remainder < 0.0 { remainder + 1.0 } else { remainder }
 }
 
-pub fn sin(x: f32) -> f32 { myriad::word32::fmath::sin(x) }
-pub fn cos(x: f32) -> f32 { myriad::word32::fmath::cos(x) }
+// Host audio has bit-exact recorded output; the bare-metal backend uses f32-only math.
+pub fn sin(x: f32) -> f32 {
+    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    { myriad::word32::fmath::sin(x) }
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    { libm::sinf(x) }
+}
+pub fn cos(x: f32) -> f32 {
+    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    { myriad::word32::fmath::cos(x) }
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    { libm::cosf(x) }
+}
 #[cfg(any(feature = "gfx", feature = "sfx"))]
 pub fn exp(x: f32) -> f32 { libm::expf(x) }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
 pub fn tanh(x: f32) -> f32 { libm::tanhf(x) }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
-pub fn powf(x: f32, n: f32) -> f32 { pow32::powf(x, n) }
+pub fn powf(x: f32, n: f32) -> f32 {
+    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    { pow32::powf(x, n) }
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    { libm::powf(x, n) }
+}
+#[cfg(all(target_os = "none", target_pointer_width = "32"))]
 mod pow32;
+
+#[cfg(all(test, not(all(target_os = "none", target_pointer_width = "32"))))]
+mod host_math_tests {
+    use super::*;
+
+    #[test]
+    fn host_math_preserves_the_recorded_libm_bits() {
+        for i in -8192..=8192 {
+            let x = i as f32 / 1024.0;
+            assert_eq!(sin(x).to_bits(), libm::sinf(x).to_bits());
+            assert_eq!(cos(x).to_bits(), libm::cosf(x).to_bits());
+            assert_eq!(powf(2.0, x).to_bits(), libm::powf(2.0, x).to_bits());
+        }
+    }
+}
 
 pub trait IntegerSqrt: Copy { fn floor_sqrt(self) -> Self; fn ceil_sqrt(self) -> Self; }
 macro_rules! integer_sqrt {

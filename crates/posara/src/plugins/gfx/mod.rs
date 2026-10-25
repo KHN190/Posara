@@ -1,17 +1,18 @@
 #[cfg(feature = "gfx-desktop")]
 mod png;
 
-pub use posara_core::gfx::*;
+pub use super::profile_core::gfx::*;
+pub use super::profile_core::Int;
 
 #[cfg(feature = "fs")]
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 #[cfg(any(feature = "fs", feature = "gfx-desktop"))]
-use myriad::Value;
+use super::runtime::Value;
 #[cfg(feature = "fs")]
-use myriad::{NativeCtx, VirtualMachine};
+use super::runtime::{NativeCtx, VirtualMachine};
 #[cfg(all(feature = "fs", feature = "gfx-desktop"))]
-use myriad::read_string;
+use super::runtime::read_string;
 
 #[cfg(feature = "gfx-desktop")]
 pub use png::SavePng;
@@ -25,7 +26,7 @@ pub fn register_io_natives(vm: &mut VirtualMachine, fb: Rc<RefCell<Framebuffer>>
     {
         let (f, r) = (Rc::clone(&fb), root.clone());
         let save_png = Rc::new(move |ctx: &mut NativeCtx, a: &[Value]| {
-            let a = posara_core::abi::Args(a);
+            let a = super::profile_core::abi::Args(a);
             let (x, y, w, h) = (a.coord(0), a.coord(1), a.coord(2), a.coord(3));
             let Some(rel) = read_string(ctx.heap, a.handle(4)) else {
                 return Ok((Value::from_int(-1), false));

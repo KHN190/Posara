@@ -75,11 +75,11 @@ fn render_scenario() -> Vec<f32> {
 }
 
 #[test]
-fn pcm_matches_unoptimized_7d9c4e8() {
+fn pcm_matches_unoptimized_host_reference() {
     let run1 = render_scenario();
     let h = pcm_hash(&run1);
-    // Oracle: 7d9c4e8 with symmetric center pan; identical math dependencies.
-    const EXPECTED_BASELINE_HASH: u64 = 0x9d1dd59e7e18f1e2;
+    // Oracle: unoptimized 63332a7 synth with the legacy libm host backend.
+    const EXPECTED_BASELINE_HASH: u64 = 0x60c97abadeabdcc0;
     assert_eq!(h, EXPECTED_BASELINE_HASH, "PCM differs from the unoptimized oracle");
 
     // Verify non-silent output when playing notes
@@ -128,4 +128,32 @@ fn fx_key_trace() -> Vec<f32> {
         }
     }
     output
+}
+
+fn noise_trace() -> Vec<f32> {
+    use posara_core::sfx::synth::Synth;
+    let mut synth = Synth::new();
+    synth.set_voices(3);
+    for pid in 0..3 {
+        synth.osc(pid, 0, if pid == 1 { 2 } else { 4 }, 0, 0.0, 1.0);
+        synth.osc(pid, 1, 4, 0, 0.0, if pid == 1 { 0.2 } else { 0.0 });
+        synth.filter(pid, 1, [3000.0, 300.0, 6500.0][pid], 0.0);
+        synth.env(pid, 0, 0, 100.0, 0.001, [0.035, 0.018, 0.120][pid], 0.0, 0.005);
+    }
+    let mut out = Vec::new();
+    for i in 0..12000 {
+        if i % 960 == 0 {
+            let pid = i / 960 % 3;
+            synth.stop(pid);
+            synth.note_on(pid, 42 + pid as u8 * 20, 0.2, 400);
+        }
+        let (l, r) = synth.tick(if i < 6000 { 48000.0 } else { 44100.0 });
+        out.extend([l, r]);
+    }
+    out
+}
+
+#[test]
+fn noise_and_rim_pcm_match_the_frozen_host_reference() {
+    assert_eq!(pcm_hash(&noise_trace()), 0xbbb0f7a90f7100fd);
 }

@@ -11,3 +11,5 @@ pub mod net;
 pub use sfx::SfxPlugin;
 #[cfg(feature = "midi-desktop")]
 pub use midi::MidiPlugin;
+
+pub(crate) use crate::{runtime, profile_core};

@@ -5,8 +5,6 @@ use std::time::{Duration, Instant, SystemTime};
 use myriad::VirtualMachine;
 use myriad::devices::{Console, SystemDevice, CONSOLE_ID, SYSTEM_ID};
 use polka::Module;
-#[cfg(not(target_arch = "wasm32"))]
-use polka::Value;
 
 use crate::Host;
 #[cfg(not(target_arch = "wasm32"))]
@@ -77,6 +75,57 @@ fn make_vm(host: &Host, module: &Module, static_names: Vec<String>, fn_names: Ve
         vm.install_device(CONSOLE_ID, Box::new(c));
     }
     host.install(&mut vm);
+    Ok(vm)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct StdoutConsole32;
+#[cfg(not(target_arch = "wasm32"))]
+impl myriad::word32::devices::Console for StdoutConsole32 {
+    fn read_byte(&mut self) -> Result<Option<u8>, String> { Ok(None) }
+    fn write_stdout(&mut self, b: u8) -> Result<(), String> {
+        std::io::stdout().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn write_stderr(&mut self, b: u8) -> Result<(), String> {
+        std::io::stderr().write_all(&[b]).map_err(|e| e.to_string())
+    }
+    fn flush(&mut self) -> Result<(), String> {
+        std::io::stdout().flush().map_err(|e| e.to_string())
+    }
+}
+
+fn make_vm32(
+    host32: &crate::word32::host::Host,
+    host: &Host,
+    module: &Module,
+    static_names: Vec<String>,
+    fn_names: Vec<String>,
+    dbg: DebugCfg,
+) -> Result<myriad::word32::VirtualMachine, String> {
+    host32.load(module)?;
+    let mut vm = myriad::word32::VirtualMachine::new()
+        .with_static_names(static_names)
+        .with_fn_names(fn_names)
+        .with_profile(std::env::var("PROFILE").as_deref() == Ok("1"));
+    if dbg.needs_sink() {
+        vm = vm.with_debug_sink(crate::debug::sink32(dbg.trace, dbg.handlers));
+    }
+    vm.install_device(SYSTEM_ID, Box::new(myriad::word32::devices::SystemDevice::new()));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let c: Box<dyn myriad::word32::devices::Console> = Box::new(StdoutConsole32);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+        let _ = &host.console_out;
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut bc = myriad::word32::devices::BufferConsole::new();
+        bc.out_buf = std::rc::Rc::clone(&host.console_out);
+        bc.err_buf = std::rc::Rc::clone(&host.console_out);
+        let c: Box<dyn myriad::word32::devices::Console> = Box::new(bc);
+        vm.install_device(CONSOLE_ID, Box::new(c));
+    }
+    host32.install(&mut vm);
     Ok(vm)
 }
 
@@ -341,12 +390,18 @@ pub fn build_crate(_entry: &Path, _host: &Host, _out: &Path) -> Result<PathBuf, 
     Err("posara built without `compiler` feature".into())
 }
 
+enum StepperBackend {
+    Word64(posara_core::word64::stepper::Stepper),
+    Word32(posara_core::word32::stepper::Stepper),
+}
+
 // Drives a loaded module frame by frame, holding the live VM state. Tests use
 // it to inject input between frames; run_until_ms / run_module wrap it.
 pub struct Stepper<'a> {
-    inner: posara_core::stepper::Stepper,
+    inner: StepperBackend,
     #[cfg_attr(not(feature = "sfx"), allow(dead_code))]
     host: &'a Host,
+    _host32: Option<crate::word32::host::Host>,
 }
 
 impl<'a> Stepper<'a> {
@@ -363,21 +418,60 @@ impl<'a> Stepper<'a> {
     }
 
     fn start_inner<F: FnOnce(&mut VirtualMachine)>(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &'a Host, register_aot: F) -> Result<Self, String> {
-        let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default())?;
-        let inner = posara_core::stepper::Stepper::start_with(vm, module, register_aot)?;
-        Ok(Self { inner, host })
+        let is_int32 = (module.flags & polka::CART_FLAG_INT32_SAFE) != 0;
+        if is_int32 {
+            let host32 = crate::word32::host::Host::from_host64(host)?;
+            let vm = make_vm32(&host32, host, &module, static_names, fn_names, DebugCfg::default())?;
+            let inner = posara_core::word32::stepper::Stepper::start(vm, module)?;
+            Ok(Self { inner: StepperBackend::Word32(inner), host, _host32: Some(host32) })
+        } else {
+            let vm = make_vm(host, &module, static_names, fn_names, DebugCfg::default())?;
+            let inner = posara_core::word64::stepper::Stepper::start_with(vm, module, register_aot)?;
+            Ok(Self { inner: StepperBackend::Word64(inner), host, _host32: None })
+        }
     }
 
-    pub fn is_frame_loop(&self) -> bool { self.inner.is_frame_loop() }
-    pub fn steps(&self) -> u64 { self.inner.steps() }
-    pub fn exit_code(&self) -> i64 { self.inner.exit_code() }
+    pub fn is_frame_loop(&self) -> bool {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.is_frame_loop(),
+            StepperBackend::Word32(s) => s.is_frame_loop(),
+        }
+    }
+    pub fn steps(&self) -> u64 {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.steps(),
+            StepperBackend::Word32(s) => s.steps() as u64,
+        }
+    }
+    pub fn exit_code(&self) -> i64 {
+        match &self.inner {
+            StepperBackend::Word64(s) => s.exit_code(),
+            StepperBackend::Word32(s) => s.exit_code() as i64,
+        }
+    }
     pub fn print_profile(&self) {
-        if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", self.inner.vm().profile_report()); }
+        if std::env::var("PROFILE").as_deref() == Ok("1") {
+            match &self.inner {
+                StepperBackend::Word64(s) => eprint!("{}", s.vm().profile_report()),
+                StepperBackend::Word32(s) => eprint!("{}", s.vm().profile_report()),
+            }
+        }
     }
 
     // Run one frame; returns false once the program is finished.
     pub fn frame(&mut self) -> Result<bool, String> {
-        let more = self.inner.frame()?;
+        #[cfg(feature = "gfx")]
+        if let Some(h32) = &self._host32 {
+            let c64 = self.host.input.controller.borrow();
+            let mut c32 = h32.input.controller.borrow_mut();
+            c32.buttons = c64.buttons;
+            c32.key = c64.key;
+        }
+
+        let more = match &mut self.inner {
+            StepperBackend::Word64(s) => s.frame()?,
+            StepperBackend::Word32(s) => s.frame()?,
+        };
         #[cfg(feature = "sfx")]
         self.host.sfx.drain_recorder();
         #[cfg(feature = "sfx")]
@@ -596,106 +690,166 @@ impl OverBudgetWarn {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
-    let mut loaded = myriad::loader::load(module)?;
-    let mut vm = make_vm(host, &loaded.module, static_names, fn_names, dbg)?;
-
-    let mut cart = is_cart(&loaded.module);
-    let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
-    if !cart && !has_update {
-        let v: Value = vm.run_module(&loaded.module)?;   // one-shot self-contained
-        if dbg.leak { eprint!("{}", vm.live_slots_report()); }
-        return Ok(v.as_int());
+fn load_reload(path: &Path, host: &Host, int32: bool) -> Result<LoadResult, String> {
+    let result = if path.extension().and_then(|s| s.to_str()) == Some("abe") {
+        compile_abe_with(path, host, int32)?
+    } else {
+        load_module(path, host)?
+    };
+    if (result.module.flags & polka::CART_FLAG_INT32_SAFE != 0) != int32 {
+        return Err("hot reload cannot change the VM word size".into());
     }
+    Ok(result)
+}
 
-    let start_of = |l: &myriad::loader::LoadedModule| l.module.exports.iter().any(|e| e.name == "start");
-    if cart {
-        vm.run_to_yield(&loaded.module)?;   // run main to the first frame.present()
-    } else if start_of(&loaded) {
-        vm.call_export(&loaded.module, "start", &[])?;
-    }
+// Keep reload, profiling and debugging identical for both VM word sizes.
+#[cfg(not(target_arch = "wasm32"))]
+macro_rules! run_module_with {
+    ($name:ident, $runtime:path, $int32:literal, $host:ident, $setup:block) => {
+        fn $name(module: Module, static_names: Vec<String>, fn_names: Vec<String>, $host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
+            use $runtime as runtime;
+            use runtime::Value;
+            let (make_vm, sync_input) = $setup;
+            let mut loaded = runtime::loader::load(module)?;
+            let mut vm = make_vm($host, &loaded.module, static_names, fn_names, dbg)?;
 
-    #[cfg(feature = "desktop")]
-    let mut prof = if profile { crate::profile::Profiler::new() } else { None };
-    #[cfg(not(feature = "desktop"))]
-    let _ = profile;
-    #[cfg(feature = "desktop")]
-    let mut last_steps: u64 = 0;
-    let mut prev = Instant::now();
+            let mut cart = is_cart(&loaded.module);
+            let has_update = loaded.module.exports.iter().any(|e| e.name == "update");
+            if !cart && !has_update {
+                let v: Value = vm.run_module(&loaded.module)?;   // one-shot self-contained
+                if dbg.leak { eprint!("{}", vm.live_slots_report()); }
+                if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", vm.profile_report()); }
+                return Ok(v.as_int() as i64);
+            }
 
-    let mut last = reload.as_deref().and_then(mtime);
-    if let Some(p) = reload.as_deref() {
-        eprintln!("• hot reload armed: {}", p.display());
-    }
-    let mut frame: u64 = 0;
-    let mut overbudget = OverBudgetWarn::new();
-    let exit_code = loop {
-        if !alive(host) { break 0i64; }
-        let t0 = Instant::now();
-        let frame_dt = t0 - prev;
-        prev = t0;
-        let s_pre = vm.steps();
-        if cart {
-            let still = vm.resume(&loaded.module, Value::from_int(0))?;   // run to next present()
-            overbudget.check(vm.steps() - s_pre);
-            if !still { break vm.exit_code().unwrap_or(0); }              // main returned / halted
-        } else {
-            vm.call_export(&loaded.module, "update", &[])?;
-            overbudget.check(vm.steps() - s_pre);
-            if vm.halted() { break vm.exit_code().unwrap_or(0); }
-        }
-        #[cfg(feature = "sfx")]
-        host.sfx.drain_recorder();
-        #[cfg(feature = "desktop")]
-        {
-            let work = t0.elapsed();
-            if prof.as_ref().is_some_and(|p| !p.is_open()) { prof = None; }
-            if let Some(p) = prof.as_mut() {
-                let steps = vm.steps();
-                let ops = steps.saturating_sub(last_steps);
-                last_steps = steps;
-                p.sample(ops, vm.heap_ref().bytes_used(), vm.heap_live_count(), work, frame_dt);
+            let start_of = |l: &runtime::loader::LoadedModule| l.module.exports.iter().any(|e| e.name == "start");
+            if cart {
+                vm.run_to_yield(&loaded.module)?;   // run main to the first frame.present()
+            } else if start_of(&loaded) {
+                vm.call_export(&loaded.module, "start", &[])?;
+            }
+
+            #[cfg(feature = "desktop")]
+            let mut prof = if profile { crate::profile::Profiler::new() } else { None };
+            #[cfg(not(feature = "desktop"))]
+            let _ = profile;
+            #[cfg(feature = "desktop")]
+            let mut last_steps: u64 = 0;
+            let mut prev = Instant::now();
+
+            let mut last = reload.as_deref().and_then(mtime);
+            if let Some(p) = reload.as_deref() {
+                eprintln!("• hot reload armed: {}", p.display());
+            }
+            let mut frame: u64 = 0;
+            let mut overbudget = OverBudgetWarn::new();
+            let exit_code = loop {
+                if !alive($host) { break 0i64; }
+                let t0 = Instant::now();
+                let frame_dt = t0 - prev;
+                prev = t0;
+                sync_input();
+                let s_pre = vm.steps();
+                if cart {
+                    let still = vm.resume(&loaded.module, Value::from_int(0))?;   // run to next present()
+                    overbudget.check((vm.steps() - s_pre) as u64);
+                    if !still { break vm.exit_code().unwrap_or(0) as i64; }              // main returned / halted
+                } else {
+                    vm.call_export(&loaded.module, "update", &[])?;
+                    overbudget.check((vm.steps() - s_pre) as u64);
+                    if vm.halted() { break vm.exit_code().unwrap_or(0) as i64; }
+                }
                 #[cfg(feature = "sfx")]
                 {
-                    let m = host.sfx.audio.meter.snapshot();
-                    p.set_audio(m.notes, m.out_peak, m.ch_voices, m.ch_peak);
+                    $host.sfx.drain_recorder();
+                    $host.sfx.audio.reclaim();
                 }
-                p.draw();
-            }
-        }
-        #[cfg(not(feature = "desktop"))]
-        let _ = (prev, frame_dt);
-
-        frame += 1;
-        if let Some(p) = reload.as_deref() {
-            if frame % 10 == 0 {
-                let now = mtime(p);
-                if now != last {
-                    last = now;
-                    match load_module(p, host).and_then(|r| myriad::loader::load(r.module).map(|l| (l, r.static_names, r.fn_names))) {
-                        Ok((newl, new_static, new_fns)) => {
-                            loaded = newl;
-                            vm = make_vm(host, &loaded.module, new_static, new_fns, dbg)?;
-                            #[cfg(feature = "desktop")]
-                            { last_steps = 0; }
-                            cart = is_cart(&loaded.module);
-                            let init = if cart {
-                                vm.run_to_yield(&loaded.module)
-                            } else if start_of(&loaded) {
-                                vm.call_export(&loaded.module, "start", &[]).map(|_| ())
-                            } else { Ok(()) };
-                            if let Err(e) = init { eprintln!("reload init error: {e}"); }
-                            eprintln!("• reloaded {}", p.display());
+                #[cfg(feature = "desktop")]
+                {
+                    let work = t0.elapsed();
+                    if prof.as_ref().is_some_and(|p| !p.is_open()) { prof = None; }
+                    if let Some(p) = prof.as_mut() {
+                        let steps = vm.steps();
+                        let ops = (steps as u64).saturating_sub(last_steps);
+                        last_steps = steps as u64;
+                        p.sample(ops, vm.heap_ref().bytes_used(), vm.heap_live_count(), work, frame_dt);
+                        #[cfg(feature = "sfx")]
+                        {
+                            let m = $host.sfx.audio.meter.snapshot();
+                            p.set_audio(m.notes, m.out_peak, m.ch_voices, m.ch_peak);
                         }
-                        Err(e) => eprintln!("• reload failed (keeping old):\n{e}"),
+                        p.draw();
                     }
                 }
-            }
-        }
+                #[cfg(not(feature = "desktop"))]
+                let _ = (prev, frame_dt);
 
-        let elapsed = t0.elapsed();
-        if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+                frame += 1;
+                if let Some(p) = reload.as_deref() {
+                    if frame % 10 == 0 {
+                        let now = mtime(p);
+                        if now != last {
+                            last = now;
+                            match load_reload(p,$host, $int32).and_then(|r| {
+                                runtime::loader::load(r.module).map(|l| (l, r.static_names, r.fn_names))
+                            }) {
+                                Ok((newl, new_static, new_fns)) => {
+                                    loaded = newl;
+                                    vm = make_vm($host, &loaded.module, new_static, new_fns, dbg)?;
+                                    #[cfg(feature = "desktop")]
+                                    { last_steps = 0; }
+                                    cart = is_cart(&loaded.module);
+                                    let init = if cart {
+                                        vm.run_to_yield(&loaded.module)
+                                    } else if start_of(&loaded) {
+                                        vm.call_export(&loaded.module, "start", &[]).map(|_| ())
+                                    } else { Ok(()) };
+                                    if let Err(e) = init { eprintln!("reload init error: {e}"); }
+                                    eprintln!("• reloaded {}", p.display());
+                                }
+                                Err(e) => eprintln!("• reload failed (keeping old):\n{e}"),
+                            }
+                        }
+                    }
+                }
+
+                let elapsed = t0.elapsed();
+                if elapsed < FRAME { std::thread::sleep(FRAME - elapsed); }
+            };
+            if dbg.leak { eprint!("{}", vm.live_slots_report()); }
+            if std::env::var("PROFILE").as_deref() == Ok("1") { eprint!("{}", vm.profile_report()); }
+            Ok(exit_code)
+        }
     };
-    if dbg.leak { eprint!("{}", vm.live_slots_report()); }
-    Ok(exit_code)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+run_module_with!(run_module64, myriad::word64, false, host, {
+    (make_vm, || {})
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+run_module_with!(run_module32, myriad::word32, true, host, {
+    let host32 = std::rc::Rc::new(crate::word32::host::Host::from_host64(host)?);
+    let input_host = std::rc::Rc::clone(&host32);
+    (move |_: &Host, module: &Module, statics, names, dbg| make_vm32(&host32, host, module, statics, names, dbg),
+     move || {
+         #[cfg(feature = "gfx")]
+         {
+             let input = host.input.controller.borrow();
+             let mut narrow = input_host.input.controller.borrow_mut();
+             narrow.buttons = input.buttons;
+             narrow.key = input.key;
+         }
+         let _ = &input_host;
+     })
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_module(module: Module, static_names: Vec<String>, fn_names: Vec<String>, host: &Host, reload: Option<PathBuf>, profile: bool, dbg: DebugCfg) -> Result<i64, String> {
+    if module.flags & polka::CART_FLAG_INT32_SAFE != 0 {
+        run_module32(module, static_names, fn_names, host, reload, profile, dbg)
+    } else {
+        run_module64(module, static_names, fn_names, host, reload, profile, dbg)
+    }
 }

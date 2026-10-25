@@ -95,6 +95,7 @@ struct Voice {
     rank: u32,
     base_freq: f32,
     env: [Adsr; 2],
+    env_used: [bool; 2],
     lfo: Lfo,
     fx: Fx,
     phase: [[f32; 2]; MAX_UNISON],
@@ -129,6 +130,7 @@ impl Default for Voice {
             rank: 0,
             base_freq: 0.0,
             env: [Adsr::default(); 2],
+            env_used: [false; 2],
             lfo: Lfo::default(),
             fx: Fx::default(),
             phase: [[0.0; 2]; MAX_UNISON],
@@ -183,6 +185,9 @@ impl Voice {
         self.gate_samples = gate_samples;
         self.rank = 0;
         for i in 0..2 {
+            let e = p.env[i];
+            self.env_used[i] = e.target == TGT_AMP || e.depth != 0.0 || e.atk != 0.0
+                || e.dec != 0.0 || e.sus != 0.0 || e.rel != 0.0;
             self.env[i].set(p.env[i].atk, p.env[i].dec, p.env[i].sus, p.env[i].rel);
             self.env[i].gate_on();
         }
@@ -251,6 +256,7 @@ impl Voice {
         let mut any = false;
         let mut amp_env = 1.0f32;
         for i in 0..2 {
+            if !self.env_used[i] { continue; }
             let lv = self.env[i].tick(dt);
             if self.env[i].active() { any = true; }
             let ec = self.cfg.env[i];
@@ -298,7 +304,9 @@ impl Voice {
             for o in 0..2 {
                 let oc = self.cfg.osc[o];
                 if oc.level <= 0.0 { continue; }
-                self.phase[u][o] = math::unit_remainder(self.phase[u][o] + self.phase_step[u][o]);
+                if oc.wave != 4 {
+                    self.phase[u][o] = math::unit_remainder(self.phase[u][o] + self.phase_step[u][o]);
+                }
                 s += wave_sample(oc.wave, self.phase[u][o], &mut self.lfsr) * oc.level;
             }
         }
@@ -321,7 +329,7 @@ impl Voice {
         s *= amp * self.vel * amp_lfo;
         #[cfg(feature = "audio-profile")]
         super::profiling::mark(super::profiling::Stage::SynthFx);
-        self.fx.process(s, sr)
+        if self.cfg.fx_kind != 0 && !(self.cfg.fx_amt <= 0.0) { self.fx.process(s, sr) } else { s }
     }
 }
 

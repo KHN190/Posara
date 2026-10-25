@@ -32,4 +32,5 @@ pub mod fs;
 pub mod net;
 
 pub fn random_float(bits: u32) -> Float { (bits >> 8) as Float / 16_777_216.0 }
+#[cfg(feature = "gfx")]
 pub(crate) fn screen_configuration_format(_: Word, selected: u8) -> u8 { selected }

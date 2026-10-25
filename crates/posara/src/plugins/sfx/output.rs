@@ -26,7 +26,7 @@ pub struct Audio {
     #[cfg(feature = "sfx-desktop")]
     _stream: Option<cpal::Stream>,
     #[cfg(not(feature = "sfx-desktop"))]
-    mixer: Mixer,
+    mixer: std::rc::Rc<std::cell::RefCell<Mixer>>,
 }
 
 impl Audio {
@@ -44,7 +44,7 @@ impl Audio {
             rec_ring: Arc::new(Spsc::new(8192)),
             rec_on: Arc::new(AtomicBool::new(false)),
             #[cfg(not(feature = "sfx-desktop"))]
-            mixer,
+            mixer: std::rc::Rc::new(std::cell::RefCell::new(mixer)),
             meter,
             sample_rate: 44100,
             channels: 2,
@@ -63,7 +63,7 @@ impl Audio {
             rec_ring: Arc::new(Spsc::new(8192)),
             rec_on: Arc::new(AtomicBool::new(false)),
             retired: mixer.retired(),
-            mixer,
+            mixer: std::rc::Rc::new(std::cell::RefCell::new(mixer)),
             meter,
             sample_rate,
             channels: 2,
@@ -74,10 +74,27 @@ impl Audio {
         while self.retired.try_pop().is_some() {}
     }
 
+    pub fn share(&self) -> Self {
+        Self {
+            cmds: Arc::clone(&self.cmds),
+            rec_ring: Arc::clone(&self.rec_ring),
+            rec_on: Arc::clone(&self.rec_on),
+            meter: Arc::clone(&self.meter),
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            retired: Arc::clone(&self.retired),
+            #[cfg(feature = "sfx-desktop")]
+            _stream: None,
+            #[cfg(not(feature = "sfx-desktop"))]
+            mixer: std::rc::Rc::clone(&self.mixer),
+        }
+    }
+
     #[cfg(not(feature = "sfx-desktop"))]
     pub fn pull(&mut self, out: &mut [f32]) {
-        while let Some(cmd) = self.cmds.try_pop() { self.mixer.apply(cmd); }
-        self.mixer.mix(out);
+        let mut mixer = self.mixer.borrow_mut();
+        while let Some(cmd) = self.cmds.try_pop() { mixer.apply(cmd); }
+        mixer.mix(out);
     }
 
     #[cfg(feature = "sfx-desktop")]
