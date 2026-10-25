@@ -74,6 +74,22 @@ impl Audio {
         while self.retired.try_pop().is_some() {}
     }
 
+    pub fn share(&self) -> Self {
+        Self {
+            cmds: Arc::clone(&self.cmds),
+            rec_ring: Arc::clone(&self.rec_ring),
+            rec_on: Arc::clone(&self.rec_on),
+            meter: Arc::clone(&self.meter),
+            sample_rate: self.sample_rate,
+            channels: self.channels,
+            retired: Arc::clone(&self.retired),
+            #[cfg(feature = "sfx-desktop")]
+            _stream: None,
+            #[cfg(not(feature = "sfx-desktop"))]
+            mixer: Mixer::new(self.sample_rate, self.channels as usize, Arc::clone(&self.meter), super::DELAY_CAP_MS),
+        }
+    }
+
     #[cfg(not(feature = "sfx-desktop"))]
     pub fn pull(&mut self, out: &mut [f32]) {
         while let Some(cmd) = self.cmds.try_pop() { self.mixer.apply(cmd); }

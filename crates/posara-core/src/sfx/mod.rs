@@ -14,6 +14,8 @@ pub mod spsc;
 #[cfg(feature = "synth")]
 pub mod synth;
 pub mod voice;
+#[cfg(feature = "audio-profile")]
+pub mod profiling;
 
 pub use meter::{AudioMeter, AudioSnapshot, Meter};
 pub use mixer::Mixer;

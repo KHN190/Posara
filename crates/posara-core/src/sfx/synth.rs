@@ -269,8 +269,12 @@ impl Voice {
         } else {
             self.cfg.cutoff * math::powf(2.0f32, cut_oct) * cut_mul
         };
+        #[cfg(feature = "audio-profile")]
+        super::profiling::mark(super::profiling::Stage::SynthFilter);
         s = self.filter(s, cutoff, self.cfg.reso, sr);
         s *= amp * self.vel * amp_lfo;
+        #[cfg(feature = "audio-profile")]
+        super::profiling::mark(super::profiling::Stage::SynthFx);
         self.fx.process(s, sr)
     }
 }
@@ -410,16 +414,33 @@ impl Synth {
         let mut tl = 0.0f32;
         let mut tr = 0.0f32;
         let mut psum = [0.0f32; 4];
+        #[cfg(feature = "audio-profile")]
+        let (mut active, mut fm, mut lfo, mut bitcrush) = (0u32, 0u32, 0u32, 0u32);
         for i in 0..self.pool {
+            #[cfg(feature = "audio-profile")]
+            {
+                let voice = &self.voices[i];
+                if voice.active {
+                    active += 1;
+                    fm += u32::from(voice.cfg.osc[1].wave == WAVE_FM && voice.cfg.osc[1].level > 0.0);
+                    lfo += u32::from(voice.lfo.enabled());
+                    bitcrush += u32::from(voice.fx.kind == super::fx::FX_BITCRUSH);
+                }
+                super::profiling::mark(super::profiling::Stage::SynthVoice);
+            }
             let pid = self.voices[i].pid;
             let s = self.voices[i].tick(sr);
             // equal-power pan from the voice's patch.
+            #[cfg(feature = "audio-profile")]
+            super::profiling::mark(super::profiling::Stage::SynthPan);
             let pan = self.voices[i].cfg.pan;
             let a = (pan + 1.0) * core::f32::consts::FRAC_PI_4;
             tl += s * math::cos(a);
             tr += s * math::sin(a);
             if pid < 4 { psum[pid] += s; }
         }
+        #[cfg(feature = "audio-profile")]
+        super::profiling::voices(self.pool as u32, active, fm, lfo, bitcrush);
         for p in 0..4 {
             if psum[p].abs() > self.pid_peak[p] { self.pid_peak[p] = psum[p].abs(); }
         }
