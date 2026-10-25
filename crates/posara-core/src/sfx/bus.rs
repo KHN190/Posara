@@ -15,14 +15,24 @@ pub struct Delay {
 impl Delay {
     // One line per output channel, sized once; mono shares a single line.
     pub fn new(cap: usize, stereo: bool) -> Self {
-        let line = || vec![0.0; cap.max(1)];
-        Self { bl: line(), br: if stereo { line() } else { Vec::new() }, idx: 0, len: 0, fb: 0.0, mix: 0.0 }
+        Self::try_new(cap, stereo).expect("delay buffer allocation")
+    }
+
+    pub fn try_new(cap: usize, stereo: bool) -> Result<Self, alloc::collections::TryReserveError> {
+        let line = || {
+            let mut samples = Vec::new();
+            samples.try_reserve_exact(cap)?;
+            samples.resize(cap, 0.0);
+            Ok::<_, alloc::collections::TryReserveError>(samples)
+        };
+        Ok(Self { bl: line()?, br: if stereo { line()? } else { Vec::new() }, idx: 0, len: 0, fb: 0.0, mix: 0.0 })
     }
 }
 
 impl Delay {
     // time_ms 0 disables. fb/mix 0..1.
     pub fn set(&mut self, time_ms: u32, fb: f32, mix: f32, sr: f32) {
+        if self.bl.is_empty() { return; }
         let len = (((time_ms as f32) * sr / 1000.0) as usize).min(self.bl.len());
         if len != self.len {
             let n = len.max(1);

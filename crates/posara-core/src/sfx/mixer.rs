@@ -118,6 +118,10 @@ impl Mixer {
         }
     }
 
+    pub fn swap_delay(&mut self, prepared: &mut super::bus::Delay) {
+        core::mem::swap(&mut self.delay, prepared);
+    }
+
     pub fn play_sample(&mut self, bytes: Vec<u8>, rate: f32, vol: f32) {
         let old = self.sample.play(bytes, rate, vol);
         if old.capacity() > 0 { self.retire(Retired::Sample(old)); }

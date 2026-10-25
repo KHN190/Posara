@@ -198,3 +198,49 @@ fn disabled_reverb_saves_memory_without_changing_dry_or_delay_audio() {
         }
     }), 0);
 }
+
+#[test]
+fn prepared_delay_matches_eager_output_and_swaps_without_heap_ops() {
+    use posara_core::sfx::bus::Delay;
+    let mut eager = Mixer::new_with_reverb(SR, 1, Arc::new(AudioMeter::default()), 750, false);
+    let mut lean = Mixer::new_with_reverb(SR, 1, Arc::new(AudioMeter::default()), 0, false);
+    let mut prepared = Delay::try_new(36_000, false).unwrap();
+    assert_eq!(heap_hits(|| lean.swap_delay(&mut prepared)), 0);
+    for m in [&mut eager, &mut lean] {
+        m.apply(Cmd::BusDelay(125, 0.3, 0.4));
+        m.apply(Cmd::SynOn(0, 60, 0.7, 90));
+    }
+    let (mut a, mut b) = ([0.0; BLOCK], [0.0; BLOCK]);
+    assert_eq!(heap_hits(|| {
+        for _ in 0..100 {
+            eager.mix(&mut a); lean.mix(&mut b);
+            for (x,y) in a.iter().zip(&b) { assert_eq!(x.to_bits(),y.to_bits()); }
+        }
+    }), 0);
+    let mut empty = Delay::try_new(0, false).unwrap();
+    assert_eq!(heap_hits(|| lean.swap_delay(&mut empty)), 0);
+    assert_eq!(heap_hits(|| {
+        lean.apply(Cmd::BusDelay(750, 0.5, 1.0));
+        lean.mix(&mut b);
+    }), 0);
+}
+
+#[test]
+fn absent_delay_releases_its_entire_line_without_changing_dry_pcm() {
+    let mut full = None; let mut lean = None;
+    let (_, full_bytes) = counted(|| full = Some(Mixer::new_with_reverb(SR, 1, Arc::new(AudioMeter::default()), 750, false)));
+    let (_, lean_bytes) = counted(|| lean = Some(Mixer::new_with_reverb(SR, 1, Arc::new(AudioMeter::default()), 0, false)));
+    assert_eq!(full_bytes - lean_bytes, 144_000);
+    let (mut full,mut lean)=(full.unwrap(),lean.unwrap());
+    for m in [&mut full,&mut lean] { m.apply(Cmd::SynOn(0,60,0.7,90)); }
+    let (mut a,mut b)=([0.0;BLOCK],[0.0;BLOCK]);
+    for _ in 0..20 {
+        full.mix(&mut a);lean.mix(&mut b);
+        assert_eq!(a,b);
+    }
+}
+
+#[test]
+fn impossible_delay_capacity_returns_an_error() {
+    assert!(posara_core::sfx::bus::Delay::try_new(usize::MAX, true).is_err());
+}
