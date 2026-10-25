@@ -175,3 +175,26 @@ mod random_streams {
         }
     }
 }
+
+#[test]
+fn disabled_reverb_saves_memory_without_changing_dry_or_delay_audio() {
+    let mut full = None;
+    let mut lean = None;
+    let (_, full_bytes) = counted(|| full = Some(Mixer::new(SR, 1, Arc::new(AudioMeter::default()), DELAY_CAP_MS)));
+    let (_, lean_bytes) = counted(|| lean = Some(Mixer::new_with_reverb(SR, 1, Arc::new(AudioMeter::default()), DELAY_CAP_MS, false)));
+    assert!(full_bytes - lean_bytes > 24 * 1024);
+    let (mut full, mut lean) = (full.unwrap(), lean.unwrap());
+    for m in [&mut full, &mut lean] {
+        m.apply(Cmd::BusDelay(125, 0.3, 0.2));
+        m.apply(Cmd::SynOn(0, 60, 0.7, 4800));
+    }
+    let mut a = [0.0f32; BLOCK];
+    let mut b = [0.0f32; BLOCK];
+    assert_eq!(heap_hits(|| {
+        for _ in 0..100 {
+            full.mix(&mut a);
+            lean.mix(&mut b);
+            for (x, y) in a.iter().zip(b.iter()) { assert_eq!(x.to_bits(), y.to_bits()); }
+        }
+    }), 0);
+}
