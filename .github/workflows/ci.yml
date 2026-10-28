@@ -26,7 +26,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, thumbv8m.main-none-eabihf
       - uses: Swatinem/rust-cache@v2
-      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Install wasm-pack
+        run: bash scripts/install-wasm-pack.sh
 
       - name: Native and cart output contract oracles
         run: python3 scripts/check-contract.py

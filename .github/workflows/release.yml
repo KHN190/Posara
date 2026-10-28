@@ -62,7 +62,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - uses: jetli/wasm-pack-action@v0.4.0
+      - name: Install wasm-pack
+        run: bash scripts/install-wasm-pack.sh
       - name: Web execution contracts
         run: bash scripts/check-wasm.sh
       - name: Build web bundle
