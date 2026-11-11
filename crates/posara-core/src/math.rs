@@ -24,6 +24,31 @@ pub fn sin(x: f32) -> f32 {
     #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
     { libm::sinf(x) }
 }
+/// Sine of an oscillator phase in [0, 1]. The phase already carries the quadrant,
+/// so no general radian argument reduction or library call is needed.
+#[inline]
+pub fn phase_sin(phase: f32) -> f32 {
+    let quadrant = (phase * 4.0 + 0.5) as u32;
+    let x = (phase - quadrant as f32 * 0.25) * core::f32::consts::TAU;
+    let z = x * x;
+    // On [-pi/4, pi/4], these Taylor remainders are below f32 rounding noise.
+    let value = if quadrant & 1 == 0 {
+        x * (1.0 + z * (-1.0 / 6.0 + z * (1.0 / 120.0
+            + z * (-1.0 / 5040.0 + z / 362880.0))))
+    } else {
+        1.0 + z * (-0.5 + z * (1.0 / 24.0 + z * (-1.0 / 720.0 + z / 40320.0)))
+    };
+    if quadrant & 2 == 0 { value } else { -value }
+}
+
+#[inline]
+pub(crate) fn oscillator_sin(phase: f32) -> f32 {
+    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    { phase_sin(phase) }
+    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    { sin(phase * core::f32::consts::TAU) }
+}
+
 pub fn cos(x: f32) -> f32 {
     #[cfg(all(target_os = "none", target_pointer_width = "32"))]
     { myriad::word32::fmath::cos(x) }

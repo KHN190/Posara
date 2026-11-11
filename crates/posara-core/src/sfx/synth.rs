@@ -164,7 +164,7 @@ fn wave_sample(wave: u8, phase: f32, lfsr: &mut u32) -> f32 {
         return ((x & 0xFF) as f32 / 128.0) - 1.0;
     }
     match wave {
-        1 => math::sin(phase * core::f32::consts::TAU),
+        1 => math::oscillator_sin(phase),
         2 => if phase < 0.5 { 4.0 * phase - 1.0 } else { 3.0 - 4.0 * phase },
         3 => 2.0 * phase - 1.0,
         _ => if phase < 0.5 { 1.0 } else { -1.0 },
@@ -296,7 +296,7 @@ impl Voice {
                 self.phase[u][1] = math::unit_remainder(self.phase[u][1] + self.phase_step[u][1]);
                 self.phase[u][0] = math::unit_remainder(self.phase[u][0] + self.phase_step[u][0]);
                 if car.level > 0.0 {
-                    let pm = math::sin(self.phase[u][1] * core::f32::consts::TAU) * modu.level * core::f32::consts::FRAC_1_PI;
+                    let pm = math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI;
                     s += wave_sample(car.wave, math::unit_euclid(self.phase[u][0] + pm), &mut self.lfsr) * car.level;
                 }
                 continue;
