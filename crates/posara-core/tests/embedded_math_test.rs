@@ -57,3 +57,25 @@ fn oscillator_phase_kernel_preserves_amplitude_symmetry_and_wrap_continuity() {
         }
     }
 }
+
+#[test]
+fn oscillator_interpolation_preserves_fm_across_notes_and_depths() {
+    use posara_core::math::phase_sin;
+    for note in 0..=127 {
+        let step = 440.0 * libm::powf(2.0, (note as f32 - 69.0) / 12.0) / 48000.0;
+        for depth in [0.0, 0.1, 0.5, 0.9, 1.0] {
+            let mut phase = 0.0f32;
+            for _ in 0..2048 {
+                phase = (phase + step).fract();
+                let mod_phase = (phase * 2.0).fract();
+                let actual_phase = (phase + phase_sin(mod_phase) * depth
+                    * core::f32::consts::FRAC_1_PI).rem_euclid(1.0);
+                let reference_phase = (phase + libm::sinf(mod_phase * core::f32::consts::TAU)
+                    * depth * core::f32::consts::FRAC_1_PI).rem_euclid(1.0);
+                let error = (phase_sin(actual_phase)
+                    - libm::sinf(reference_phase * core::f32::consts::TAU)).abs();
+                assert!(error < 0.000003, "note={note} depth={depth} error={error}");
+            }
+        }
+    }
+}
