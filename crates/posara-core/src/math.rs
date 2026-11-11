@@ -31,12 +31,11 @@ pub fn phase_sin(phase: f32) -> f32 {
     let quadrant = (phase * 4.0 + 0.5) as u32;
     let x = (phase - quadrant as f32 * 0.25) * core::f32::consts::TAU;
     let z = x * x;
-    // On [-pi/4, pi/4], these Taylor remainders are below f32 rounding noise.
+    // On [-pi/4, pi/4], peak error is below 4e-6 (0.14 of a 16-bit PCM step).
     let value = if quadrant & 1 == 0 {
-        x * (1.0 + z * (-1.0 / 6.0 + z * (1.0 / 120.0
-            + z * (-1.0 / 5040.0 + z / 362880.0))))
+        x * (1.0 + z * (-1.0 / 6.0 + z * (1.0 / 120.0 - z / 5040.0)))
     } else {
-        1.0 + z * (-0.5 + z * (1.0 / 24.0 + z * (-1.0 / 720.0 + z / 40320.0)))
+        1.0 + z * (-0.5 + z * (1.0 / 24.0 - z / 720.0))
     };
     if quadrant & 2 == 0 { value } else { -value }
 }

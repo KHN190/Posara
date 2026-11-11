@@ -46,36 +46,39 @@ fn oscillator_phase_kernel_preserves_amplitude_symmetry_and_wrap_continuity() {
         let phase = i as f32 / 262144.0;
         let actual = phase_sin(phase);
         let reference = libm::sinf(phase * core::f32::consts::TAU);
-        assert!((actual - reference).abs() < 0.000001, "phase={phase}");
-        assert!((actual + phase_sin(1.0 - phase)).abs() < 0.000001);
+        assert!((actual - reference).abs() < 0.000004, "phase={phase}");
+        assert!((actual + phase_sin(1.0 - phase)).abs() < 0.000004);
         assert!(actual.abs() <= 1.000001);
     }
     for boundary in [0.0f32, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0] {
         for offset in [-2.0f32, -1.0, 0.0, 1.0, 2.0] {
             let phase = (boundary + offset * f32::EPSILON).clamp(0.0, 1.0);
-            assert!((phase_sin(phase) - libm::sinf(phase * core::f32::consts::TAU)).abs() < 0.000001);
+            assert!((phase_sin(phase) - libm::sinf(phase * core::f32::consts::TAU)).abs() < 0.000004);
         }
     }
 }
 
 #[test]
-fn oscillator_interpolation_preserves_fm_across_notes_and_depths() {
+fn oscillator_kernel_preserves_fm_across_notes_and_depths() {
     use posara_core::math::phase_sin;
     for note in 0..=127 {
         let step = 440.0 * libm::powf(2.0, (note as f32 - 69.0) / 12.0) / 48000.0;
         for depth in [0.0, 0.1, 0.5, 0.9, 1.0] {
+          for ratio in [0.5, 1.0, 2.0, 4.0] {
             let mut phase = 0.0f32;
+            let mut mod_phase = 0.0f32;
             for _ in 0..2048 {
                 phase = (phase + step).fract();
-                let mod_phase = (phase * 2.0).fract();
+                mod_phase = (mod_phase + step * ratio).fract();
                 let actual_phase = (phase + phase_sin(mod_phase) * depth
                     * core::f32::consts::FRAC_1_PI).rem_euclid(1.0);
                 let reference_phase = (phase + libm::sinf(mod_phase * core::f32::consts::TAU)
                     * depth * core::f32::consts::FRAC_1_PI).rem_euclid(1.0);
                 let error = (phase_sin(actual_phase)
                     - libm::sinf(reference_phase * core::f32::consts::TAU)).abs();
-                assert!(error < 0.000003, "note={note} depth={depth} error={error}");
+                assert!(error < 0.00001, "note={note} depth={depth} ratio={ratio} error={error}");
             }
+          }
         }
     }
 }
