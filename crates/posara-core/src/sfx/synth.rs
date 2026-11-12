@@ -469,6 +469,7 @@ impl Synth {
         }
         let p = self.patches[pid];
         self.voices[slot].start(&p, pid, note, vel, gate_samples, self.serial);
+        self.voices[slot].modulation=self.modulation[pid];
 
     }
 

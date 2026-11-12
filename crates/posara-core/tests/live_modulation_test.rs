@@ -9,3 +9,6 @@ fn synth(pid:usize)->Synth{let mut s=Synth::new();s.set_voices(3);s.osc(pid,0,1,
  }}
 }
 #[test]fn mute_recovers_without_retriggering_and_invalid_controls_do_not_poison_audio(){for gain in [0.0,0.2,0.5]{let mut a=synth(0);a.modulate(0,gain,1.0,0.0);for _ in 0..4000{a.tick(48000.0);}a.modulate(0,1.0,1.0,0.0);let mut energy=0.0;for _ in 0..4000{energy+=a.tick(48000.0).0.abs();}assert!(energy>1.0);for bad in [f32::NAN,f32::INFINITY,f32::NEG_INFINITY]{a.modulate(0,bad,bad,bad);assert!(a.tick(48000.0).0.is_finite());}}}
+#[test]fn reused_voices_do_not_inherit_another_patch_modulation(){
+ for target in [[0.0,1.0,0.0],[1.0,0.8,0.8]]{let mut a=synth(0);a.set_voices(1);a.modulate(0,target[0],target[1],target[2]);for _ in 0..4000{a.tick(48000.0);}a.panic();let mut b=Synth::new();b.set_voices(1);for s in [&mut a,&mut b]{s.note_on(2,48,0.5,4000);}for _ in 0..2000{assert_eq!(a.tick(48000.0),b.tick(48000.0));}}
+}
