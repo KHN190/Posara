@@ -10,10 +10,6 @@ CLAUDE.md
 AGENTS.md
 Cargo.lock
 
-# KiCad local profiles and generated verification artifacts
-/tools/kicad-fast/*.local.json
-/tools/kicad-fast/artifacts/
-
 # LLVM coverage intermediates
 *.profraw
 *.profdata
