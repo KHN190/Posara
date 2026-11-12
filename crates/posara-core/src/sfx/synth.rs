@@ -85,6 +85,7 @@ impl Default for Patch {
 
 #[derive(Clone, Copy)]
 struct Voice {
+    modulation: [f32; 3],
     cfg: Patch,
     pid: usize,
     note: u8,
@@ -120,6 +121,7 @@ struct Voice {
 impl Default for Voice {
     fn default() -> Self {
         Self {
+            modulation: [1.0, 1.0, 0.0],
             cfg: Patch::default(),
             pid: 0,
             note: 0,
@@ -243,8 +245,14 @@ impl Voice {
         }
     }
 
-    fn tick(&mut self, sr: f32) -> f32 {
+    fn tick(&mut self, sr: f32, target: [f32; 3]) -> f32 {
         if !self.active { return 0.0; }
+        for (current, target) in self.modulation.iter_mut().zip(target) {
+            if *current != target {
+                *current += (target - *current) * (1.0 / 240.0);
+                if (*current - target).abs() < 0.00001 { *current = target; }
+            }
+        }
         if self.gate_samples == 1 { self.note_off(); }
         if self.gate_samples > 0 { self.gate_samples -= 1; }
 
@@ -279,7 +287,7 @@ impl Voice {
             _ => {}
         }
 
-        let freq = self.base_freq * (if pitch_semi != 0.0 { math::powf(2.0f32, pitch_semi / 12.0) } else { 1.0 }) * p_mul;
+        let freq = self.base_freq * self.modulation[1] * (if pitch_semi != 0.0 { math::powf(2.0f32, pitch_semi / 12.0) } else { 1.0 }) * p_mul;
         let mut s = 0.0f32;
         let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
         let fm = modu.wave == WAVE_FM && modu.level > 0.0;
@@ -329,11 +337,18 @@ impl Voice {
         s *= amp * self.vel * amp_lfo;
         #[cfg(feature = "audio-profile")]
         super::profiling::mark(super::profiling::Stage::SynthFx);
-        if self.cfg.fx_kind != 0 && !(self.cfg.fx_amt <= 0.0) { self.fx.process(s, sr) } else { s }
+        let s = if self.cfg.fx_kind != 0 && !(self.cfg.fx_amt <= 0.0) { self.fx.process(s, sr) } else { s };
+        let drive = self.modulation[2];
+        let shaped = if drive > 0.0 {
+            let x = s * (1.0 + 8.0 * drive);
+            s + (x / (1.0 + x.abs()) - s) * drive
+        } else { s };
+        shaped * self.modulation[0]
     }
 }
 
 pub struct Synth {
+    modulation: [[f32; 3]; MAX_PATCHES],
     patches: [Patch; MAX_PATCHES],
     voices: Box<[Voice]>,
     pool: usize,
@@ -344,6 +359,7 @@ pub struct Synth {
 impl Synth {
     pub fn new() -> Self {
         Self {
+            modulation: [[1.0, 1.0, 0.0]; MAX_PATCHES],
             patches: [Patch::default(); MAX_PATCHES],
             voices: vec![Voice::default(); MAX_VOICES].into_boxed_slice(),
             pool: 8,
@@ -413,6 +429,15 @@ impl Synth {
 
     pub fn set_voices(&mut self, n: usize) {
         self.pool = n.clamp(1, MAX_VOICES);
+    }
+
+    /// Temporary live controls do not overwrite the stored patch or its envelopes.
+    pub fn modulate(&mut self, pid: usize, gain: f32, pitch: f32, drive: f32) {
+        if let Some(target) = self.modulation.get_mut(pid) {
+            if gain.is_finite() && pitch.is_finite() && drive.is_finite() {
+                *target = [gain.clamp(0.0, 1.0), pitch.clamp(0.5, 2.0), drive.clamp(0.0, 1.0)];
+            }
+        }
     }
 
     fn alloc(&self) -> usize {
@@ -486,7 +511,7 @@ impl Synth {
                 super::profiling::mark(super::profiling::Stage::SynthVoice);
             }
             let pid = voice.pid;
-            let s = voice.tick(sr);
+            let s = voice.tick(sr, self.modulation[pid]);
             // equal-power pan from the voice's patch.
             #[cfg(feature = "audio-profile")]
             super::profiling::mark(super::profiling::Stage::SynthPan);

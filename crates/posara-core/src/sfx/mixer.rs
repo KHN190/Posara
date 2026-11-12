@@ -73,6 +73,8 @@ pub enum Cmd {
     SynStop(usize),
     #[cfg(feature = "synth")]
     SynPanic,
+    #[cfg(feature = "synth")]
+    SynMod(usize, f32, f32, f32),
 }
 
 const RETIRE_CAP: usize = 16;
@@ -180,6 +182,8 @@ impl Mixer {
             Cmd::SynStop(pid) => self.synth.stop(pid),
             #[cfg(feature = "synth")]
             Cmd::SynPanic => self.synth.panic(),
+            #[cfg(feature = "synth")]
+            Cmd::SynMod(pid, gain, pitch, drive) => self.synth.modulate(pid, gain, pitch, drive),
         }
     }
 
