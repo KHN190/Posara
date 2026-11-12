@@ -86,6 +86,10 @@ impl Default for Patch {
 #[derive(Clone, Copy)]
 struct Voice {
     modulation: [f32; 3],
+    modulation_target: [f32; 3],
+    modulation_delta: [f32; 3],
+    modulation_left: u8,
+    modulation_active: bool,
     cfg: Patch,
     pid: usize,
     note: u8,
@@ -122,6 +126,10 @@ impl Default for Voice {
     fn default() -> Self {
         Self {
             modulation: [1.0, 1.0, 0.0],
+            modulation_target: [1.0, 1.0, 0.0],
+            modulation_delta: [0.0; 3],
+            modulation_left: 0,
+            modulation_active: false,
             cfg: Patch::default(),
             pid: 0,
             note: 0,
@@ -245,14 +253,35 @@ impl Voice {
         }
     }
 
-    fn tick(&mut self, sr: f32, target: [f32; 3]) -> f32 {
-        if !self.active { return 0.0; }
-        for (current, target) in self.modulation.iter_mut().zip(target) {
-            if *current != target {
-                *current += (target - *current) * (1.0 / 240.0);
-                if (*current - target).abs() < 0.00001 { *current = target; }
+    fn set_modulation(&mut self, target: [f32; 3]) {
+        self.modulation_target = target;
+        self.modulation_left = 0;
+        self.modulation_active = self.modulation != target;
+    }
+
+    fn advance_modulation(&mut self) {
+        if self.modulation_left == 0 {
+            self.modulation_active = false;
+            for i in 0..3 {
+                let difference = self.modulation_target[i] - self.modulation[i];
+                if difference.abs() < 0.00001 {
+                    self.modulation[i] = self.modulation_target[i];
+                    self.modulation_delta[i] = 0.0;
+                } else {
+                    // Sixteen-sample chords approximate the original 1/240 exponential.
+                    self.modulation_delta[i] = difference * ((1.0 - 0.9353767) / 16.0);
+                    self.modulation_active = true;
+                }
             }
+            self.modulation_left = 16;
         }
+        for i in 0..3 { self.modulation[i] += self.modulation_delta[i]; }
+        self.modulation_left -= 1;
+    }
+
+    fn tick(&mut self, sr: f32) -> f32 {
+        if !self.active { return 0.0; }
+        if self.modulation_active { self.advance_modulation(); }
         if self.gate_samples == 1 { self.note_off(); }
         if self.gate_samples > 0 { self.gate_samples -= 1; }
 
@@ -287,7 +316,7 @@ impl Voice {
             _ => {}
         }
 
-        let freq = self.base_freq * self.modulation[1] * (if pitch_semi != 0.0 { math::powf(2.0f32, pitch_semi / 12.0) } else { 1.0 }) * p_mul;
+        let freq = self.base_freq * (if pitch_semi != 0.0 { math::powf(2.0f32, pitch_semi / 12.0) } else { 1.0 }) * p_mul;
         let mut s = 0.0f32;
         let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
         let fm = modu.wave == WAVE_FM && modu.level > 0.0;
@@ -300,9 +329,14 @@ impl Voice {
             self.step_sr = sr;
         }
         for u in 0..self.ucount {
+            let mut step = self.phase_step[u];
+            if self.modulation[1] != 1.0 {
+                step[0] *= self.modulation[1];
+                step[1] *= self.modulation[1];
+            }
             if fm {
-                self.phase[u][1] = math::unit_remainder(self.phase[u][1] + self.phase_step[u][1]);
-                self.phase[u][0] = math::unit_remainder(self.phase[u][0] + self.phase_step[u][0]);
+                self.phase[u][1] = math::unit_remainder(self.phase[u][1] + step[1]);
+                self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
                 if car.level > 0.0 {
                     let pm = math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI;
                     s += wave_sample(car.wave, math::unit_euclid(self.phase[u][0] + pm), &mut self.lfsr) * car.level;
@@ -313,7 +347,7 @@ impl Voice {
                 let oc = self.cfg.osc[o];
                 if oc.level <= 0.0 { continue; }
                 if oc.wave != 4 {
-                    self.phase[u][o] = math::unit_remainder(self.phase[u][o] + self.phase_step[u][o]);
+                    self.phase[u][o] = math::unit_remainder(self.phase[u][o] + step[o]);
                 }
                 s += wave_sample(oc.wave, self.phase[u][o], &mut self.lfsr) * oc.level;
             }
@@ -435,7 +469,13 @@ impl Synth {
     pub fn modulate(&mut self, pid: usize, gain: f32, pitch: f32, drive: f32) {
         if let Some(target) = self.modulation.get_mut(pid) {
             if gain.is_finite() && pitch.is_finite() && drive.is_finite() {
-                *target = [gain.clamp(0.0, 1.0), pitch.clamp(0.5, 2.0), drive.clamp(0.0, 1.0)];
+                let next = [gain.clamp(0.0, 1.0), pitch.clamp(0.5, 2.0), drive.clamp(0.0, 1.0)];
+                if *target != next {
+                    *target = next;
+                    for voice in self.voices.iter_mut().filter(|v| v.active && v.pid == pid) {
+                        voice.set_modulation(next);
+                    }
+                }
             }
         }
     }
@@ -470,6 +510,7 @@ impl Synth {
         let p = self.patches[pid];
         self.voices[slot].start(&p, pid, note, vel, gate_samples, self.serial);
         self.voices[slot].modulation=self.modulation[pid];
+        self.voices[slot].set_modulation(self.modulation[pid]);
 
     }
 
@@ -512,7 +553,7 @@ impl Synth {
                 super::profiling::mark(super::profiling::Stage::SynthVoice);
             }
             let pid = voice.pid;
-            let s = voice.tick(sr, self.modulation[pid]);
+            let s = voice.tick(sr);
             // equal-power pan from the voice's patch.
             #[cfg(feature = "audio-profile")]
             super::profiling::mark(super::profiling::Stage::SynthPan);
@@ -593,5 +634,67 @@ mod rank_tests {
         synth.note_on(0, 63, 1.0, 0);
         assert_eq!(synth.voices[0].note, 63);
         assert_eq!(synth.voices[1].note, 62);
+    }
+}
+
+#[cfg(test)]
+mod modulation_ramp_tests {
+    use super::*;
+
+    #[test]
+    fn finite_control_segments_track_the_original_smoother_and_recover_exactly() {
+        for interval in [7, 16, 33, 240, 960] {
+            let mut voice = Voice::default();
+            let mut reference = [1.0f32, 1.0, 0.0];
+            let mut target = reference;
+            for n in 0..16000 {
+                if n % interval == 0 {
+                    target = [[0.0, 0.78, 0.85], [0.4, 0.9, 0.4], [0.8, 0.95, 0.2], [1.0, 1.0, 0.0]][(n / interval) % 4];
+                    voice.set_modulation(target);
+                }
+                let previous = voice.modulation;
+                if voice.modulation_active { voice.advance_modulation(); }
+                for i in 0..3 {
+                    reference[i] += (target[i] - reference[i]) / 240.0;
+                    if (reference[i] - target[i]).abs() < 0.00001 { reference[i] = target[i]; }
+                    assert!((voice.modulation[i] - reference[i]).abs() < if interval == 7 { 0.0035 } else { 0.0006 });
+                    assert!((voice.modulation[i] - previous[i]).abs() <= 1.0 / 240.0 + 0.00001);
+                    assert!(voice.modulation[i] >= previous[i].min(target[i]) - 0.00001);
+                    assert!(voice.modulation[i] <= previous[i].max(target[i]) + 0.00001);
+                }
+            }
+            voice.set_modulation([1.0, 1.0, 0.0]);
+            for _ in 0..8000 { if voice.modulation_active { voice.advance_modulation(); } }
+            assert_eq!(voice.modulation, [1.0, 1.0, 0.0]);
+            assert!(!voice.modulation_active);
+        }
+    }
+
+    #[test]
+    fn pitch_modulation_does_not_invalidate_unmodulated_phase_steps() {
+        for sr in [22050.0, 44100.0, 48000.0, 96000.0] {
+            for unison in [1, 3, 7] {
+                let mut synth = Synth::new();
+                synth.set_voices(1);
+                synth.unison(0, unison, 7.0);
+                synth.note_on(0, 60, 0.5, 0);
+                synth.tick(sr);
+                let steps = synth.voices[0].phase_step;
+                synth.modulate(0, 1.0, 0.78, 0.0);
+                let mut phase_error = 0.0f64;
+                for _ in 0..4000 {
+                    let old_phase = synth.voices[0].phase;
+                    synth.tick(sr);
+                    let voice = &synth.voices[0];
+                    assert_eq!(voice.phase_step, steps);
+                    for u in 0..unison as usize {
+                        let expected = old_phase[u][0] + steps[u][0] * voice.modulation[1];
+                        let expected = expected - libm::floorf(expected);
+                        phase_error += (expected - voice.phase[u][0]).abs() as f64;
+                    }
+                }
+                assert!(phase_error < 0.0001);
+            }
+        }
     }
 }
