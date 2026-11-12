@@ -40,10 +40,24 @@ pub fn phase_sin(phase: f32) -> f32 {
     if quadrant & 2 == 0 { value } else { -value }
 }
 
+mod sine_lut;
+
+/// Linearly interpolated sine for oscillator phases in [0, 1].
+#[inline]
+pub fn phase_sin_lut(phase: f32) -> f32 {
+    let scaled = phase * 256.0;
+    let index = scaled as usize;
+    let fraction = scaled - index as f32;
+    // Phase 1 is the same endpoint as phase 0; the last entry closes the cycle.
+    let index = index & 255;
+    let first = sine_lut::TABLE[index];
+    first + (sine_lut::TABLE[index + 1] - first) * fraction
+}
+
 #[inline]
 pub(crate) fn oscillator_sin(phase: f32) -> f32 {
     #[cfg(all(target_os = "none", target_pointer_width = "32"))]
-    { phase_sin(phase) }
+    { phase_sin_lut(phase) }
     #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
     { sin(phase * core::f32::consts::TAU) }
 }
