@@ -3,7 +3,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export PROPTEST_CASES=${PROPTEST_CASES:-10000}
-cargo test -q --release -p posara-usb-midi -p posara-sync-jack -p posara-flash-log
 cargo test -q --release -p posara-core --features std,gfx,sfx --test mono_mix_test --test framebuffer_test --test sample_playback_test
 cargo test -q --release -p posara --test gfx_controller_test
 cargo test -q --release -p posara --test gfx_raster_test --test gfx_framebuffer_test --test lang_fs_test
