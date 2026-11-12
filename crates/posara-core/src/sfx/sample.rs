@@ -42,13 +42,21 @@ pub struct SamplePlayer<P: Pos = Fixed> {
     cached_sr: f32,
     step: f32,
     alpha: f32,
+    pcm: bool,
+    pcm_phase: u64,
+    pcm_step: u64,
 }
 
 impl<P: Pos> SamplePlayer<P> {
     pub fn play(&mut self, bytes: Vec<u8>, rate: f32, vol: f32) -> Vec<u8> {
-        self.total_bits = bytes.len().saturating_mul(8);
+        self.pcm=bytes.starts_with(b"PSM1");
+        let clip=super::pcm::Clip::parse(&bytes);
+        let frames=clip.map_or(0,|c|c.frames);
+        let source_rate=clip.map_or(0,|c|c.rate);
+        self.total_bits=if self.pcm {frames}else{bytes.len().saturating_mul(8)};
+        self.pcm_phase=0;
         let old = core::mem::replace(&mut self.bytes, bytes);
-        self.rate = rate.max(1.0);
+        self.rate = if self.pcm && rate<=0.0 {source_rate as f32}else{rate.max(1.0)};
         self.vol = vol.clamp(0.0, 1.0);
         self.pos = P::default();
         self.lp = 0.0;
@@ -64,6 +72,15 @@ impl<P: Pos> SamplePlayer<P> {
     pub fn tick(&mut self, sr: f32) -> f32 {
         if !self.playing {
             return 0.0;
+        }
+        if self.pcm {
+            if self.cached_sr!=sr {self.cached_sr=sr;self.pcm_step=(self.rate as f64/sr as f64*4294967296.0) as u64;}
+            let i=(self.pcm_phase>>32) as usize;
+            if i>=self.total_bits {self.playing=false;return 0.0;}
+            let sample=|n:usize| {let p=12+n*2;i16::from_le_bytes([self.bytes[p],self.bytes[p+1]]) as f32/32768.0};
+            let a=sample(i);let b=sample((i+1).min(self.total_bits-1));
+            let t=self.pcm_phase as u32 as f32*(1.0/4294967296.0);
+            self.pcm_phase+=self.pcm_step;return (a+(b-a)*t)*self.vol;
         }
         let bi = self.pos.bit();
         if bi >= self.total_bits {

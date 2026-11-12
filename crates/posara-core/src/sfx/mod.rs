@@ -19,3 +19,5 @@ pub mod profiling;
 
 pub use meter::{AudioMeter, AudioSnapshot, Meter};
 pub use mixer::Mixer;
+
+pub mod pcm;

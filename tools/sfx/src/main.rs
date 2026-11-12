@@ -5,11 +5,13 @@
 use std::process::ExitCode;
 
 mod sample;
+mod pcm;
 mod track;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: posara-sfx <sample|track> ...");
+    eprintln!("usage: posara-sfx <sample|pcm|track> ...");
     eprintln!("  sample   mp3 -> 1-bit delta-sigma .sample (run with -h for opts)");
+    eprintln!("  pcm      WAV/MP3 -> mono 16-bit PSM1 .pcm");
     eprintln!("  track    midi -> .trk packed events");
     ExitCode::from(2)
 }
@@ -17,6 +19,7 @@ fn usage() -> ExitCode {
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
+        Some("pcm") => pcm::run(args.collect()),
         Some("sample") => sample::run(args.collect()),
         Some("track") => track::run(args.collect()),
         _ => usage(),

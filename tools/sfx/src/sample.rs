@@ -86,11 +86,11 @@ fn resample(input: &[f32], src: u32, dst: u32) -> Vec<f32> {
     out
 }
 
-fn decode_mono(path: &PathBuf) -> Result<(Vec<f32>, u32), String> {
+pub(super) fn decode_mono(path: &PathBuf) -> Result<(Vec<f32>, u32), String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
-    hint.with_extension("mp3");
+    if let Some(ext)=path.extension().and_then(|s|s.to_str()) {hint.with_extension(ext);}
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
         .map_err(|e| e.to_string())?;
@@ -106,12 +106,13 @@ fn decode_mono(path: &PathBuf) -> Result<(Vec<f32>, u32), String> {
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
-            Err(_) => break,
+            Err(symphonia::core::errors::Error::IoError(e)) if e.kind()==std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e.to_string()),
         };
         if packet.track_id() != track_id { continue; }
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            Err(_) => continue,
+            Err(e) => return Err(e.to_string()),
         };
         let spec = *decoded.spec();
         sr = spec.rate;
