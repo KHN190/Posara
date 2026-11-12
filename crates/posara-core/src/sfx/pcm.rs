@@ -24,6 +24,7 @@ impl<'a> Clip<'a> {
             frames,
         })
     }
+    #[inline(always)]
     pub fn sample(self, index: usize) -> f32 {
         if index >= self.frames {
             return 0.0;
@@ -46,12 +47,15 @@ impl<'a> Player<'a> {
         self.phase = 0;
         self.gain = gain.clamp(0.0, 1.0);
     }
+    #[inline]
     pub fn stop(&mut self) {
         self.clip = None;
     }
+    #[inline]
     pub fn active(&self) -> bool {
         self.clip.is_some()
     }
+    #[inline(always)]
     pub fn tick(&mut self) -> f32 {
         let Some(clip) = self.clip else {
             return 0.0;

@@ -6,10 +6,11 @@ use std::process::ExitCode;
 
 mod bitpack;
 mod font;
+mod icon;
 mod sprite;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: posara-gfx <sprite|font> ...");
+    eprintln!("usage: posara-gfx <sprite|font|icon> ...");
     eprintln!("  sprite   image -> .spr (run with -h for opts)");
     eprintln!("  font     ttf/otf -> .fnt");
     ExitCode::from(2)
@@ -20,6 +21,7 @@ fn main() -> ExitCode {
     match args.next().as_deref() {
         Some("sprite") => sprite::run(args.collect()),
         Some("font") => font::run(args.collect()),
+ Some("icon") => icon::run(args.collect()),
         _ => usage(),
     }
 }
