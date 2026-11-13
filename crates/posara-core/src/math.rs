@@ -19,9 +19,9 @@ pub(crate) fn unit_euclid(x: f32) -> f32 {
 
 // Host audio has bit-exact recorded output; the bare-metal backend uses f32-only math.
 pub fn sin(x: f32) -> f32 {
-    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
     { myriad::word32::fmath::sin(x) }
-    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
     { libm::sinf(x) }
 }
 /// Sine of an oscillator phase in [0, 1]. The phase already carries the quadrant,
@@ -56,16 +56,16 @@ pub fn phase_sin_lut(phase: f32) -> f32 {
 
 #[inline]
 pub(crate) fn oscillator_sin(phase: f32) -> f32 {
-    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
     { phase_sin_lut(phase) }
-    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
     { sin(phase * core::f32::consts::TAU) }
 }
 
 pub fn cos(x: f32) -> f32 {
-    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
     { myriad::word32::fmath::cos(x) }
-    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
     { libm::cosf(x) }
 }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
@@ -74,15 +74,15 @@ pub fn exp(x: f32) -> f32 { libm::expf(x) }
 pub fn tanh(x: f32) -> f32 { libm::tanhf(x) }
 #[cfg(any(feature = "gfx", feature = "sfx"))]
 pub fn powf(x: f32, n: f32) -> f32 {
-    #[cfg(all(target_os = "none", target_pointer_width = "32"))]
+    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
     { pow32::powf(x, n) }
-    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
     { libm::powf(x, n) }
 }
-#[cfg(all(target_os = "none", target_pointer_width = "32"))]
+#[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
 mod pow32;
 
-#[cfg(all(test, not(all(target_os = "none", target_pointer_width = "32"))))]
+#[cfg(all(test, not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))))]
 mod host_math_tests {
     use super::*;
 
