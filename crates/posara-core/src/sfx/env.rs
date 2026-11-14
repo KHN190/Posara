@@ -51,26 +51,35 @@ impl Adsr {
     }
 
     #[inline]
-    fn progress(&self, inverse: f32) -> f32 {
-        if self.t == 0.0 { 0.0 } else { (self.t * inverse).min(1.0) }
+    fn progress(&self, duration: f32, inverse: f32) -> f32 {
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        {
+            let _ = duration;
+            if self.t == 0.0 { 0.0 } else { (self.t * inverse).min(1.0) }
+        }
+        #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+        {
+            let _ = inverse;
+            (self.t / duration).min(1.0)
+        }
     }
 
     pub fn tick(&mut self, dt: f32) -> f32 {
         match self.stage {
             Stage::Idle => self.level = 0.0,
             Stage::Attack => {
-                self.level = if self.atk <= 0.0 { 1.0 } else { self.progress(self.inverse[0]) };
+                self.level = if self.atk <= 0.0 { 1.0 } else { self.progress(self.atk, self.inverse[0]) };
                 self.t += dt;
                 if self.t >= self.atk { self.stage = Stage::Decay; self.t = 0.0; }
             }
             Stage::Decay => {
-                self.level = if self.dec <= 0.0 { self.sus } else { 1.0 - (1.0 - self.sus) * self.progress(self.inverse[1]) };
+                self.level = if self.dec <= 0.0 { self.sus } else { 1.0 - (1.0 - self.sus) * self.progress(self.dec, self.inverse[1]) };
                 self.t += dt;
                 if self.t >= self.dec { self.stage = Stage::Sustain; }
             }
             Stage::Sustain => self.level = self.sus,
             Stage::Release => {
-                self.level = if self.rel <= 0.0 { 0.0 } else { self.rel_from * (1.0 - self.progress(self.inverse[2])) };
+                self.level = if self.rel <= 0.0 { 0.0 } else { self.rel_from * (1.0 - self.progress(self.rel, self.inverse[2])) };
                 self.t += dt;
                 if self.t >= self.rel { self.stage = Stage::Idle; self.level = 0.0; }
             }
