@@ -10,7 +10,7 @@ pub(crate) fn unit_remainder(x: f32) -> f32 {
     (positive - (positive as u32) as f32).copysign(x)
 }
 
-#[cfg(any(feature = "synth", test))]
+#[cfg(any(test, all(feature = "synth", not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))))]
 #[inline]
 pub(crate) fn unit_euclid(x: f32) -> f32 {
     let remainder = unit_remainder(x);
@@ -23,21 +23,6 @@ pub fn sin(x: f32) -> f32 {
     { myriad::word32::fmath::sin(x) }
     #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
     { libm::sinf(x) }
-}
-/// Sine of an oscillator phase in [0, 1]. The phase already carries the quadrant,
-/// so no general radian argument reduction or library call is needed.
-#[inline]
-pub fn phase_sin(phase: f32) -> f32 {
-    let quadrant = (phase * 4.0 + 0.5) as u32;
-    let x = (phase - quadrant as f32 * 0.25) * core::f32::consts::TAU;
-    let z = x * x;
-    // On [-pi/4, pi/4], peak error is below 4e-6 (0.14 of a 16-bit PCM step).
-    let value = if quadrant & 1 == 0 {
-        x * (1.0 + z * (-1.0 / 6.0 + z * (1.0 / 120.0 - z / 5040.0)))
-    } else {
-        1.0 + z * (-0.5 + z * (1.0 / 24.0 - z / 720.0))
-    };
-    if quadrant & 2 == 0 { value } else { -value }
 }
 
 mod sine_lut;
@@ -78,6 +63,21 @@ pub fn powf(x: f32, n: f32) -> f32 {
     { pow32::powf(x, n) }
     #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
     { libm::powf(x, n) }
+}
+#[cfg(any(feature = "sfx", test))]
+#[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
+#[cfg_attr(all(target_arch = "arm", target_os = "none"), inline(never))]
+pub(crate) fn fast_exp2(x: f32) -> f32 {
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    {
+        let xc = x.clamp(-126.0, 126.0);
+        let k = if xc >= 0.0 { xc as i32 } else { (xc as i32) - i32::from(xc != (xc as i32) as f32) };
+        let r = xc - k as f32;
+        let poly = 1.0 + r * (0.6931472 + r * (0.2402265 + r * (0.05550411 + r * 0.009618129)));
+        f32::from_bits(((k + 127) as u32) << 23) * poly
+    }
+    #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+    { powf(2.0f32, x) }
 }
 #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
 mod pow32;

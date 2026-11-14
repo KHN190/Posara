@@ -1,4 +1,4 @@
-#[cfg(not(feature = "std"))]
+#[cfg(not(any(feature = "std", test)))]
 use crate::math::F32Ext;
 use crate::math;
 
@@ -78,7 +78,7 @@ impl Fx {
             }
             FX_RING => {
                 self.ring_phase = math::unit_remainder(self.ring_phase + self.param.max(0.0) / sr);
-                let m = math::sin(self.ring_phase * core::f32::consts::TAU);
+                let m = math::oscillator_sin(self.ring_phase);
                 x * (1.0 - self.amt + self.amt * m)
             }
             _ => x,

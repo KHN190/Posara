@@ -67,7 +67,7 @@ impl Voice {
         self.phase = math::unit_remainder(self.phase + freq / sr);
         let p = self.phase;
         match self.wave {
-            WAVE_SINE => math::sin(p * core::f32::consts::TAU),
+            WAVE_SINE => math::oscillator_sin(p),
             WAVE_TRIANGLE => if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p },
             WAVE_SAW => 2.0 * p - 1.0,
             _ => if p < 0.5 { 1.0 } else { -1.0 },
@@ -80,7 +80,7 @@ impl Voice {
         if self.gate_samples > 0 { self.gate_samples -= 1; }
 
         let m = if self.lfo.enabled() { self.lfo.tick(sr) } else { 0.0 };
-        let freq = if self.lfo.target == LFO_PITCH { self.freq * math::powf(2.0f32, m) } else { self.freq };
+        let freq = if self.lfo.target == LFO_PITCH { self.freq * math::fast_exp2(m) } else { self.freq };
         let mut s = self.osc(freq, sr);
 
         let amp = self.env.tick(1.0 / sr) * self.vel;
@@ -89,7 +89,7 @@ impl Voice {
 
         if self.lfo.target == LFO_CUTOFF && self.fx.kind != 0 {
             let base = self.fx.param;
-            self.fx.param = base * math::powf(2.0f32, m * 2.0);
+            self.fx.param = base * math::fast_exp2(m * 2.0);
             s = self.fx.process(s, sr);
             self.fx.param = base;
         } else {

@@ -30,7 +30,7 @@ impl Lfo {
             1 => if p < 0.5 { 4.0 * p - 1.0 } else { 3.0 - 4.0 * p },
             2 => 2.0 * p - 1.0,
             3 => if p < 0.5 { 1.0 } else { -1.0 },
-            _ => math::sin(p * core::f32::consts::TAU),
+            _ => math::oscillator_sin(p),
         };
         s * self.depth
     }
