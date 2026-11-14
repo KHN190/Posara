@@ -69,10 +69,13 @@ impl<P: Pos> SamplePlayer<P> {
         self.playing = false;
     }
 
+    #[inline(always)]
     pub fn tick(&mut self, sr: f32) -> f32 {
-        if !self.playing {
-            return 0.0;
-        }
+        if !self.playing { return 0.0; }
+        self.tick_playing(sr)
+    }
+
+    fn tick_playing(&mut self, sr: f32) -> f32 {
         if self.pcm {
             if self.cached_sr!=sr {self.cached_sr=sr;self.pcm_step=(self.rate as f64/sr as f64*4294967296.0) as u64;}
             let i=(self.pcm_phase>>32) as usize;

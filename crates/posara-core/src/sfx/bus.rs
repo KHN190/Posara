@@ -45,8 +45,13 @@ impl Delay {
         self.mix = mix;
     }
 
+    #[inline(always)]
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         if self.len == 0 || self.mix <= 0.0 { return (l, r); }
+        self.process_enabled(l, r)
+    }
+
+    fn process_enabled(&mut self, l: f32, r: f32) -> (f32, f32) {
         if self.br.is_empty() {
             let w = self.bl[self.idx];
             self.bl[self.idx] = (l + r) * 0.5 + w * self.fb;
