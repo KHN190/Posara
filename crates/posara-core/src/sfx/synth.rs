@@ -495,12 +495,19 @@ impl Synth {
     pub fn note_on(&mut self, pid: usize, note: u8, vel: f32, gate_samples: u32) {
         if pid >= MAX_PATCHES { return; }
         self.serial = self.serial.wrapping_add(1);
-        let ranks = core::array::from_fn::<_, MAX_VOICES, _>(|i| self.voices[i].rank);
-        let active = core::array::from_fn::<_, MAX_VOICES, _>(|i| self.voices[i].active);
+        // Active ranks stay below MAX_VOICES; prefix counts close gaps left by finished voices.
+        let mut ranks = [0u8; MAX_VOICES];
+        for voice in &self.voices {
+            if voice.active { ranks[voice.rank as usize] += 1; }
+        }
+        let mut lower = 0;
+        for rank in &mut ranks {
+            let count = *rank;
+            *rank = lower;
+            lower += count;
+        }
         for voice in &mut self.voices {
-            if voice.active {
-                voice.rank = ranks.iter().zip(active).filter(|(rank, live)| *live && **rank < voice.rank).count() as u32;
-            }
+            if voice.active { voice.rank = ranks[voice.rank as usize] as u32; }
         }
         let slot = self.alloc();
         let replaced = if self.voices[slot].active { self.voices[slot].rank } else { u32::MAX };
@@ -600,6 +607,64 @@ impl Synth {
 #[cfg(test)]
 mod rank_tests {
     use super::*;
+    // Frozen quadratic rank policy is an independent oracle for allocation and rendered output.
+    fn reference_note_on(s: &mut Synth, note: u8) {
+        s.serial = s.serial.wrapping_add(1);
+        let ranks = core::array::from_fn::<_, MAX_VOICES, _>(|i| s.voices[i].rank);
+        let active = core::array::from_fn::<_, MAX_VOICES, _>(|i| s.voices[i].active);
+        for v in &mut s.voices {
+            if v.active { v.rank = ranks.iter().zip(active).filter(|(r, live)| *live && **r < v.rank).count() as u32; }
+        }
+        let slot = s.alloc();
+        let replaced = if s.voices[slot].active { s.voices[slot].rank } else { u32::MAX };
+        for (i, v) in s.voices.iter_mut().enumerate() {
+            if i != slot && v.active && v.rank < replaced { v.rank += 1; }
+        }
+        s.voices[slot].start(&s.patches[0], 0, note, 0.6, 0, s.serial);
+        s.voices[slot].modulation = s.modulation[0];
+        s.voices[slot].set_modulation(s.modulation[0]);
+    }
+
+    #[test]
+    fn rank_compaction_preserves_stealing_completion_pool_changes_and_pcm() {
+        for initial_pool in [1, 2, 8, MAX_VOICES] {
+            for seed in [1u32, 17, 921, u32::MAX] {
+                let mut actual = Synth::new();
+                let mut expected = Synth::new();
+                for s in [&mut actual, &mut expected] {
+                    s.set_voices(initial_pool);
+                    s.serial = u32::MAX - 16;
+                    s.env(0, 0, TGT_AMP, 1.0, 0.001, 0.01, 0.5, 0.01);
+                }
+                let mut rng = seed;
+                for event in 0..1024 {
+                    rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let slot = (rng >> 16) as usize % MAX_VOICES;
+                    match event % 19 {
+                        0 => { let pool = 1 + slot; actual.set_voices(pool); expected.set_voices(pool); }
+                        1 | 2 => { actual.voices[slot].active = false; expected.voices[slot].active = false; }
+                        3 => { actual.note_off(0, 60); expected.note_off(0, 60); }
+                        4 if event % 57 == 4 => { actual.panic(); expected.panic(); }
+                        _ => {
+                            let note = 48 + (rng >> 24) as u8 % 36;
+                            actual.note_on(0, note, 0.6, 0);
+                            reference_note_on(&mut expected, note);
+                        }
+                    }
+                    for (a, b) in actual.voices.iter().zip(expected.voices.iter()) {
+                        assert_eq!((a.active,a.rank,a.note,a.gate),(b.active,b.rank,b.note,b.gate), "pool={initial_pool} seed={seed} event={event}");
+                        if a.active { assert!(a.rank < MAX_VOICES as u32); }
+                    }
+                    for _ in 0..8 {
+                        let a = actual.tick(48000.0);
+                        let b = expected.tick(48000.0);
+                        assert_eq!((a.0.to_bits(), a.1.to_bits()),(b.0.to_bits(), b.1.to_bits()));
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn voice_pool_does_not_travel_on_the_startup_stack() {
         assert!(core::mem::size_of::<Synth>() < 8192);
