@@ -21,13 +21,21 @@ const TGT_PITCH: u8 = 2;
 #[derive(Clone, Copy)]
 struct OscCfg {
     wave: u8,
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    timbre: u8,
     mult: f32,
     level: f32,
 }
 
 impl Default for OscCfg {
     fn default() -> Self {
-        Self { wave: 3, mult: 1.0, level: 0.0 }
+        Self {
+            wave: 3,
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            timbre: 0,
+            mult: 1.0,
+            level: 0.0,
+        }
     }
 }
 
@@ -55,6 +63,8 @@ struct Patch {
     fx_amt: f32,
     fx_param: f32,
     pan: f32,   // -1 left .. 0 centre .. 1 right
+    pan_l: f32,
+    pan_r: f32,
 }
 
 impl Default for Patch {
@@ -79,6 +89,8 @@ impl Default for Patch {
             fx_amt: 0.0,
             fx_param: 0.0,
             pan: 0.0,
+            pan_l: core::f32::consts::FRAC_1_SQRT_2,
+            pan_r: core::f32::consts::FRAC_1_SQRT_2,
         }
     }
 }
@@ -87,7 +99,9 @@ impl Default for Patch {
 struct Voice {
     modulation: [f32; 3],
     modulation_target: [f32; 3],
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     modulation_delta: [f32; 3],
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     modulation_left: u8,
     modulation_active: bool,
     cfg: Patch,
@@ -118,7 +132,6 @@ struct Voice {
     cached_filter_sr: f32,
     cached_f: f32,
     cached_damp: f32,
-    cached_pan: f32,
     pan_l: f32,
     pan_r: f32,
 }
@@ -128,7 +141,9 @@ impl Default for Voice {
         Self {
             modulation: [1.0, 1.0, 0.0],
             modulation_target: [1.0, 1.0, 0.0],
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
             modulation_delta: [0.0; 3],
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
             modulation_left: 0,
             modulation_active: false,
             cfg: Patch::default(),
@@ -159,7 +174,6 @@ impl Default for Voice {
             cached_filter_sr: 0.0,
             cached_f: 0.0,
             cached_damp: 0.0,
-            cached_pan: f32::NAN,
             pan_l: 0.0,
             pan_r: 0.0,
         }
@@ -167,6 +181,9 @@ impl Default for Voice {
 }
 
 pub const WAVE_FM: u8 = 5;
+#[cfg(any(test, feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+#[path = "synth_tables.rs"]
+mod synth_tables;
 
 fn wave_sample(wave: u8, phase: f32, lfsr: &mut u32) -> f32 {
     if wave == 4 {
@@ -212,10 +229,15 @@ impl Voice {
         self.fx.set(p.fx_kind, p.fx_amt, p.fx_param);
         let c = (p.unison.max(1) as usize).min(MAX_UNISON);
         self.ucount = c;
-        for u in 0..c {
-            let spread = if c == 1 { 0.0 } else { (u as f32 / (c as f32 - 1.0)) * 2.0 - 1.0 };
-            self.uratio[u] = math::powf(2.0f32, spread * p.detune / 1200.0);
-            self.phase[u] = [(u as f32 * 0.137) % 1.0, (u as f32 * 0.331) % 1.0];
+        if c == 1 {
+            self.uratio[0] = 1.0;
+            self.phase[0] = [0.0, 0.0];
+        } else {
+            for u in 0..c {
+                let spread = (u as f32 / (c as f32 - 1.0)) * 2.0 - 1.0;
+                self.uratio[u] = math::powf(2.0f32, spread * p.detune / 1200.0);
+                self.phase[u] = [(u as f32 * 0.137) % 1.0, (u as f32 * 0.331) % 1.0];
+            }
         }
         self.lfsr = 0x1234abcd ^ note as u32 ^ seed.wrapping_mul(2654435761);
         self.flp = 0.0;
@@ -225,9 +247,8 @@ impl Voice {
         self.cached_filter_sr = 0.0;
         self.cached_f = 0.0;
         self.cached_damp = 0.0;
-        self.cached_pan = f32::NAN;
-        self.pan_l = 0.0;
-        self.pan_r = 0.0;
+        self.pan_l = p.pan_l;
+        self.pan_r = p.pan_r;
     }
 
     fn note_off(&mut self) {
@@ -241,7 +262,7 @@ impl Voice {
         if !self.fixed_filter || sr != self.cached_filter_sr {
             let fc = cutoff.clamp(20.0, sr * 0.16);
             if fc != self.cached_fc || reso != self.cached_reso || sr != self.cached_filter_sr {
-                self.cached_f = 2.0 * math::sin(core::f32::consts::PI * fc / sr);
+                self.cached_f = 2.0 * math::oscillator_sin(0.5 * fc / sr);
                 self.cached_damp = (1.0 - (reso / 100.0) * 0.9).clamp(0.1, 1.0);
                 self.cached_fc = fc;
                 self.cached_reso = reso;
@@ -263,31 +284,55 @@ impl Voice {
 
     fn set_modulation(&mut self, target: [f32; 3]) {
         self.modulation_target = target;
-        self.modulation_left = 0;
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        { self.modulation_left = 0; }
         self.modulation_active = self.modulation != target;
     }
 
     fn advance_modulation(&mut self) {
-        if self.modulation_left == 0 {
+        #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+        {
             self.modulation_active = false;
             for i in 0..3 {
-                let difference = self.modulation_target[i] - self.modulation[i];
-                if difference.abs() < 0.00001 {
-                    self.modulation[i] = self.modulation_target[i];
-                    self.modulation_delta[i] = 0.0;
-                } else {
-                    // Sixteen-sample chords approximate the original 1/240 exponential.
-                    self.modulation_delta[i] = difference * ((1.0 - 0.9353767) / 16.0);
-                    self.modulation_active = true;
+                let target = self.modulation_target[i];
+                if self.modulation[i] != target {
+                    self.modulation[i] += (target - self.modulation[i]) * (1.0 / 240.0);
+                    if (self.modulation[i] - target).abs() < 0.00001 {
+                        self.modulation[i] = target;
+                    } else {
+                        self.modulation_active = true;
+                    }
                 }
             }
-            self.modulation_left = 16;
+            return;
         }
-        for i in 0..3 { self.modulation[i] += self.modulation_delta[i]; }
-        self.modulation_left -= 1;
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        {
+            if self.modulation_left == 0 {
+                self.modulation_active = false;
+                for i in 0..3 {
+                    let difference = self.modulation_target[i] - self.modulation[i];
+                    if difference.abs() < 0.00001 {
+                        self.modulation[i] = self.modulation_target[i];
+                        self.modulation_delta[i] = 0.0;
+                    } else {
+                        self.modulation_delta[i] = difference * ((1.0 - 0.9353767) / 16.0);
+                        self.modulation_active = true;
+                    }
+                }
+                self.modulation_left = 16;
+            }
+            for i in 0..3 { self.modulation[i] += self.modulation_delta[i]; }
+            self.modulation_left -= 1;
+        }
     }
 
-    fn tick(&mut self, sr: f32) -> f32 {
+    fn tick(
+        &mut self,
+        sr: f32,
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        fm_table: &[i16; 1025],
+    ) -> f32 {
         if !self.active { return 0.0; }
         if self.modulation_active { self.advance_modulation(); }
         if self.gate_samples == 1 { self.note_off(); }
@@ -315,16 +360,22 @@ impl Voice {
         if !have_amp { amp = 1.0; }
         if !any && !self.gate { self.active = false; return 0.0; }
 
-        let m = if self.lfo.enabled() { self.lfo.tick(sr) } else { 0.0 };
         let (mut p_mul, mut cut_mul, mut amp_lfo) = (1.0f32, 1.0f32, 1.0f32);
-        match self.lfo.target {
-            TGT_AMP => amp_lfo = (1.0 + m).max(0.0),
-            TGT_CUTOFF => cut_mul = math::powf(2.0f32, m * 2.0),
-            TGT_PITCH => p_mul = math::powf(2.0f32, m),
-            _ => {}
+        if self.lfo.enabled() {
+            let m = self.lfo.tick(sr);
+            match self.lfo.target {
+                TGT_AMP => amp_lfo = (1.0 + m).max(0.0),
+                TGT_CUTOFF => cut_mul = math::fast_exp2(m * 2.0),
+                TGT_PITCH => p_mul = math::fast_exp2(m),
+                _ => {}
+            }
         }
 
-        let freq = self.base_freq * (if pitch_semi != 0.0 { math::powf(2.0f32, pitch_semi / 12.0) } else { 1.0 }) * p_mul;
+        let freq = if pitch_semi == 0.0 && p_mul == 1.0 {
+            self.base_freq
+        } else {
+            self.base_freq * (if pitch_semi != 0.0 { math::fast_exp2(pitch_semi / 12.0) } else { 1.0 }) * p_mul
+        };
         let mut s = 0.0f32;
         let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
         let fm = modu.wave == WAVE_FM && modu.level > 0.0;
@@ -343,13 +394,24 @@ impl Voice {
                 step[1] *= self.modulation[1];
             }
             if fm {
-                self.phase[u][1] = math::unit_remainder(self.phase[u][1] + step[1]);
-                self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
-                if car.level > 0.0 {
-                    let pm = math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI;
-                    s += wave_sample(car.wave, math::unit_euclid(self.phase[u][0] + pm), &mut self.lfsr) * car.level;
+                #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                {
+                    self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
+                    if car.level > 0.0 {
+                        s += synth_tables::sample(fm_table, self.phase[u][0]) * car.level;
+                    }
+                    continue;
                 }
-                continue;
+                #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+                {
+                    self.phase[u][1] = math::unit_remainder(self.phase[u][1] + step[1]);
+                    self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
+                    if car.level > 0.0 {
+                        let pm = math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI;
+                        s += wave_sample(car.wave, math::unit_euclid(self.phase[u][0] + pm), &mut self.lfsr) * car.level;
+                    }
+                    continue;
+                }
             }
             for o in 0..2 {
                 let oc = self.cfg.osc[o];
@@ -371,7 +433,7 @@ impl Voice {
         } else if cut_oct == 0.0 && cut_mul == 1.0 {
             self.cfg.cutoff
         } else {
-            self.cfg.cutoff * math::powf(2.0f32, cut_oct) * cut_mul
+            self.cfg.cutoff * math::fast_exp2(cut_oct) * cut_mul
         };
         #[cfg(feature = "audio-profile")]
         super::profiling::mark(super::profiling::Stage::SynthFilter);
@@ -393,6 +455,10 @@ pub struct Synth {
     modulation: [[f32; 3]; MAX_PATCHES],
     patches: [Patch; MAX_PATCHES],
     voices: Box<[Voice]>,
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    fm_table: Box<[i16; 1025]>,
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    fm_timbre: u8,
     pool: usize,
     serial: u32,
     pid_peak: [f32; 4],
@@ -404,6 +470,10 @@ impl Synth {
             modulation: [[1.0, 1.0, 0.0]; MAX_PATCHES],
             patches: [Patch::default(); MAX_PATCHES],
             voices: vec![Voice::default(); MAX_VOICES].into_boxed_slice(),
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            fm_table: Box::new(synth_tables::TABLES[0]),
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            fm_timbre: 0,
             pool: 8,
             serial: 0,
             pid_peak: [0.0; 4],
@@ -415,14 +485,23 @@ impl Synth {
     }
 
     pub fn osc(&mut self, pid: usize, idx: usize, wave: u8, semi: i32, fine: f32, level: f32) {
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        let timbre = ((level * 100.0 - 10.0) * 0.125 + 0.5).clamp(0.0, 10.0) as u8;
         if let Some(p) = self.patch(pid) {
             if idx < 2 {
                 p.osc[idx] = OscCfg {
                     wave,
+                    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                    timbre,
                     mult: math::powf(2.0f32, (semi as f32 + fine / 100.0) / 12.0),
                     level,
                 };
             }
+        }
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        if wave == WAVE_FM && timbre != self.fm_timbre {
+            *self.fm_table = synth_tables::TABLES[timbre as usize];
+            self.fm_timbre = timbre;
         }
     }
 
@@ -451,6 +530,14 @@ impl Synth {
     pub fn pan(&mut self, pid: usize, pos: f32) {
         if let Some(p) = self.patch(pid) {
             p.pan = pos;
+            if pos == 0.0 {
+                p.pan_l = core::f32::consts::FRAC_1_SQRT_2;
+                p.pan_r = core::f32::consts::FRAC_1_SQRT_2;
+            } else {
+                let a = (pos + 1.0) * core::f32::consts::FRAC_PI_4;
+                p.pan_l = math::cos(a);
+                p.pan_r = math::sin(a);
+            }
         }
     }
 
@@ -570,22 +657,19 @@ impl Synth {
                 super::profiling::mark(super::profiling::Stage::SynthVoice);
             }
             let pid = voice.pid;
-            let s = voice.tick(sr);
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            if voice.cfg.osc[1].wave == WAVE_FM && voice.cfg.osc[1].timbre != self.fm_timbre {
+                self.fm_timbre = voice.cfg.osc[1].timbre;
+                *self.fm_table = synth_tables::TABLES[self.fm_timbre as usize];
+            }
+            let s = voice.tick(
+                sr,
+                #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                &self.fm_table,
+            );
             // equal-power pan from the voice's patch.
             #[cfg(feature = "audio-profile")]
             super::profiling::mark(super::profiling::Stage::SynthPan);
-            let pan = voice.cfg.pan;
-            if pan != voice.cached_pan {
-                let a = (pan + 1.0) * core::f32::consts::FRAC_PI_4;
-                if pan == 0.0 {
-                    voice.pan_l = core::f32::consts::FRAC_1_SQRT_2;
-                    voice.pan_r = voice.pan_l;
-                } else {
-                    voice.pan_l = math::cos(a);
-                    voice.pan_r = math::sin(a);
-                }
-                voice.cached_pan = pan;
-            }
             tl += s * voice.pan_l;
             tr += s * voice.pan_r;
             if pid < 4 { psum[pid] += s; }
@@ -801,10 +885,33 @@ mod filter_prepare_tests {
                         }
                         if n == 1800 || n == 4500 { candidate.note_off(); original.note_off(); }
                         let sr = [48000.0, 22050.0, 96000.0][(n / 700) % 3];
-                        assert_eq!(candidate.tick(sr).to_bits(), original.tick(sr).to_bits(), "kind={kind} mode={mode} cutoff={cutoff} n={n}");
+                        let a = candidate.tick(
+                            sr,
+                            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                            &synth_tables::TABLES[0],
+                        );
+                        let b = original.tick(
+                            sr,
+                            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                            &synth_tables::TABLES[0],
+                        );
+                        assert_eq!(a.to_bits(), b.to_bits(), "kind={kind} mode={mode} cutoff={cutoff} n={n}");
                         assert_eq!(candidate.active, original.active);
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn fm_wavetable_matches_device_oscillator_across_all_timbres_and_phases() {
+        for t in 0..=10 {
+            let level = (10 + 8 * t) as f32 / 100.0;
+            for i in 0..4096 {
+                let p0 = i as f32 / 4096.0;
+                let pm = math::phase_sin_lut(math::unit_remainder(p0 * 2.0)) * level * core::f32::consts::FRAC_1_PI;
+                let expected = math::phase_sin_lut(math::unit_euclid(p0 + pm));
+                assert!((synth_tables::sample(&synth_tables::TABLES[t], p0) - expected).abs() < 6e-4, "t={t} i={i}");
             }
         }
     }
