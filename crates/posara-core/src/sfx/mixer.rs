@@ -9,7 +9,7 @@ use crate::sfx::seq::{note_to_freq, Event, Sequencer};
 use crate::sfx::voice::{Voice, WAVE_NOISE, WAVE_SQUARE};
 
 #[inline]
-#[cfg(any(test, any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
+#[cfg(any(test, any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
 fn approximate_limit_sample(x: f32) -> f32 {
     if x.abs() > 1.0 || !x.is_finite() { return math::tanh(x); }
     let z = x * x;
@@ -19,9 +19,9 @@ fn approximate_limit_sample(x: f32) -> f32 {
 
 #[inline]
 fn limit_sample(x: f32) -> f32 {
-    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     { approximate_limit_sample(x) }
-    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
+    #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
     { math::tanh(x) }
 }
 

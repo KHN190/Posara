@@ -87,14 +87,14 @@ impl Sequencer {
     }
 }
 
-#[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
+#[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
 mod note_frequencies;
 
 #[inline]
 pub fn note_to_freq(note: u8) -> f32 {
-    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     { note_frequencies::TABLE[note as usize] }
-    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
+    #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
     { 440.0 * crate::math::powf(2.0f32, (note as f32 - 69.0) / 12.0) }
 }
 
