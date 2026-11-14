@@ -259,16 +259,24 @@ impl Mixer {
         }
     }
 
+    pub fn mix(&mut self, out: &mut [f32]) { self.mix_outputs(out,None); }
+
+    /// Render the same voice timeline once, with a linear tap before master saturation.
+    pub fn mix_with_linear(&mut self, out: &mut [f32], linear: &mut [f32]) {
+        assert_eq!(out.len(),linear.len());
+        self.mix_outputs(out,Some(linear));
+    }
+
     #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
     #[cfg_attr(all(target_arch = "arm", target_os = "none"), inline(never))]
-    pub fn mix(&mut self, out: &mut [f32]) {
+    fn mix_outputs(&mut self, out: &mut [f32], mut linear: Option<&mut [f32]>) {
         let nc = self.out_channels.max(1);
         let sr = self.sample_rate as f32;
         let mut out_peak = 0.0f32;
         let mut ch_peak = [0.0f32; 4];
         #[cfg(feature = "audio-profile")]
         let mut limit_cycles = 0u32;
-        for frame in out.chunks_mut(nc) {
+        for (index,frame) in out.chunks_mut(nc).enumerate() {
             #[cfg(feature = "audio-profile")]
             super::profiling::mark(super::profiling::Stage::Sequence);
             self.advance_seq();
@@ -298,6 +306,11 @@ impl Mixer {
             l = dl; r = dr;
             let rv = self.reverb.as_mut().map_or(0.0, |reverb| reverb.process((l + r) * 0.5));
             l += rv; r += rv;
+            if let Some(linear)=linear.as_deref_mut() {
+                let frame=&mut linear[index*nc..(index+1)*nc];
+                if nc==1 {frame[0]=(l+r)*0.4;}
+                else {frame[0]=l*0.8;frame[1]=r*0.8;for v in &mut frame[2..]{*v=(l+r)*0.4;}}
+            }
             // default amp without hard-clipping dense chords.
             #[cfg(feature = "audio-profile")]
             let limit_start = super::profiling::cycles();
