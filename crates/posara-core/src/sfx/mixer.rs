@@ -11,7 +11,11 @@ use crate::sfx::voice::{Voice, WAVE_NOISE, WAVE_SQUARE};
 #[inline]
 #[cfg(any(test, any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
 fn approximate_limit_sample(x: f32) -> f32 {
-    if x.abs() > 1.0 || !x.is_finite() { return math::tanh(x); }
+    if !x.is_finite() { return math::tanh(x); }
+    #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+    if x.abs() > 1.0 { return math::tanh(x); }
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    if x.abs() >= 3.0 { return x.signum(); }
     let z = x * x;
     x * (135135.0 + z * (17325.0 + z * (378.0 + z)))
         / (135135.0 + z * (62370.0 + z * (3150.0 + z * 28.0)))
@@ -373,7 +377,7 @@ mod duration_tests {
 mod limiter_tests {
     use super::*;
 
-    #[cfg(not(all(target_os = "none", target_pointer_width = "32")))]
+    #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
     #[test]
     fn host_limiter_preserves_the_recorded_tanh_bits() {
         let mut bits = 0x12345678u32;
