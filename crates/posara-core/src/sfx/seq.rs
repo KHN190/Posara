@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use crate::math;
 
 #[derive(Clone, Copy)]
 pub struct Event {
@@ -88,8 +87,15 @@ impl Sequencer {
     }
 }
 
+#[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
+mod note_frequencies;
+
+#[inline]
 pub fn note_to_freq(note: u8) -> f32 {
-    440.0 * math::powf(2.0f32, (note as f32 - 69.0) / 12.0)
+    #[cfg(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32")))]
+    { note_frequencies::TABLE[note as usize] }
+    #[cfg(not(any(feature = "device-dsp", all(target_os = "none", target_pointer_width = "32"))))]
+    { 440.0 * crate::math::powf(2.0f32, (note as f32 - 69.0) / 12.0) }
 }
 
 pub const EVENT_BYTES: usize = 8;
