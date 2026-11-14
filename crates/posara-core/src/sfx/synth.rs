@@ -112,6 +112,7 @@ struct Voice {
     lfsr: u32,
     flp: f32,
     fbp: f32,
+    fixed_filter: bool,
     cached_fc: f32,
     cached_reso: f32,
     cached_filter_sr: f32,
@@ -152,6 +153,7 @@ impl Default for Voice {
             lfsr: 0x1234abcd,
             flp: 0.0,
             fbp: 0.0,
+            fixed_filter: false,
             cached_fc: 0.0,
             cached_reso: 0.0,
             cached_filter_sr: 0.0,
@@ -202,6 +204,10 @@ impl Voice {
             self.env[i].gate_on();
         }
         self.lfo = p.lfo;
+        // A voice owns a patch snapshot; only cutoff modulation can change its filter.
+        self.fixed_filter = p.fkind != FK_LPG
+            && !p.env.iter().any(|e| e.target == TGT_CUTOFF && e.depth != 0.0)
+            && !(p.lfo.enabled() && p.lfo.target == TGT_CUTOFF);
         self.fx = Fx::default();
         self.fx.set(p.fx_kind, p.fx_amt, p.fx_param);
         let c = (p.unison.max(1) as usize).min(MAX_UNISON);
@@ -232,13 +238,15 @@ impl Voice {
     fn filter(&mut self, x: f32, cutoff: f32, reso: f32, sr: f32) -> f32 {
         // Chamberlin SVF: stable only for fc well below sr/6 — clamp to keep f < 1,
         // else it blows up to inf/NaN (silent output that also dodges the meter).
-        let fc = cutoff.clamp(20.0, sr * 0.16);
-        if fc != self.cached_fc || reso != self.cached_reso || sr != self.cached_filter_sr {
-            self.cached_f = 2.0 * math::sin(core::f32::consts::PI * fc / sr);
-            self.cached_damp = (1.0 - (reso / 100.0) * 0.9).clamp(0.1, 1.0);
-            self.cached_fc = fc;
-            self.cached_reso = reso;
-            self.cached_filter_sr = sr;
+        if !self.fixed_filter || sr != self.cached_filter_sr {
+            let fc = cutoff.clamp(20.0, sr * 0.16);
+            if fc != self.cached_fc || reso != self.cached_reso || sr != self.cached_filter_sr {
+                self.cached_f = 2.0 * math::sin(core::f32::consts::PI * fc / sr);
+                self.cached_damp = (1.0 - (reso / 100.0) * 0.9).clamp(0.1, 1.0);
+                self.cached_fc = fc;
+                self.cached_reso = reso;
+                self.cached_filter_sr = sr;
+            }
         }
         let f = self.cached_f;
         let damp = self.cached_damp;
@@ -761,6 +769,42 @@ mod modulation_ramp_tests {
                     }
                 }
                 assert!(phase_error < 0.0001);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod filter_prepare_tests {
+    use super::*;
+
+    #[test]
+    fn prepared_filter_matches_original_through_modulation_retrigger_and_rate_changes() {
+        for kind in [0, FK_HI, FK_BAND, FK_LPG] {
+            for mode in 0..4 {
+                for cutoff in [20.0, 6400.0, 18000.0] {
+                    let mut patch = Patch::default();
+                    patch.fkind = kind;
+                    patch.cutoff = cutoff;
+                    patch.reso = 70.0;
+                    patch.env[0].rel = 0.025;
+                    if mode == 1 { patch.env[1] = EnvCfg { target: TGT_CUTOFF, depth: 60.0, atk: 0.01, dec: 0.02, sus: 0.4, rel: 0.02 }; }
+                    if mode == 2 { patch.lfo.set(TGT_CUTOFF, 0, 4.0, 0.7); }
+                    if mode == 3 { patch.lfo.set(TGT_PITCH, 0, 4.0, 0.7); }
+                    let mut candidate = Voice::default();
+                    let mut original = Voice::default();
+                    for n in 0..6000 {
+                        if n == 0 || n == 3000 {
+                            candidate.start(&patch, 0, 60, 0.8, 0, 17);
+                            original.start(&patch, 0, 60, 0.8, 0, 17);
+                            original.fixed_filter = false;
+                        }
+                        if n == 1800 || n == 4500 { candidate.note_off(); original.note_off(); }
+                        let sr = [48000.0, 22050.0, 96000.0][(n / 700) % 3];
+                        assert_eq!(candidate.tick(sr).to_bits(), original.tick(sr).to_bits(), "kind={kind} mode={mode} cutoff={cutoff} n={n}");
+                        assert_eq!(candidate.active, original.active);
+                    }
+                }
             }
         }
     }
