@@ -132,7 +132,18 @@ pub trait F32Ext {
 #[cfg(not(feature = "std"))]
 impl F32Ext for f32 {
     fn round(self) -> f32 { libm::roundf(self) }
-    fn sqrt(self) -> f32 { myriad::word32::fmath::sqrt(self) }
+    #[inline]
+    fn sqrt(self) -> f32 {
+        #[cfg(all(target_arch = "arm", target_os = "none", target_abi = "eabihf"))]
+        {
+            let mut bits = self.to_bits();
+            // Explicit S0 clobber works with Rust's baseline hard-float ARM target.
+            unsafe { core::arch::asm!("vmov s0, {bits}", "vsqrt.f32 s0, s0", "vmov {bits}, s0", bits = inout(reg) bits, out("s0") _, options(pure, nomem, nostack)); }
+            f32::from_bits(bits)
+        }
+        #[cfg(not(all(target_arch = "arm", target_os = "none", target_abi = "eabihf")))]
+        { myriad::word32::fmath::sqrt(self) }
+    }
     fn ceil(self) -> f32 { libm::ceilf(self) }
     fn rem_euclid(self, rhs: f32) -> f32 {
         let r = self % rhs;
@@ -171,6 +182,25 @@ mod phase_tests {
         for _ in 0..1_000_000 {
             bits = bits.wrapping_mul(1664525).wrapping_add(1013904223);
             check(f32::from_bits(bits));
+        }
+    }
+}
+
+#[cfg(test)]
+mod sqrt_rounding_tests {
+    extern crate std;
+    #[test]
+    fn ieee_sqrt_preserves_software_results_for_physical_inputs() {
+        let mut bits = 1u32;
+        for _ in 0..1_000_000 {
+            bits = bits.wrapping_mul(1664525).wrapping_add(1013904223);
+            let x = f32::from_bits(bits & 0x7fffffff);
+            if x.is_finite() {
+                assert_eq!(std::primitive::f32::sqrt(x).to_bits(), myriad::word32::fmath::sqrt(x).to_bits(), "{x:?}");
+            }
+        }
+        for x in [0.0f32, -0.0, f32::INFINITY] {
+            assert_eq!(std::primitive::f32::sqrt(x).to_bits(), myriad::word32::fmath::sqrt(x).to_bits());
         }
     }
 }
