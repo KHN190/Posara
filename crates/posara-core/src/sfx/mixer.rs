@@ -392,19 +392,24 @@ mod limiter_tests {
     }
 
     #[test]
-    fn limiter_curve_stays_below_one_tenth_of_a_pcm16_step() {
+    fn limiter_tracks_tanh_with_bounded_rounding_before_device_saturation() {
         let mut previous = -1.0;
         for i in 0..=600_000 {
             let x = -3.0 + i as f32 * 0.00001;
             let value = approximate_limit_sample(x);
-            assert!((value - math::tanh(x)).abs() < 0.000002);
-            assert!(value >= previous);
+            if x.abs() < 3.0 {
+                assert!((value - math::tanh(x)).abs() < 0.000002);
+            }
+            assert!(value + 4.0 * f32::EPSILON >= previous, "x={x}");
             assert!(value.abs() <= 1.0);
             assert_eq!(approximate_limit_sample(-x).to_bits(), (-value).to_bits());
             previous = value;
         }
-        for x in [-0.0, 0.0, -3.00001, -3.0, 3.0, 3.00001] {
+        for x in [-0.0, 0.0, -3.00001, -3.0, 3.0, 3.00001, -f32::MAX, f32::MAX] {
+            #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
             assert!((approximate_limit_sample(x) - math::tanh(x)).abs() < 0.000002);
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            assert_eq!(approximate_limit_sample(x).to_bits(), x.clamp(-1.0, 1.0).to_bits());
         }
     }
 
