@@ -459,6 +459,8 @@ pub struct Synth {
     fm_table: Box<[i16; 1025]>,
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     fm_timbre: u8,
+    #[cfg(all(test, feature = "rp32"))]
+    table_copies: usize,
     pool: usize,
     serial: u32,
     pid_peak: [f32; 4],
@@ -474,6 +476,8 @@ impl Synth {
             fm_table: Box::new(synth_tables::TABLES[0]),
             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
             fm_timbre: 0,
+            #[cfg(all(test, feature = "rp32"))]
+            table_copies: 0,
             pool: 8,
             serial: 0,
             pid_peak: [0.0; 4],
@@ -501,6 +505,8 @@ impl Synth {
         #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
         if wave == WAVE_FM && timbre != self.fm_timbre {
             *self.fm_table = synth_tables::TABLES[timbre as usize];
+            #[cfg(all(test, feature = "rp32"))]
+            { self.table_copies += 1; }
             self.fm_timbre = timbre;
         }
     }
@@ -658,14 +664,16 @@ impl Synth {
             }
             let pid = voice.pid;
             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
-            if voice.cfg.osc[1].wave == WAVE_FM && voice.cfg.osc[1].timbre != self.fm_timbre {
-                self.fm_timbre = voice.cfg.osc[1].timbre;
-                *self.fm_table = synth_tables::TABLES[self.fm_timbre as usize];
-            }
+            let fm_table = if voice.cfg.osc[1].timbre == self.fm_timbre {
+                &*self.fm_table
+            } else {
+                // Old tails retain their timbre without evicting the current RAM table.
+                &synth_tables::TABLES[voice.cfg.osc[1].timbre as usize]
+            };
             let s = voice.tick(
                 sr,
                 #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
-                &self.fm_table,
+                fm_table,
             );
             // equal-power pan from the voice's patch.
             #[cfg(feature = "audio-profile")]
@@ -914,5 +922,34 @@ mod filter_prepare_tests {
                 assert!((synth_tables::sample(&synth_tables::TABLES[t], p0) - expected).abs() < 6e-4, "t={t} i={i}");
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "rp32"))]
+mod fm_overlap_tests {
+    use super::*;
+    fn configure(s: &mut Synth, timbre: u8) {
+        s.osc(0, 0, 3, 0, 0.0, 0.5);
+        s.osc(0, 1, WAVE_FM, 12, 0.0, (10+8*timbre) as f32/100.0);
+    }
+    #[test]
+    fn overlapping_timbres_match_independent_voices_without_render_time_table_copies() {
+        for old in 0..=10 { for new in 0..=10 { for count in [2,4,8] {
+            let mut mixed=Synth::new();
+            let mut isolated=alloc::vec::Vec::new();
+            for i in 0..count {
+                let timbre=if i%2==0 {old}else{new};
+                let note=36+i as u8*3;
+                configure(&mut mixed,timbre);mixed.note_on(0,note,0.5,0);
+                let mut single=Synth::new();configure(&mut single,timbre);single.note_on(0,note,0.5,0);
+                isolated.push(single);
+            }
+            let copies=mixed.table_copies;
+            for _ in 0..192 {
+                let expected=isolated.iter_mut().map(|s|s.tick(48_000.0)).fold((0.0,0.0),|(l,r),(a,b)|(l+a,r+b));
+                assert_eq!(mixed.tick(48_000.0),expected,"old={old} new={new} voices={count}");
+                assert_eq!(mixed.table_copies,copies,"render copied a table: old={old} new={new} voices={count}");
+            }
+        }}}
     }
 }
