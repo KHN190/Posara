@@ -52,6 +52,14 @@ impl<T> Spsc<T> {
         Ok(())
     }
 
+    /// Published prefix length at the consumer's current position.
+    /// Only the consumer may use this as a boundary while producers keep appending.
+    pub fn pending(&self) -> usize {
+        let t = self.tail.load(Ordering::Relaxed);
+        let h = self.head.load(Ordering::Acquire);
+        h.wrapping_sub(t)
+    }
+
     pub fn try_pop(&self) -> Option<T> {
         let t = self.tail.load(Ordering::Relaxed);
         let h = self.head.load(Ordering::Acquire);
