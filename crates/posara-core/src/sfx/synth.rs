@@ -124,6 +124,8 @@ struct Voice {
     step_freq: f32,
     step_sr: f32,
     ucount: usize,
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    baked_fm: bool,
     lfsr: u32,
     flp: f32,
     fbp: f32,
@@ -166,6 +168,8 @@ impl Default for Voice {
             step_freq: f32::NAN,
             step_sr: f32::NAN,
             ucount: 1,
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            baked_fm: false,
             lfsr: 0x1234abcd,
             flp: 0.0,
             fbp: 0.0,
@@ -236,6 +240,14 @@ impl Voice {
         self.fx.set(p.fx_kind, p.fx_amt, p.fx_param);
         let c = (p.unison.max(1) as usize).min(MAX_UNISON);
         self.ucount = c;
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        {
+            let [car, modu] = p.osc;
+            let baked_level = (10 + 8 * modu.timbre) as f32 / 100.0;
+            // A phase table requires the sine carrier and phase-locked 2:1 pair.
+            self.baked_fm = c == 1 && car.wave == 1 && modu.mult == 2.0 * car.mult
+                && (modu.level - baked_level).abs() <= f32::EPSILON;
+        }
         if c == 1 {
             self.uratio[0] = 1.0;
             self.phase[0] = [0.0, 0.0];
@@ -402,14 +414,13 @@ impl Voice {
             }
             if fm {
                 #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
-                {
+                if self.baked_fm {
                     self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
                     if car.level > 0.0 {
                         s += synth_tables::sample(fm_table, self.phase[u][0]) * car.level;
                     }
                     continue;
                 }
-                #[cfg(not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
                 {
                     self.phase[u][1] = math::unit_remainder(self.phase[u][1] + step[1]);
                     self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
@@ -961,9 +972,45 @@ mod filter_prepare_tests {
 mod fm_overlap_tests {
     use super::*;
     fn configure(s: &mut Synth, timbre: u8, wave: u8) {
-        s.osc(0, 0, 3, 0, 0.0, 0.5);
+        s.osc(0, 0, 1, 0, 0.0, 0.5);
         s.osc(0, 1, wave, 12, 0.0, (10 + 8 * timbre) as f32 / 100.0);
     }
+    #[test]
+    fn generic_fm_preserves_carrier_ratio_depth_and_unison() {
+        for (wave, ratio, level, unison) in [
+            (2, 2.0, 0.42, 1), (3, 2.0, 0.42, 1),
+            (1, 1.0, 0.42, 1), (1, 3.0, 0.42, 1),
+            (1, 2.0, 0.4, 1), (1, 2.0, 1.5, 1),
+            (1, 2.0, 0.42, 2),
+        ] {
+            for mode in [WAVE_FM, WAVE_PREVIEW_FM] {
+                let mut patch = Patch::default();
+                patch.osc[0] = OscCfg { wave, mult: 1.0, level: 0.5, timbre: 0 };
+                patch.osc[1] = OscCfg { wave: mode, mult: ratio, level, timbre: 4 };
+                patch.unison = unison;
+                let mut voice = Voice::default();
+                voice.start(&patch, 0, 60, 1.0, 0, 1);
+                assert!(!voice.baked_fm);
+                let mut filter = Voice::default();
+                for _ in 0..128 {
+                    let actual = voice.tick(48000.0, &synth_tables::TABLES[4]);
+                    let mut raw = 0.0;
+                    for phase in &voice.phase[..voice.ucount] {
+                        let pm = if mode == WAVE_PREVIEW_FM {
+                            (1.0 - math::oscillator_sin(math::unit_remainder(phase[1] + 0.25)))
+                                * level * (0.5 * core::f32::consts::FRAC_1_PI)
+                        } else {
+                            math::oscillator_sin(phase[1]) * level * core::f32::consts::FRAC_1_PI
+                        };
+                        raw += wave_sample(wave, math::unit_euclid(phase[0] + pm), &mut 1) * 0.5;
+                    }
+                    let expected = filter.filter(raw / voice.ucount as f32, patch.cutoff, patch.reso, 48000.0);
+                    assert_eq!(actual, expected, "wave={wave} ratio={ratio} level={level} unison={unison} mode={mode}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn overlapping_timbres_match_independent_voices_without_render_time_table_copies() {
         for (old_wave, new_wave) in [
@@ -983,6 +1030,7 @@ mod fm_overlap_tests {
                             let wave = if i % 2 == 0 { old_wave } else { new_wave };
                             configure(&mut mixed, timbre, wave);
                             mixed.note_on(0, note, 0.5, 0);
+                            assert!(mixed.voices[i].baked_fm);
                             let mut single = Synth::new();
                             configure(&mut single, timbre, wave);
                             single.note_on(0, note, 0.5, 0);

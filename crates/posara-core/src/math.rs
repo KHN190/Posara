@@ -10,7 +10,7 @@ pub(crate) fn unit_remainder(x: f32) -> f32 {
     (positive - (positive as u32) as f32).copysign(x)
 }
 
-#[cfg(any(test, all(feature = "synth", not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))))]
+#[cfg(any(test, feature = "synth"))]
 #[inline]
 pub(crate) fn unit_euclid(x: f32) -> f32 {
     let remainder = unit_remainder(x);
