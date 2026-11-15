@@ -1,5 +1,6 @@
 pub mod bus;
 pub mod env;
+mod preview_tables;
 pub mod fx;
 pub mod lfo;
 pub mod meter;

@@ -15,6 +15,7 @@ const FK_BAND: u8 = 2;
 const FK_LPG: u8 = 3;
 
 const TGT_AMP: u8 = 0;
+pub const TGT_AMP_EXP: u8 = 3;
 const TGT_CUTOFF: u8 = 1;
 const TGT_PITCH: u8 = 2;
 
@@ -181,6 +182,8 @@ impl Default for Voice {
 }
 
 pub const WAVE_FM: u8 = 5;
+/// Preview frequency FM with a fixed 2:1 modulator, separate from generic PM.
+pub const WAVE_PREVIEW_FM: u8 = 6;
 #[cfg(any(test, feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
 #[path = "synth_tables.rs"]
 mod synth_tables;
@@ -215,9 +218,13 @@ impl Voice {
         self.rank = 0;
         for i in 0..2 {
             let e = p.env[i];
-            self.env_used[i] = e.target == TGT_AMP || e.depth != 0.0 || e.atk != 0.0
+            self.env_used[i] = matches!(e.target, TGT_AMP | TGT_AMP_EXP) || e.depth != 0.0 || e.atk != 0.0
                 || e.dec != 0.0 || e.sus != 0.0 || e.rel != 0.0;
-            self.env[i].set(p.env[i].atk, p.env[i].dec, p.env[i].sus, p.env[i].rel);
+            if e.target == TGT_AMP_EXP {
+                self.env[i].set_exponential(e.atk, e.dec, e.sus, e.rel);
+            } else {
+                self.env[i].set(e.atk, e.dec, e.sus, e.rel);
+            }
             self.env[i].gate_on();
         }
         self.lfo = p.lfo;
@@ -351,7 +358,7 @@ impl Voice {
             if self.env[i].active() { any = true; }
             let ec = self.cfg.env[i];
             match ec.target {
-                TGT_AMP => { amp *= lv; have_amp = true; amp_env = lv; }
+                TGT_AMP | TGT_AMP_EXP => { amp *= lv; have_amp = true; amp_env = lv; }
                 TGT_CUTOFF => cut_oct += (ec.depth / 100.0) * 6.0 * lv,
                 TGT_PITCH => pitch_semi += ec.depth * lv,
                 _ => {}
@@ -378,7 +385,7 @@ impl Voice {
         };
         let mut s = 0.0f32;
         let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
-        let fm = modu.wave == WAVE_FM && modu.level > 0.0;
+        let fm = matches!(modu.wave, WAVE_FM | WAVE_PREVIEW_FM) && modu.level > 0.0;
         if freq.to_bits() != self.step_freq.to_bits() || sr.to_bits() != self.step_sr.to_bits() {
             for u in 0..self.ucount {
                 let uf = freq * self.uratio[u];
@@ -407,7 +414,12 @@ impl Voice {
                     self.phase[u][1] = math::unit_remainder(self.phase[u][1] + step[1]);
                     self.phase[u][0] = math::unit_remainder(self.phase[u][0] + step[0]);
                     if car.level > 0.0 {
-                        let pm = math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI;
+                        let pm = if modu.wave == WAVE_PREVIEW_FM {
+                            (1.0 - math::oscillator_sin(math::unit_remainder(self.phase[u][1] + 0.25)))
+                                * modu.level * (0.5 * core::f32::consts::FRAC_1_PI)
+                        } else {
+                            math::oscillator_sin(self.phase[u][1]) * modu.level * core::f32::consts::FRAC_1_PI
+                        };
                         s += wave_sample(car.wave, math::unit_euclid(self.phase[u][0] + pm), &mut self.lfsr) * car.level;
                     }
                     continue;
@@ -459,6 +471,8 @@ pub struct Synth {
     fm_table: Box<[i16; 1025]>,
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     fm_timbre: u8,
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    fm_wave: u8,
     #[cfg(all(test, feature = "rp32"))]
     table_copies: usize,
     pool: usize,
@@ -476,6 +490,8 @@ impl Synth {
             fm_table: Box::new(synth_tables::TABLES[0]),
             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
             fm_timbre: 0,
+            #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+            fm_wave: WAVE_FM,
             #[cfg(all(test, feature = "rp32"))]
             table_copies: 0,
             pool: 8,
@@ -495,7 +511,10 @@ impl Synth {
             if idx < 2 {
                 p.osc[idx] = OscCfg {
                     wave,
-                    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                    #[cfg(any(
+                        feature = "rp32",
+                        all(target_os = "none", target_pointer_width = "32")
+                    ))]
                     timbre,
                     mult: math::powf(2.0f32, (semi as f32 + fine / 100.0) / 12.0),
                     level,
@@ -503,10 +522,19 @@ impl Synth {
             }
         }
         #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
-        if wave == WAVE_FM && timbre != self.fm_timbre {
-            *self.fm_table = synth_tables::TABLES[timbre as usize];
+        if matches!(wave, WAVE_FM | WAVE_PREVIEW_FM)
+            && (timbre != self.fm_timbre || wave != self.fm_wave)
+        {
+            *self.fm_table = if wave == WAVE_PREVIEW_FM {
+                super::preview_tables::FM[timbre as usize]
+            } else {
+                synth_tables::TABLES[timbre as usize]
+            };
+            self.fm_wave = wave;
             #[cfg(all(test, feature = "rp32"))]
-            { self.table_copies += 1; }
+            {
+                self.table_copies += 1;
+            }
             self.fm_timbre = timbre;
         }
     }
@@ -657,18 +685,22 @@ impl Synth {
             #[cfg(feature = "audio-profile")]
             {
                 active += 1;
-                fm += u32::from(voice.cfg.osc[1].wave == WAVE_FM && voice.cfg.osc[1].level > 0.0);
+                fm += u32::from(matches!(voice.cfg.osc[1].wave, WAVE_FM | WAVE_PREVIEW_FM) && voice.cfg.osc[1].level > 0.0);
                 lfo += u32::from(voice.lfo.enabled());
                 bitcrush += u32::from(voice.fx.kind == super::fx::FX_BITCRUSH);
                 super::profiling::mark(super::profiling::Stage::SynthVoice);
             }
             let pid = voice.pid;
             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
-            let fm_table = if voice.cfg.osc[1].timbre == self.fm_timbre {
+            let fm_table = if voice.cfg.osc[1].timbre == self.fm_timbre && voice.cfg.osc[1].wave == self.fm_wave {
                 &*self.fm_table
             } else {
                 // Old tails retain their timbre without evicting the current RAM table.
-                &synth_tables::TABLES[voice.cfg.osc[1].timbre as usize]
+                if voice.cfg.osc[1].wave == WAVE_PREVIEW_FM {
+                    &super::preview_tables::FM[voice.cfg.osc[1].timbre as usize]
+                } else {
+                    &synth_tables::TABLES[voice.cfg.osc[1].timbre as usize]
+                }
             };
             let s = voice.tick(
                 sr,
@@ -928,28 +960,153 @@ mod filter_prepare_tests {
 #[cfg(all(test, feature = "rp32"))]
 mod fm_overlap_tests {
     use super::*;
-    fn configure(s: &mut Synth, timbre: u8) {
+    fn configure(s: &mut Synth, timbre: u8, wave: u8) {
         s.osc(0, 0, 3, 0, 0.0, 0.5);
-        s.osc(0, 1, WAVE_FM, 12, 0.0, (10+8*timbre) as f32/100.0);
+        s.osc(0, 1, wave, 12, 0.0, (10 + 8 * timbre) as f32 / 100.0);
     }
     #[test]
     fn overlapping_timbres_match_independent_voices_without_render_time_table_copies() {
-        for old in 0..=10 { for new in 0..=10 { for count in [2,4,8] {
-            let mut mixed=Synth::new();
-            let mut isolated=alloc::vec::Vec::new();
-            for i in 0..count {
-                let timbre=if i%2==0 {old}else{new};
-                let note=36+i as u8*3;
-                configure(&mut mixed,timbre);mixed.note_on(0,note,0.5,0);
-                let mut single=Synth::new();configure(&mut single,timbre);single.note_on(0,note,0.5,0);
-                isolated.push(single);
+        for (old_wave, new_wave) in [
+            (WAVE_FM, WAVE_FM),
+            (WAVE_PREVIEW_FM, WAVE_PREVIEW_FM),
+            (WAVE_FM, WAVE_PREVIEW_FM),
+            (WAVE_PREVIEW_FM, WAVE_FM),
+        ] {
+            for old in 0..=10 {
+                for new in 0..=10 {
+                    for count in [2, 4, 8] {
+                        let mut mixed = Synth::new();
+                        let mut isolated = alloc::vec::Vec::new();
+                        for i in 0..count {
+                            let timbre = if i % 2 == 0 { old } else { new };
+                            let note = 36 + i as u8 * 3;
+                            let wave = if i % 2 == 0 { old_wave } else { new_wave };
+                            configure(&mut mixed, timbre, wave);
+                            mixed.note_on(0, note, 0.5, 0);
+                            let mut single = Synth::new();
+                            configure(&mut single, timbre, wave);
+                            single.note_on(0, note, 0.5, 0);
+                            isolated.push(single);
+                        }
+                        let copies = mixed.table_copies;
+                        for _ in 0..192 {
+                            let expected = isolated
+                                .iter_mut()
+                                .map(|s| s.tick(48_000.0))
+                                .fold((0.0, 0.0), |(l, r), (a, b)| (l + a, r + b));
+                            assert_eq!(
+                                mixed.tick(48_000.0),
+                                expected,
+                                "old={old} new={new} voices={count}"
+                            );
+                            assert_eq!(
+                                mixed.table_copies, copies,
+                                "render copied a table: old={old} new={new} voices={count}"
+                            );
+                        }
+                    }
+                }
             }
-            let copies=mixed.table_copies;
-            for _ in 0..192 {
-                let expected=isolated.iter_mut().map(|s|s.tick(48_000.0)).fold((0.0,0.0),|(l,r),(a,b)|(l+a,r+b));
-                assert_eq!(mixed.tick(48_000.0),expected,"old={old} new={new} voices={count}");
-                assert_eq!(mixed.table_copies,copies,"render copied a table: old={old} new={new} voices={count}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    fn html_frequency_fm(phase: f32, tone: usize) -> f32 {
+        let theta = phase as f64 * core::f64::consts::TAU;
+        let beta = 0.1 + 0.08 * tone as f64;
+        // Integral of f + f*(.2+1.6*tone/10)*sin(4πft), from zero phase.
+        (theta + beta * (1.0 - (2.0 * theta).cos())).sin() as f32
+    }
+
+    #[test]
+    fn baked_preview_wave_matches_integrated_frequency_not_generic_phase_fm() {
+        let mut separates_old_pm = false;
+        for tone in 0..=10 {
+            for i in 0..16384 {
+                let phase = i as f32 / 16384.0;
+                let actual = synth_tables::sample(&super::super::preview_tables::FM[tone], phase);
+                let expected = html_frequency_fm(phase, tone);
+                assert!(
+                    (actual - expected).abs() < 1e-4,
+                    "tone={tone} phase={phase}"
+                );
+                let theta = phase as f64 * core::f64::consts::TAU;
+                let wrong = (theta + (0.1 + 0.08 * tone as f64) * (2.0 * theta).sin()).sin() as f32;
+                separates_old_pm |= (actual - wrong).abs() > 0.1;
             }
-        }}}
+        }
+        assert!(separates_old_pm);
+    }
+
+    #[test]
+    fn preview_dry_voices_follow_html_wave_across_rates_gates_and_retrigger() {
+        for sr in [8000.0, 22050.0, 44100.0, 48000.0, 96000.0] {
+            for tone in 0..=10 {
+                for note in [36, 60, 84] {
+                    let end = 0.15 + 0.04 * tone as f32;
+                    let mut patch = Patch::default();
+                    patch.osc[0].wave = 1;
+                    patch.osc[1].wave = WAVE_PREVIEW_FM;
+                    patch.osc[1].level = 0.1 + 0.08 * tone as f32;
+                    patch.osc[1].mult = 2.0;
+                    #[cfg(any(
+                        feature = "rp32",
+                        all(target_os = "none", target_pointer_width = "32")
+                    ))]
+                    {
+                        patch.osc[1].timbre = tone as u8;
+                    }
+                    patch.cutoff = 400.0 + 60.0 * (tone * tone) as f32;
+                    patch.env[0] = EnvCfg {
+                        target: TGT_AMP_EXP,
+                        depth: 100.0,
+                        atk: 0.01,
+                        dec: end - 0.01,
+                        sus: 0.0,
+                        rel: end,
+                    };
+                    let mut voice = Voice::default();
+                    let mut unchanged_filter = Voice::default();
+                    let mut envelope = Adsr::default();
+                    for n in 0..4096 {
+                        if n == 0 || n == 2048 {
+                            voice.start(&patch, 0, note, 0.35, 1024, 1);
+                            unchanged_filter = Voice::default();
+                            envelope.set_exponential(0.01, end - 0.01, 0.0, end);
+                            envelope.gate_on();
+                        }
+                        if n % 2048 == 1023 {
+                            envelope.gate_off();
+                        }
+                        let amplitude = envelope.tick(1.0 / sr);
+                        #[cfg(any(
+                            feature = "rp32",
+                            all(target_os = "none", target_pointer_width = "32")
+                        ))]
+                        let actual = voice.tick(sr, &super::super::preview_tables::FM[tone]);
+                        #[cfg(not(any(
+                            feature = "rp32",
+                            all(target_os = "none", target_pointer_width = "32")
+                        )))]
+                        let actual = voice.tick(sr);
+                        let raw = html_frequency_fm(voice.phase[0][0], tone);
+                        let expected = if voice.active {
+                            unchanged_filter.filter(raw, patch.cutoff, 0.0, sr) * amplitude * 0.35
+                        } else {
+                            0.0
+                        };
+                        assert!(actual.is_finite());
+                        assert!(
+                            (actual - expected).abs() < 2e-4,
+                            "sr={sr} tone={tone} note={note} n={n}: {actual} != {expected}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
