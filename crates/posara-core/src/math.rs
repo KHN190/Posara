@@ -121,7 +121,8 @@ integer_sqrt!(i64);
 pub fn isqrt<T: IntegerSqrt>(n: T) -> T { n.floor_sqrt() }
 pub fn isqrt_ceil<T: IntegerSqrt>(n: T) -> T { n.ceil_sqrt() }
 
-#[cfg(not(feature = "std"))]
+/// Explicit device math (libm / VSQRT / soft sqrt). Always available so firmware code that calls
+/// `F32Ext::sqrt` builds identically with or without `std`; method syntax still prefers std's inherent methods.
 pub trait F32Ext {
     fn round(self) -> f32;
     fn sqrt(self) -> f32;
@@ -129,7 +130,6 @@ pub trait F32Ext {
     fn rem_euclid(self, rhs: f32) -> f32;
 }
 
-#[cfg(not(feature = "std"))]
 impl F32Ext for f32 {
     fn round(self) -> f32 { libm::roundf(self) }
     #[inline]
