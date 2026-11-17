@@ -39,6 +39,7 @@ pub fn phase_sin_lut(phase: f32) -> f32 {
     first + (sine_lut::TABLE[index + 1] - first) * fraction
 }
 
+#[cfg(feature = "sfx")]
 #[inline]
 pub(crate) fn oscillator_sin(phase: f32) -> f32 {
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]

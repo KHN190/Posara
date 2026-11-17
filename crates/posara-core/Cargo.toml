@@ -37,3 +37,17 @@ proptest = "1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
+
+# Tests and generators that only make sense with a capability enabled.
+[[example]]
+name = "generate_note_frequencies"
+required-features = ["rp32"]
+
+[[test]]
+name = "trace"
+required-features = ["sfx"]
+
+[[test]]
+name = "phase_lookup_test"
+required-features = ["sfx"]
+
