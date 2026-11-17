@@ -23,6 +23,24 @@ pub struct Event {
 
 pub type Sink = fn(Level, Event);
 static SINK: AtomicUsize = AtomicUsize::new(0);
+static FILTER: AtomicUsize = AtomicUsize::new(0);
+pub fn install_filter(filter: fn(u32) -> bool) -> bool {
+    FILTER
+        .compare_exchange(0, filter as usize, Ordering::Release, Ordering::Relaxed)
+        .is_ok()
+}
+pub fn enabled_event(level: Level, kind: u32) -> bool {
+    if !enabled(level) {
+        return false;
+    }
+    let pointer = FILTER.load(Ordering::Acquire);
+    if pointer == 0 {
+        return true;
+    }
+    // The immutable slot is written only by install_filter from this exact function type.
+    let filter: fn(u32) -> bool = unsafe { core::mem::transmute(pointer) };
+    filter(kind)
+}
 static LEVEL: AtomicU32 = AtomicU32::new(0);
 
 pub fn install(sink: Sink) -> bool {
@@ -42,7 +60,7 @@ pub fn enabled(level: Level) -> bool {
 }
 
 pub fn record(level: Level, event: Event) {
-    if !enabled(level) {
+    if !enabled_event(level, event.kind) {
         return;
     }
     let pointer = SINK.load(Ordering::Acquire);
@@ -54,6 +72,12 @@ pub fn record(level: Level, event: Event) {
 #[cfg(feature = "diag")]
 #[macro_export]
 macro_rules! trace {
+    ($level:expr, $kind:expr, $event:expr) => {{
+        let level = $level;
+        if $crate::sfx::diag::enabled_event(level, $kind) {
+            $crate::sfx::diag::record(level, $event);
+        }
+    }};
     ($level:expr, $event:expr) => {{
         let level = $level;
         if $crate::sfx::diag::enabled(level) {
@@ -65,5 +89,21 @@ macro_rules! trace {
 #[cfg(not(feature = "diag"))]
 #[macro_export]
 macro_rules! trace {
+    ($level:expr, $kind:expr, $event:expr) => {{}};
     ($level:expr, $event:expr) => {{}};
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum Stage {
+    Usb = 1,
+    Spsc = 2,
+    Synth = 3,
+    Mixer = 4,
+    Dma = 5,
+    Imu = 6,
+    Motion = 7,
+    Power = 8,
+    System = 9,
+    Profile = 10,
 }

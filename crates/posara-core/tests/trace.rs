@@ -19,6 +19,8 @@ fn filtering_lazy_payload_and_single_registration() {
         Level::Debug,
         Level::Trace,
     ];
+    assert!(install_filter(|kind| kind == 42));
+    assert!(!install_filter(|_| true));
     let mut expected = 0;
     for threshold in [
         None,
@@ -37,6 +39,12 @@ fn filtering_lazy_payload_and_single_registration() {
             });
             if cfg!(feature = "diag") && threshold.is_some_and(|t| level as u32 <= t as u32) {
                 expected += 1;
+            }
+            for _kind in [0, 41, 43, u32::MAX] {
+                trace!(level, _kind, {
+                    evaluated.fetch_add(1, Ordering::Relaxed);
+                    Event { kind: _kind, ..Event::default() }
+                });
             }
             assert_eq!(evaluated.load(Ordering::Relaxed), expected);
             assert_eq!(CALLS.load(Ordering::Relaxed), expected);
