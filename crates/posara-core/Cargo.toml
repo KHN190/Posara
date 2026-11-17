@@ -8,6 +8,7 @@ authors = ["knh190"]
 description = "no_std posara runtime core: plugins and driver traits shared by every platform."
 
 [features]
+diag = ["sfx"]
 default = []
 std = []
 gfx = ["dep:libm"]

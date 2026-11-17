@@ -1,4 +1,5 @@
 pub mod bus;
+pub mod diag;
 pub mod env;
 mod preview_tables;
 pub mod fx;
