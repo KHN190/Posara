@@ -24,7 +24,7 @@ pub struct Event {
 pub type Sink = fn(Level, Event);
 static SINK: AtomicUsize = AtomicUsize::new(0);
 static FILTER: AtomicUsize = AtomicUsize::new(0);
-pub fn install_filter(filter: fn(u32) -> bool) -> bool {
+pub fn install_filter(filter: fn(Level, u32) -> bool) -> bool {
     FILTER
         .compare_exchange(0, filter as usize, Ordering::Release, Ordering::Relaxed)
         .is_ok()
@@ -38,8 +38,8 @@ pub fn enabled_event(level: Level, kind: u32) -> bool {
         return true;
     }
     // The immutable slot is written only by install_filter from this exact function type.
-    let filter: fn(u32) -> bool = unsafe { core::mem::transmute(pointer) };
-    filter(kind)
+    let filter: fn(Level, u32) -> bool = unsafe { core::mem::transmute(pointer) };
+    filter(level, kind)
 }
 static LEVEL: AtomicU32 = AtomicU32::new(0);
 

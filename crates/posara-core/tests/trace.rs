@@ -19,8 +19,8 @@ fn filtering_lazy_payload_and_single_registration() {
         Level::Debug,
         Level::Trace,
     ];
-    assert!(install_filter(|kind| kind == 42));
-    assert!(!install_filter(|_| true));
+    assert!(install_filter(|_, kind| kind == 42));
+    assert!(!install_filter(|_, _| true));
     let mut expected = 0;
     for threshold in [
         None,
