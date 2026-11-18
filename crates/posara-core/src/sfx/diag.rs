@@ -21,6 +21,13 @@ pub struct Event {
     pub data: [u32; 9],
 }
 
+impl Event {
+    /// `observed_us` is stamped by the sink when the event is recorded.
+    pub const fn new(kind: u32, epoch: u32, at_us: u32, related_us: u32, data: [u32; 9]) -> Self {
+        Self { kind, epoch, at_us, related_us, observed_us: 0, data }
+    }
+}
+
 pub type Sink = fn(Level, Event);
 static SINK: AtomicUsize = AtomicUsize::new(0);
 static FILTER: AtomicUsize = AtomicUsize::new(0);
@@ -86,11 +93,16 @@ macro_rules! trace {
     }};
 }
 
+// Without `diag` the arguments are still type-checked (so builds agree) but never evaluated.
 #[cfg(not(feature = "diag"))]
 #[macro_export]
 macro_rules! trace {
-    ($level:expr, $kind:expr, $event:expr) => {{}};
-    ($level:expr, $event:expr) => {{}};
+    ($level:expr, $kind:expr, $event:expr) => {{
+        if false { let _ = ($level, $kind, $event); }
+    }};
+    ($level:expr, $event:expr) => {{
+        if false { let _ = ($level, $event); }
+    }};
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
