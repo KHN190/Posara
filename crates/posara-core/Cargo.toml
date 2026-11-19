@@ -51,3 +51,7 @@ required-features = ["sfx"]
 name = "phase_lookup_test"
 required-features = ["sfx"]
 
+[[test]]
+name = "synth_block_test"
+required-features = ["synth", "rp32"]
+
