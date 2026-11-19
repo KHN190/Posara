@@ -756,7 +756,6 @@ impl Synth {
         best
     }
 
-    #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
     #[cfg_attr(all(target_arch = "arm", target_os = "none"), inline(never))]
     pub fn note_on(&mut self, pid: usize, note: u8, vel: f32, gate_samples: u32) {
         if pid >= MAX_PATCHES { return; }
