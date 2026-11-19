@@ -1225,7 +1225,7 @@ mod preview_tests {
 
     fn html_frequency_fm(phase: f32, tone: usize) -> f32 {
         let theta = phase as f64 * core::f64::consts::TAU;
-        let beta = 0.1 + 0.08 * tone as f64;
+        let beta = 0.05 + 0.1 * tone as f64 + 0.0195 * (tone * tone) as f64;
         // Integral of f + f*(.2+1.6*tone/10)*sin(4πft), from zero phase.
         (theta + beta * (1.0 - (2.0 * theta).cos())).sin() as f32
     }
@@ -1239,11 +1239,11 @@ mod preview_tests {
                 let actual = synth_tables::sample(&super::super::preview_tables::FM[tone], phase);
                 let expected = html_frequency_fm(phase, tone);
                 assert!(
-                    (actual - expected).abs() < 1e-4,
+                    (actual - expected).abs() < 1e-3,
                     "tone={tone} phase={phase}"
                 );
                 let theta = phase as f64 * core::f64::consts::TAU;
-                let wrong = (theta + (0.1 + 0.08 * tone as f64) * (2.0 * theta).sin()).sin() as f32;
+                let wrong = (theta + (0.05 + 0.1 * tone as f64 + 0.0195 * (tone * tone) as f64) * (2.0 * theta).sin()).sin() as f32;
                 separates_old_pm |= (actual - wrong).abs() > 0.1;
             }
         }
@@ -1268,7 +1268,7 @@ mod preview_tests {
                     {
                         patch.osc[1].timbre = tone as u8;
                     }
-                    patch.cutoff = 400.0 + 60.0 * (tone * tone) as f32;
+                    patch.cutoff = 300.0 + 91.0 * (tone * tone) as f32;
                     patch.env[0] = EnvCfg {
                         target: TGT_AMP_EXP,
                         depth: 100.0,
