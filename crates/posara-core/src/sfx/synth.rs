@@ -126,6 +126,8 @@ struct Voice {
     ucount: usize,
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     baked_fm: bool,
+    /// Amplitude at the end of the last rendered block: the next block ramps from it (msfa gain1).
+    kernel_gain: f32,
     lfsr: u32,
     flp: f32,
     fbp: f32,
@@ -170,6 +172,7 @@ impl Default for Voice {
             ucount: 1,
             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
             baked_fm: false,
+            kernel_gain: 0.0,
             lfsr: 0x1234abcd,
             flp: 0.0,
             fbp: 0.0,
@@ -210,6 +213,7 @@ fn wave_sample(wave: u8, phase: f32, lfsr: &mut u32) -> f32 {
 impl Voice {
     fn start(&mut self, p: &Patch, pid: usize, note: u8, vel: f32, gate_samples: u32, seed: u32) {
         self.cfg = *p;
+        self.kernel_gain = 0.0;
         self.step_freq = f32::NAN;
         self.step_sr = f32::NAN;
         self.pid = pid;
@@ -275,6 +279,19 @@ impl Voice {
         for e in self.env.iter_mut() { e.gate_off(); }
     }
 
+    /// SVF coefficients for this cutoff, cached as in `filter`.
+    fn filter_coeffs(&mut self, cutoff: f32, reso: f32, sr: f32) -> (f32, f32) {
+        let fc = cutoff.clamp(20.0, sr * 0.16);
+        if fc != self.cached_fc || reso != self.cached_reso || sr != self.cached_filter_sr {
+            self.cached_f = 2.0 * math::oscillator_sin(0.5 * fc / sr);
+            self.cached_damp = (1.0 - (reso / 100.0) * 0.9).clamp(0.1, 1.0);
+            self.cached_fc = fc;
+            self.cached_reso = reso;
+            self.cached_filter_sr = sr;
+        }
+        (self.cached_f, self.cached_damp)
+    }
+
     fn filter(&mut self, x: f32, cutoff: f32, reso: f32, sr: f32) -> f32 {
         // Chamberlin SVF: stable only for fc well below sr/6 — clamp to keep f < 1,
         // else it blows up to inf/NaN (silent output that also dodges the meter).
@@ -313,6 +330,11 @@ impl Voice {
         psum: &mut [[f32; 4]],
         pid: usize,
     ) -> u32 {
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        if self.single_fm_block(chunk.len()) {
+            KERNEL_PROBE.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            return if self.modulation[2] > 0.0 { self.render_single_fm::<true>(sr, dt, fm_table, chunk, psum, pid) } else { self.render_single_fm::<false>(sr, dt, fm_table, chunk, psum, pid) };
+        }
         let mut rendered = 0;
         for (n, frame) in chunk.iter_mut().enumerate() {
             // Inactive voices return 0.0 exactly like the per-frame loop skipping them.
@@ -329,6 +351,74 @@ impl Voice {
             if pid < 4 { psum[n][pid] += s; }
         }
         rendered
+    }
+
+    /// The builtin patch shape: one baked-FM unison voice, one amplitude envelope, fixed filter,
+    /// no LFO, FX or pending gate edge in this block. Checked once per block (msfa specialised kernel).
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    fn single_fm_block(&self, len: usize) -> bool {
+        let modu = self.cfg.osc[1];
+        self.active && !self.modulation_active && self.ucount == 1 && self.baked_fm
+            && matches!(modu.wave, WAVE_FM | WAVE_PREVIEW_FM) && modu.level > 0.0
+            && self.env_used == [true, false] && matches!(self.cfg.env[0].target, TGT_AMP | TGT_AMP_EXP)
+            && !self.lfo.enabled() && self.cfg.fkind != FK_LPG
+            && !(self.cfg.fx_kind != 0 && !(self.cfg.fx_amt <= 0.0))
+            && (self.gate_samples == 0 || self.gate_samples as usize > len)
+    }
+
+    /// msfa FmOpKernel style: envelope once per block with a linear gain ramp, Q32 phase and
+    /// integer table interpolation; the frame loop has no branches or float-to-int conversions.
+    #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+    #[inline(always)]
+    fn render_single_fm<const DRIVE: bool>(&mut self, sr: f32, dt: f32, fm_table: &[i16; 1025], chunk: &mut [(f32, f32)], psum: &mut [[f32; 4]], pid: usize) -> u32 {
+        let len = chunk.len();
+        let freq = self.base_freq;
+        if freq.to_bits() != self.step_freq.to_bits() || sr.to_bits() != self.step_sr.to_bits() {
+            let (car, modu) = (self.cfg.osc[0], self.cfg.osc[1]);
+            let uf = freq * self.uratio[0];
+            self.phase_step[0] = [uf * car.mult / sr, uf * modu.mult / sr];
+            self.step_freq = freq;
+            self.step_sr = sr;
+        }
+        const Q32: f32 = 4_294_967_296.0;
+        let step = (self.phase_step[0][0] * self.modulation[1] * Q32) as u32;
+        let mut phase = (self.phase[0][0] * Q32) as u32;
+        let gain1 = self.kernel_gain;
+        let gain2 = self.env[0].tick(len as f32 * dt);
+        self.kernel_gain = gain2;
+        let dgain = (gain2 - gain1) * (1.0 / len as f32);
+        let (f, damp) = self.filter_coeffs(self.cfg.cutoff, self.cfg.reso, sr);
+        let (wl, wh, wb) = match self.cfg.fkind { FK_HI => (0.0, 1.0, 0.0), FK_BAND => (0.0, 0.0, 1.0), _ => (1.0, 0.0, 0.0) };
+        let scale = self.cfg.osc[0].level * (1.0 / 32767.0);
+        let (vel, drive, post, pan_l, pan_r) = (self.vel, self.modulation[2], self.modulation[0], self.pan_l, self.pan_r);
+        let drive_in = 1.0 + 8.0 * drive;
+        let (mut flp, mut fbp, mut gain) = (self.flp, self.fbp, gain1);
+        let slot = pid & 3;
+        let tracked = if pid < 4 { 1.0 } else { 0.0 };
+        for (n, frame) in chunk.iter_mut().enumerate() {
+            gain += dgain;
+            let index = (phase >> 22) as usize;
+            let y0 = fm_table[index] as i32;
+            let y = y0 + ((((fm_table[index + 1] as i32 - y0) as i64) * (phase & 0x3f_ffff) as i64) >> 22) as i32;
+            phase = phase.wrapping_add(step);
+            let x = y as f32 * scale;
+            flp += f * fbp;
+            let hp = x - flp - damp * fbp;
+            fbp += f * hp;
+            let mut v = (flp * wl + hp * wh + fbp * wb) * (gain * vel);
+            if DRIVE { let t = v * drive_in; v += (t / (1.0 + t.abs()) - v) * drive; }
+            let out = v * post;
+            frame.0 += out * pan_l;
+            frame.1 += out * pan_r;
+            psum[n][slot] += out * tracked;
+        }
+        if !(flp.is_finite() && fbp.is_finite()) { flp = 0.0; fbp = 0.0; }
+        self.flp = flp;
+        self.fbp = fbp;
+        self.phase[0][0] = phase as f32 * (1.0 / Q32);
+        if self.gate_samples > 0 { self.gate_samples -= len as u32; }
+        if !self.env[0].active() && !self.gate { self.active = false; }
+        len as u32
     }
 
     fn set_modulation(&mut self, target: [f32; 3]) {
@@ -401,7 +491,7 @@ impl Voice {
             if self.env[i].active() { any = true; }
             let ec = self.cfg.env[i];
             match ec.target {
-                TGT_AMP | TGT_AMP_EXP => { amp *= lv; have_amp = true; amp_env = lv; }
+                TGT_AMP | TGT_AMP_EXP => { amp *= lv; have_amp = true; amp_env = lv; self.kernel_gain = lv; }
                 TGT_CUTOFF => cut_oct += (ec.depth / 100.0) * 6.0 * lv,
                 TGT_PITCH => pitch_semi += ec.depth * lv,
                 _ => {}
@@ -504,6 +594,9 @@ impl Voice {
         shaped * self.modulation[0]
     }
 }
+
+#[doc(hidden)]
+pub static KERNEL_PROBE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 pub struct Synth {
     modulation: [[f32; 3]; MAX_PATCHES],
