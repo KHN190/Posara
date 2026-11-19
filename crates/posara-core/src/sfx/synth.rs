@@ -301,6 +301,36 @@ impl Voice {
         }
     }
 
+    /// One call per voice per block: the per-frame body inlines here (msfa FmCore::compute style).
+    #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
+    fn render(
+        &mut self,
+        sr: f32,
+        dt: f32,
+        #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+        fm_table: &[i16; 1025],
+        chunk: &mut [(f32, f32)],
+        psum: &mut [[f32; 4]],
+        pid: usize,
+    ) -> u32 {
+        let mut rendered = 0;
+        for (n, frame) in chunk.iter_mut().enumerate() {
+            // Inactive voices return 0.0 exactly like the per-frame loop skipping them.
+            if !self.active { break; }
+            rendered += 1;
+            let s = self.tick(
+                sr,
+                dt,
+                #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                fm_table,
+            );
+            frame.0 += s * self.pan_l;
+            frame.1 += s * self.pan_r;
+            if pid < 4 { psum[n][pid] += s; }
+        }
+        rendered
+    }
+
     fn set_modulation(&mut self, target: [f32; 3]) {
         self.modulation_target = target;
         #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
@@ -346,6 +376,7 @@ impl Voice {
         }
     }
 
+    #[inline(always)]
     fn tick(
         &mut self,
         sr: f32,
@@ -733,6 +764,44 @@ impl Synth {
             if psum[p].abs() > self.pid_peak[p] { self.pid_peak[p] = psum[p].abs(); }
         }
         (tl, tr)
+    }
+
+    /// Renders `out.len()` frames voice by voice (JUCE renderNextBlock style). Each frame sums
+    /// the voices in the same order as `tick`, so the result is bit-identical.
+    #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
+    pub fn render(&mut self, sr: f32, out: &mut [(f32, f32)]) {
+        const CHUNK: usize = 64;
+        let dt = 1.0 / sr;
+        for chunk in out.chunks_mut(CHUNK) {
+            let mut psum = [[0.0f32; 4]; CHUNK];
+            for frame in chunk.iter_mut() { *frame = (0.0, 0.0); }
+            for i in 0..self.pool {
+                let voice = &mut self.voices[i];
+                if !voice.active { continue; }
+                let pid = voice.pid;
+                #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
+                let fm_table = if voice.cfg.osc[1].timbre == self.fm_timbre && voice.cfg.osc[1].wave == self.fm_wave {
+                    &*self.fm_table
+                } else if voice.cfg.osc[1].wave == WAVE_PREVIEW_FM {
+                    &super::preview_tables::FM[voice.cfg.osc[1].timbre as usize]
+                } else {
+                    &synth_tables::TABLES[voice.cfg.osc[1].timbre as usize]
+                };
+                #[cfg(feature = "audio-profile")]
+                let (started, mut rendered) = (super::profiling::cycles(), 0u32);
+                #[cfg(feature = "audio-profile")]
+                { rendered = voice.render(sr, dt, #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))] fm_table, chunk, &mut psum, pid); }
+                #[cfg(not(feature = "audio-profile"))]
+                voice.render(sr, dt, #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))] fm_table, chunk, &mut psum, pid);
+                #[cfg(feature = "audio-profile")]
+                super::profiling::synth_work(rendered, super::profiling::cycles().wrapping_sub(started));
+            }
+            for sums in &psum[..chunk.len()] {
+                for p in 0..4 {
+                    if sums[p].abs() > self.pid_peak[p] { self.pid_peak[p] = sums[p].abs(); }
+                }
+            }
+        }
     }
 
     pub fn take_pid_peaks(&mut self) -> [f32; 4] {

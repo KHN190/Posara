@@ -100,6 +100,8 @@ pub struct Mixer {
     reverb: Option<super::bus::Reverb>,
     #[cfg(feature = "synth")]
     synth: super::synth::Synth,
+    #[cfg(all(feature = "synth", any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+    synth_block: alloc::vec::Vec<(f32, f32)>,
 }
 
 impl Mixer {
@@ -121,6 +123,8 @@ impl Mixer {
             reverb: reverb.then(|| super::bus::Reverb::new(sample_rate as f32)),
             #[cfg(feature = "synth")]
             synth: super::synth::Synth::new(),
+            #[cfg(all(feature = "synth", any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+            synth_block: alloc::vec::Vec::with_capacity(512),
         }
     }
 
@@ -280,6 +284,12 @@ impl Mixer {
         let mut ch_peak = [0.0f32; 4];
         #[cfg(feature = "audio-profile")]
         let mut limit_cycles = 0u32;
+        #[cfg(all(feature = "synth", any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+        {
+            // The sequencer drives legacy voices only; synth events land between blocks.
+            self.synth_block.resize(out.len() / nc, (0.0, 0.0));
+            self.synth.render(sr, &mut self.synth_block);
+        }
         for (index,frame) in out.chunks_mut(nc).enumerate() {
             #[cfg(feature = "audio-profile")]
             super::profiling::mark(super::profiling::Stage::Sequence);
@@ -294,9 +304,14 @@ impl Mixer {
                 let a = vl.abs().max(vr.abs());
                 if a > ch_peak[i] { ch_peak[i] = a; }
             }
-            #[cfg(feature = "synth")]
+            #[cfg(all(feature = "synth", not(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))))]
             {
                 let (sl, sr2) = self.synth.tick(sr);
+                l += sl; r += sr2;
+            }
+            #[cfg(all(feature = "synth", any(feature = "rp32", all(target_os = "none", target_pointer_width = "32"))))]
+            {
+                let (sl, sr2) = self.synth_block[index];
                 l += sl; r += sr2;
             }
             #[cfg(feature = "audio-profile")]
