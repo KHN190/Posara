@@ -97,7 +97,6 @@ impl Allpass {
     }
 }
 
-// Freeverb-lite: 4 combs in parallel into 2 allpass in series, mono.
 pub struct Reverb {
     combs: Vec<Comb>,
     aps: Vec<Allpass>,

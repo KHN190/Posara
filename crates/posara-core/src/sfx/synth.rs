@@ -126,7 +126,6 @@ struct Voice {
     ucount: usize,
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     baked_fm: bool,
-    /// Amplitude at the end of the last rendered block: the next block ramps from it (msfa gain1).
     kernel_gain: f32,
     lfsr: u32,
     flp: f32,
@@ -236,7 +235,6 @@ impl Voice {
             self.env[i].gate_on();
         }
         self.lfo = p.lfo;
-        // A voice owns a patch snapshot; only cutoff modulation can change its filter.
         self.fixed_filter = p.fkind != FK_LPG
             && !p.env.iter().any(|e| e.target == TGT_CUTOFF && e.depth != 0.0)
             && !(p.lfo.enabled() && p.lfo.target == TGT_CUTOFF);
@@ -318,7 +316,6 @@ impl Voice {
         }
     }
 
-    /// One call per voice per block: the per-frame body inlines here (msfa FmCore::compute style).
     #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
     fn render(
         &mut self,
@@ -354,7 +351,7 @@ impl Voice {
     }
 
     /// The builtin patch shape: one baked-FM unison voice, one amplitude envelope, fixed filter,
-    /// no LFO, FX or pending gate edge in this block. Checked once per block (msfa specialised kernel).
+    /// no LFO, FX or pending gate edge in this block. Checked once per block.
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     fn single_fm_block(&self, len: usize) -> bool {
         let modu = self.cfg.osc[1];
@@ -366,8 +363,6 @@ impl Voice {
             && (self.gate_samples == 0 || self.gate_samples as usize > len)
     }
 
-    /// msfa FmOpKernel style: envelope once per block with a linear gain ramp, Q32 phase and
-    /// integer table interpolation; the frame loop has no branches or float-to-int conversions.
     #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
     #[inline(always)]
     fn render_single_fm<const DRIVE: bool>(&mut self, sr: f32, dt: f32, fm_table: &[i16; 1025], chunk: &mut [(f32, f32)], psum: &mut [[f32; 4]], pid: usize) -> u32 {
