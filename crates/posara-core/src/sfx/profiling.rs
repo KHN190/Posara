@@ -33,6 +33,10 @@ pub fn snapshot() -> Snapshot {
 }
 
 static LIMIT_CYCLES: AtomicU32 = AtomicU32::new(0);
+/// [voice-samples rendered, cycles spent in Voice::tick loops]
+static SYNTH_WORK: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
+pub fn synth_work(samples: u32, cycles: u32) { SYNTH_WORK[0].fetch_add(samples, Relaxed); SYNTH_WORK[1].fetch_add(cycles, Relaxed); }
+pub fn synth_work_totals() -> [u32; 2] { [SYNTH_WORK[0].load(Relaxed), SYNTH_WORK[1].load(Relaxed)] }
 pub fn limiter_cycles() -> u32 { LIMIT_CYCLES.load(Relaxed) }
 pub fn set_limiter_cycles(value: u32) { LIMIT_CYCLES.store(value, Relaxed); }
 #[inline]
