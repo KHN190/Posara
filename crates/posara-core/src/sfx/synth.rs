@@ -349,6 +349,7 @@ impl Voice {
     fn tick(
         &mut self,
         sr: f32,
+        dt: f32,
         #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
         fm_table: &[i16; 1025],
     ) -> f32 {
@@ -357,7 +358,6 @@ impl Voice {
         if self.gate_samples == 1 { self.note_off(); }
         if self.gate_samples > 0 { self.gate_samples -= 1; }
 
-        let dt = 1.0 / sr;
         let mut amp = 1.0f32;
         let mut have_amp = false;
         let mut cut_oct = 0.0f32;
@@ -688,6 +688,7 @@ impl Synth {
         let mut psum = [0.0f32; 4];
         #[cfg(feature = "audio-profile")]
         let (mut active, mut fm, mut lfo, mut bitcrush) = (0u32, 0u32, 0u32, 0u32);
+        let dt = 1.0 / sr;
         for i in 0..self.pool {
             let voice = &mut self.voices[i];
             if !voice.active {
@@ -715,6 +716,7 @@ impl Synth {
             };
             let s = voice.tick(
                 sr,
+                dt,
                 #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
                 fm_table,
             );
@@ -938,11 +940,13 @@ mod filter_prepare_tests {
                         let sr = [48000.0, 22050.0, 96000.0][(n / 700) % 3];
                         let a = candidate.tick(
                             sr,
+                            1.0 / sr,
                             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
                             &synth_tables::TABLES[0],
                         );
                         let b = original.tick(
                             sr,
+                            1.0 / sr,
                             #[cfg(any(feature = "rp32", all(target_os = "none", target_pointer_width = "32")))]
                             &synth_tables::TABLES[0],
                         );
@@ -993,7 +997,7 @@ mod fm_overlap_tests {
                 assert!(!voice.baked_fm);
                 let mut filter = Voice::default();
                 for _ in 0..128 {
-                    let actual = voice.tick(48000.0, &synth_tables::TABLES[4]);
+                    let actual = voice.tick(48000.0, 1.0 / 48000.0, &synth_tables::TABLES[4]);
                     let mut raw = 0.0;
                     for phase in &voice.phase[..voice.ucount] {
                         let pm = if mode == WAVE_PREVIEW_FM {
@@ -1135,12 +1139,12 @@ mod preview_tests {
                             feature = "rp32",
                             all(target_os = "none", target_pointer_width = "32")
                         ))]
-                        let actual = voice.tick(sr, &super::super::preview_tables::FM[tone]);
+                        let actual = voice.tick(sr, 1.0 / sr, &super::super::preview_tables::FM[tone]);
                         #[cfg(not(any(
                             feature = "rp32",
                             all(target_os = "none", target_pointer_width = "32")
                         )))]
-                        let actual = voice.tick(sr);
+                        let actual = voice.tick(sr, 1.0 / sr);
                         let raw = html_frequency_fm(voice.phase[0][0], tone);
                         let expected = if voice.active {
                             unchanged_filter.filter(raw, patch.cutoff, 0.0, sr) * amplitude * 0.35

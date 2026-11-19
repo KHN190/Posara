@@ -42,6 +42,7 @@ impl Fx {
         self.cached_alpha
     }
 
+    #[cfg_attr(all(target_arch = "arm", target_os = "none"), unsafe(link_section = ".data.ram_func"))]
     pub fn process(&mut self, x: f32, sr: f32) -> f32 {
         if self.amt <= 0.0 {
             self.hold_n = 0;
